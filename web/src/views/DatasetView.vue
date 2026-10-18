@@ -30,6 +30,29 @@ const zoom = ref<number>(saved.zoom ?? 200)
 const fit = ref<'cover' | 'contain'>(saved.fit ?? 'cover')
 const showMasks = ref<boolean>(saved.masks ?? false) // dim what each mask leaves out, on the grid
 const sideOpen = ref<boolean>(saved.side ?? true) // the side panel: health, faces, auto-caption, bulk edit, display
+// The side panel stays pinned without a scrollbar of its own: under the sticky toolbar when it fits
+// the window, or, when it's taller, scrolling with the page until its bottom reaches the window's
+// bottom and staying there (a negative sticky top), so it never scrolls out of sight
+const sideEl = ref<HTMLElement | null>(null)
+const sideTop = ref(58)
+const PIN = 66 // the sticky toolbar (10px down, 46px tall) + its 10px margin
+function placeSide() {
+  const h = sideEl.value?.offsetHeight ?? 0
+  sideTop.value = Math.min(PIN, window.innerHeight - h - 12)
+}
+let sideObs: ResizeObserver | null = null
+watch(sideEl, (el) => {
+  sideObs?.disconnect()
+  if (!el) return
+  sideObs = new ResizeObserver(placeSide)
+  sideObs.observe(el)
+})
+window.addEventListener('resize', placeSide)
+onUnmounted(() => {
+  sideObs?.disconnect()
+  window.removeEventListener('resize', placeSide)
+})
+
 // the side panel changes the grid's columns: the cards on screen glide to their new places (FLIP)
 // instead of jumping there
 async function toggleSide() {
@@ -672,7 +695,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
 
       </main>
 
-      <aside v-if="sideOpen" class="ds-side">
+      <aside v-if="sideOpen" ref="sideEl" class="ds-side" :style="{ top: `${sideTop}px` }">
         <section class="side-sec">
           <header class="side-head"><span>Health</span><span class="muted small">“{{ activeSet }}”</span></header>
           <DatasetStats
@@ -1566,8 +1589,15 @@ dd {
   flex-wrap: nowrap;
   overflow: hidden;
   position: sticky;
-  top: 0;
+  top: 10px;
   z-index: 5;
+  /* opaque, so the grid doesn't show through once it's stuck; the two shadows paint the page's
+     background 10px above and below it (the gap to the grid), so it sits in an even margin and
+     scrolled pictures disappear before they reach it */
+  background: color-mix(in srgb, var(--zen-surface) 70%, var(--zen-bg));
+  box-shadow:
+    0 -8px 0 2px var(--zen-bg),
+    0 8px 0 2px var(--zen-bg);
 }
 .ds-toolbar .zoom {
   width: 150px;
@@ -1633,7 +1663,8 @@ dd {
   gap: 10px;
 }
 .ds-side {
-  /* scrolls with the page: no scrollbar of its own */
+  /* pinned (top set by placeSide), never a scrollbar of its own */
+  position: sticky;
   animation: side-in 0.24s cubic-bezier(0.2, 0.7, 0.2, 1);
   display: flex;
   flex-direction: column;
