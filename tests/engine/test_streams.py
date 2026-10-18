@@ -397,3 +397,25 @@ def test_grounded_template_keeps_the_encoders_own_system_prompt():
     assert grounded_template(SimpleNamespace(tokenizer=SimpleNamespace()), 1) is None  # a T5/CLIP encoder
     assert instruction("add a hat", "Make the following edit: {}") == "Make the following edit: add a hat"
     assert instruction("add a hat", "") == "add a hat"
+
+
+def test_w8a8_kernels_match_torch():
+    import pytest
+
+    if not torch.cuda.is_available():
+        pytest.skip("needs CUDA (Triton kernels)")
+    from zentrainer.harness.kernels.w8a8_backward import TRITON_AVAILABLE, int8_matmul, quantize_rows
+
+    if not TRITON_AVAILABLE:
+        pytest.skip("needs Triton")
+    torch.manual_seed(0)
+    g = torch.randn(300, 512, device="cuda", dtype=torch.bfloat16)
+    s = torch.rand(512, device="cuda") + 0.5
+    q = torch.randint(-127, 128, (512, 256), device="cuda", dtype=torch.int8)
+    gq, step = quantize_rows(g, s, 7)
+    x = g.float() * s
+    assert torch.allclose(step, x.abs().amax(1) / 127, rtol=1e-5)
+    assert ((gq.float() * step[:, None] - x).abs() <= step[:, None] + 1e-6).all()  # within one int8 step
+    ref = (gq.float() @ q.float()) * step[:, None]
+    out = int8_matmul(gq, q, step).float()
+    assert ((out - ref).norm() / ref.norm()) < 5e-3

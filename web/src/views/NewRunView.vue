@@ -895,7 +895,7 @@ async function start(position: 'next' | 'end' = 'next') {
                 <span v-else class="sw-state">Off</span>
               </div>
             </ZenField>
-            <ZenField label="int8 backward (W8A8)" stack tip="int8 ConvRot bases (MiniMax H3, Krea 2 int8): the gradient is quantized to int8 too, so each frozen layer's input gradient runs on int8 tensor cores (about 2.8× the bf16 matmul on an RTX 5090). Rounded stochastically so it stays unbiased; noisier per step than 16-bit">
+            <ZenField label="int8 backward (W8A8)" stack tip="int8 ConvRot bases (MiniMax H3, Krea 2 int8): the gradient is quantized to int8 too, so each frozen layer's input gradient runs on int8 tensor cores (about 2× the bf16 backward on an RTX 5090). Rounded stochastically so it stays unbiased; noisier per step than 16-bit">
               <div class="sw-row"><ZenSwitch :model-value="!!spec.memory.w8a8_backward" @update:model-value="spec.memory.w8a8_backward = $event" /><span class="sw-state">{{ spec.memory.w8a8_backward ? 'On' : 'Off' }}</span></div>
             </ZenField>
             <ZenField label="Fused int8 backward" stack tip="int8 ConvRot bases (MiniMax H3, Krea 2 int8): each frozen layer's input gradient from a fused Triton kernel instead of a rebuilt bf16 weight (Fizgig's, by @mabseyuk). Saves the rebuilt weight's VRAM; not faster on an RTX 5090 (cuBLAS wins)">

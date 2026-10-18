@@ -68,6 +68,17 @@ def w8a8_input_grad(grad_2d: torch.Tensor, q: torch.Tensor, scale: torch.Tensor,
     k = q.shape[1]
     if m <= 16 or n % 8 or k % 8:
         return None
+    try:
+        from .kernels.w8a8_backward import TRITON_AVAILABLE, int8_matmul, quantize_rows
+    except Exception:
+        TRITON_AVAILABLE = False
+    if TRITON_AVAILABLE:  # two fused kernels (kernels/w8a8_backward.py), then the rotation in bf16
+        gq, step = quantize_rows(grad_2d, scale, int(torch.randint(0, 2**31 - 1, (1,)).item()))
+        g = int8_matmul(gq, q, step)
+        if group:
+            h = _hadamard(group, g.device, torch.bfloat16)
+            g = torch.matmul(g.view(m, k // group, group), h.T).view(m, k)
+        return g
     gs = grad_2d.float() * scale.reshape(1, -1).float()
     step = gs.abs().amax(dim=1, keepdim=True).clamp_min(1e-30) / 127.0
     # stochastic rounding: each value lands on a neighbouring int8 step with the odds that keep

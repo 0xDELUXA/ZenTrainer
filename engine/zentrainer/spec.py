@@ -169,8 +169,8 @@ class MemorySpec:
     # by @mabseyuk). Saves a transient weight per layer; faster at large token counts.
     fused_int8_backward: bool = False
     # int8 ConvRot bases: the backward's gradient quantized to int8 as well, so the frozen layers'
-    # input gradients run on int8 tensor cores (~2.8x the bf16 GEMM on an RTX 5090). Some gradient
-    # precision for the speed (OneTrainer's W8A8).
+    # input gradients run on int8 tensor cores (Triton kernels: 2x the bf16 backward on H3's
+    # clip-size layers, RTX 5090). Some gradient precision for the speed (OneTrainer's W8A8).
     w8a8_backward: bool = False
     # With offloading: VRAM kept free for activations, the LoRA and its optimizer (GB);
     # the rest holds as much of the model as fits. 0 = auto: 8 GB, more for long video clips.
