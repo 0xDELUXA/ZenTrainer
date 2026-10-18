@@ -250,7 +250,8 @@ export interface DatasetSettings {
 export interface DatasetFaces {
   available: boolean
   hint?: string
-  items?: Record<string, { faces: number; share: number; likeness: number | null; outlier: boolean }>
+  /** faces: in the trained (white) part of the mask; masked: faces the mask leaves out */
+  items?: Record<string, { faces: number; masked?: number; share: number; likeness: number | null; outlier: boolean }>
   with_face?: number
   total?: number
   pack?: string

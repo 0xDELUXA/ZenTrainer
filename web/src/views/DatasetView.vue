@@ -250,10 +250,16 @@ const faceOf = (it: DatasetItem) => faces.value?.items?.[it.path]
 function faceIssue(it: DatasetItem): string | null {
   const f = faceOf(it)
   if (!f) return null
-  if (f.faces === 0) return 'No face found'
+  if (f.faces === 0) return f.masked ? `No face in the trained area (${f.masked} masked out)` : 'No face found'
   if (f.outlier) return `Doesn't look like the others (likeness ${f.likeness?.toFixed(2)})`
-  if (f.faces > 1) return `${f.faces} faces: another person can bleed into the likeness`
+  if (f.faces > 1) return `${f.faces} faces: another person can bleed into the likeness. Mask the extra ones out`
   return null
+}
+/** a picture's face, described: its size, likeness, and any faces its mask leaves out */
+const faceNote = (it: DatasetItem) => {
+  const f = faceOf(it)!
+  const out = f.masked ? ` · ${f.masked} masked out` : ''
+  return `Face ${Math.round(f.share * 100)}% of the height; likeness to the others ${f.likeness?.toFixed(2)}${out}`
 }
 const shown = computed(() => {
   const q = query.value.trim().toLowerCase()
@@ -597,7 +603,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
             <span v-if="it.kind === 'video'" class="badge" :title="`Video: ${it.frames ?? '?'} frames at ${it.fps ?? '?'} fps`"><i class="mdi mdi-play" /> {{ secs(it.duration) }}</span>
             <span v-if="it.repeats > 1" class="badge" :title="`Repeats ${it.repeats}×`">×{{ it.repeats }}</span>
             <span v-if="imageFlags[it.path]?.length" class="badge warn" :title="imageFlags[it.path]!.join(', ')"><i class="mdi mdi-image-filter-center-focus-weak" /> {{ imageFlags[it.path]!.length }}</span>
-            <span v-if="faceOf(it)" class="badge" :class="{ warn: !!faceIssue(it) }" :title="faceIssue(it) ?? `Face ${Math.round((faceOf(it)!.share) * 100)}% of the height; likeness to the others ${faceOf(it)!.likeness?.toFixed(2)}`">
+            <span v-if="faceOf(it)" class="badge" :class="{ warn: !!faceIssue(it) }" :title="faceIssue(it) ?? faceNote(it)">
               <i :class="faceOf(it)!.faces === 0 ? 'mdi mdi-face-man-outline' : 'mdi mdi-face-recognition'" />
               {{ faceOf(it)!.faces === 0 ? '0' : faceOf(it)!.likeness != null ? faceOf(it)!.likeness!.toFixed(2) : faceOf(it)!.faces }}
             </span>
@@ -691,7 +697,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
         <span
           class="c-face small mono"
           :class="{ warn: !!faceIssue(it) }"
-          :title="faceOf(it) ? faceIssue(it) ?? `Face ${Math.round(faceOf(it)!.share * 100)}% of the height; likeness to the others ${faceOf(it)!.likeness?.toFixed(2)}` : 'Run Faces to check'"
+          :title="faceOf(it) ? faceIssue(it) ?? faceNote(it) : 'Run Faces to check'"
         >
           <template v-if="faceOf(it)">
             <i v-if="faceIssue(it)" class="mdi mdi-alert-outline" />

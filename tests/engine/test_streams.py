@@ -510,3 +510,22 @@ def test_face_likeness_leaves_each_face_out():
     me = unit(rng.normal(size=512))
     same = {str(i): unit(me + 0.6 * unit(rng.normal(size=512))).astype(np.float32) for i in range(4)}
     assert min(_leave_one_out(same).values()) > 0.5  # one person's photos do
+
+
+def test_masked_out_faces_dont_count():
+    import numpy as np
+
+    from zentrainer.faces import _summarize
+
+    me = {"box": [0.1, 0.1, 0.4, 0.5], "share": 0.4, "emb": [1.0, 0.0]}
+    bystander = {"box": [0.6, 0.2, 0.8, 0.4], "share": 0.2, "emb": [0.0, 1.0]}
+    frames = [[me, bystander]]
+    assert _summarize(frames, None)["faces"] == 2  # no mask: both count
+    mask = np.ones((256, 256), np.float32)
+    mask[:, 140:] = 0  # the right side (the bystander) masked out
+    r = _summarize(frames, mask)
+    assert (r["faces"], r["masked"], r["emb"]) == (1, 1, [1.0, 0.0])
+    mask[:] = 0
+    mask[:, 140:] = 1  # now the main face is masked out: the bystander is the trained face
+    r = _summarize(frames, mask)
+    assert (r["faces"], r["masked"], r["emb"], r["share"]) == (1, 1, [0.0, 1.0], 0.2)

@@ -321,6 +321,13 @@ class Trainer:
                    "Turn on Train on sound")
             logging.warning("[ZenTrainer] %s", msg)
             self._status("loading", message=msg)
+        masked = sum(sm.mask is not None for sm in self.dataset.samples)
+        if masked and not s.dataset.masked_loss:
+            msg = (f"{masked} picture{'s have masks' if masked != 1 else ' has a mask'}, but 'Masked training' is "
+                   "off: the masks are ignored and every part of those pictures trains (masked-out faces "
+                   "included). Turn on Masked training")
+            logging.warning("[ZenTrainer] %s", msg)
+            self._status("loading", message=msg)
         if s.memory.tread > 0 and s.memory.tread_steps >= 1.0 and self.dataset.samples and all(
                 sm.latent.ndim == 4 and sm.latent.shape[1] > 1 for sm in self.dataset.samples):
             msg = ("TREAD routes every step: this dataset is all clips, with no stills run whole to anchor the "

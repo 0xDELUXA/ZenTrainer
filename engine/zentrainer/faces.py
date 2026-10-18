@@ -2,7 +2,9 @@
 opencv-python-headless): InsightFace on the CPU, so it never competes with training for VRAM.
 
 - A dataset's face report: how many faces each picture has, how big the main one is, and how much
-  it looks like the rest (cosine to the dataset's average face). Outliers stand out.
+  it looks like the rest (cosine to the dataset's average face). Outliers stand out. A face mostly
+  in the black (not trained) part of a picture's mask doesn't count: mask out a bystander and they
+  stop being an "extra face" (with Masked training on, they aren't trained either).
 - Likeness: how much a sample's face looks like the dataset's, per sample and checkpoint, so the
   best checkpoint of a character LoRA is a number instead of a guess (Fizgig's likeness scoring).
 
@@ -21,6 +23,8 @@ from pathlib import Path
 import numpy as np
 
 PACK = "buffalo_l"  # ArcFace R50 (WebFace600K) + RetinaFace; "antelopev2" is the stronger R100
+MASKED_OUT = 0.5  # a face whose box averages below this in the picture's mask is masked out
+MAX_FACES = 6  # faces kept per frame (largest first)
 OUTLIER = 0.3  # cosine to the other pictures' average face below this: probably not the same person
 ONE_IDENTITY = 0.35  # the set's median below this: its faces aren't one person (likeness means little)
 _app = None
@@ -83,15 +87,52 @@ def _frames(path: Path, n: int) -> list[np.ndarray]:
         return [np.asarray(im)]
 
 
-def main_face(path: Path, frames: int = 3) -> tuple[int, dict | None]:
-    """(most faces seen in one frame, the largest face across the frames)."""
-    best, most = None, 0
+def frame_faces(path: Path, frames: int = 3) -> list[list[dict]]:
+    """Per frame, its faces (largest first) with boxes as fractions of the picture, so a mask of
+    any size can be laid over them later: [[{"box": [x0, y0, x1, y1], "share", "emb"}, ...], ...]."""
+    out = []
     for rgb in _frames(path, frames):
-        fs = detect(rgb)
-        most = max(most, len(fs))
-        if fs and (best is None or fs[0]["share"] > best["share"]):
-            best = fs[0]
-    return most, best
+        h, w = rgb.shape[:2]
+        out.append([{"box": [f["bbox"][0] / w, f["bbox"][1] / h, f["bbox"][2] / w, f["bbox"][3] / h],
+                     "share": f["share"], "emb": f["emb"].tolist()} for f in detect(rgb)[:MAX_FACES]])
+    return out
+
+
+def _mask_array(path: Path | None) -> np.ndarray | None:
+    """A mask as a (256, 256) float array in [0, 1] (its own aspect doesn't matter: boxes are fractions)."""
+    if path is None:
+        return None
+    from PIL import Image
+
+    try:
+        with Image.open(path) as im:
+            return np.asarray(im.convert("L").resize((256, 256), Image.BILINEAR), np.float32) / 255
+    except OSError:
+        return None
+
+
+def _trained(box: list[float], mask: np.ndarray | None) -> bool:
+    """Whether a face's box is mostly in the trained (white) part of the mask."""
+    if mask is None:
+        return True
+    n = mask.shape[0]
+    x0, y0 = max(0, int(box[0] * n)), max(0, int(box[1] * n))
+    x1, y1 = min(n, max(x0 + 1, int(np.ceil(box[2] * n)))), min(n, max(y0 + 1, int(np.ceil(box[3] * n))))
+    return float(mask[y0:y1, x0:x1].mean()) >= MASKED_OUT
+
+
+def _summarize(frames: list[list[dict]], mask: np.ndarray | None) -> dict:
+    """A picture's faces after its mask: how many trained faces in its busiest frame, how many masked
+    out, and the largest trained face (its share and embedding)."""
+    most = masked = 0
+    best = None
+    for fs in frames:
+        kept = [f for f in fs if _trained(f["box"], mask)]
+        most = max(most, len(kept))
+        masked = max(masked, len(fs) - len(kept))
+        if kept and (best is None or kept[0]["share"] > best["share"]):
+            best = kept[0]
+    return {"faces": most, "masked": masked, "share": best["share"] if best else 0.0, "emb": best["emb"] if best else None}
 
 
 # ---- a dataset's faces --------------------------------------------------------------------------
@@ -105,8 +146,15 @@ def _cache_dir() -> Path:
 
 
 def dataset_faces(name: str, progress=None) -> dict:
-    """{"items": {rel: {"faces", "share", "likeness", "outlier"}}, "with_face", "total"}; each
-    picture's face is cached by its mtime and size, so a re-check only looks at what changed."""
+    """{"items": {rel: {"faces", "masked", "share", "likeness", "outlier"}}, "with_face", "total"};
+    each picture's faces are cached by its mtime and size, so a re-check only looks at what changed
+    (masks are applied afresh each time: redrawing one needs no detection)."""
+    out, _ = _report(name, progress)
+    return out
+
+
+def _report(name: str, progress=None) -> tuple[dict, dict[str, np.ndarray]]:
+    """The face report, and each picture's main trained face embedding (for the centroid)."""
     from . import datasets
     from .harness.data import scan
 
@@ -121,30 +169,29 @@ def dataset_faces(name: str, progress=None) -> dict:
     for k, it in enumerate(items):
         rel = str(it.path.relative_to(root))
         st = it.path.stat()
-        stamp = f"{PACK}|{st.st_mtime_ns}|{st.st_size}"
+        stamp = f"{PACK}|2|{st.st_mtime_ns}|{st.st_size}"  # 2: every face per frame, boxes as fractions
         hit = cache.get(rel)
         if not hit or hit.get("stamp") != stamp:
-            n, face = main_face(it.path)
-            hit = {"stamp": stamp, "faces": n, "share": face["share"] if face else 0.0,
-                   "emb": face["emb"].tolist() if face else None}
+            hit = {"stamp": stamp, "frames": frame_faces(it.path)}
             cache[rel] = hit
-        rows[rel] = hit
+        rows[rel] = _summarize(hit["frames"], _mask_array(it.mask))
         if progress:
             progress(k + 1, len(items))
     cache = {k: v for k, v in cache.items() if k in rows}
     cache_file.write_text(json.dumps(cache))
-    likes = _leave_one_out({rel: np.asarray(r["emb"], np.float32) for rel, r in rows.items() if r["emb"]})
+    embs = {rel: np.asarray(r["emb"], np.float32) for rel, r in rows.items() if r["emb"]}
+    likes = _leave_one_out(embs)
     out = {}
     for rel, r in rows.items():
         like = likes.get(rel)
-        out[rel] = {"faces": r["faces"], "share": round(r["share"], 4),
+        out[rel] = {"faces": r["faces"], "masked": r["masked"], "share": round(r["share"], 4),
                     "likeness": round(like, 4) if like is not None else None,
                     "outlier": like is not None and like < OUTLIER}
     vals = sorted(likes.values())
     median = vals[len(vals) // 2] if vals else None
-    return {"items": out, "with_face": sum(1 for r in rows.values() if r["emb"]), "total": len(rows), "pack": PACK,
+    return {"items": out, "with_face": len(embs), "total": len(rows), "pack": PACK,
             "identity": round(median, 4) if median is not None else None,
-            "one_identity": median is not None and median >= ONE_IDENTITY}
+            "one_identity": median is not None and median >= ONE_IDENTITY}, embs
 
 
 def _leave_one_out(embs: dict[str, np.ndarray]) -> dict[str, float]:
@@ -176,10 +223,8 @@ def _centroid(embs: list[np.ndarray]) -> np.ndarray | None:
 
 
 def dataset_centroid(name: str) -> np.ndarray | None:
-    rows = dataset_faces(name)["items"]  # cached: cheap after the first look
-    cache_file = _cache_dir() / f"{hashlib.sha1(name.encode()).hexdigest()[:16]}.json"
-    cache = json.loads(cache_file.read_text())
-    return _centroid([np.asarray(cache[r]["emb"], np.float32) for r in rows if cache.get(r, {}).get("emb")])
+    _, embs = _report(name)  # cached: cheap after the first look
+    return _centroid(list(embs.values()))
 
 
 def likeness(path: Path, centroid: np.ndarray, frames: int = 4) -> float | None:
