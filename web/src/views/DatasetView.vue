@@ -5,7 +5,7 @@
 import { ZenButton, ZenEmpty, ZenInput, ZenLightbox, ZenSlider } from '@nynxz/zenkit-ui'
 import type { LightboxItem } from '@nynxz/zenkit-ui'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { engine, thumbUrl, viewUrl, type CaptionJob, type DatasetItem } from '@/api/engine'
 import { activeCaptions } from '@/captions'
 import CaptionPanel from '@/components/CaptionPanel.vue'
@@ -13,6 +13,7 @@ import { vAutosize } from '@/autosize'
 
 const props = defineProps<{ name: string }>()
 const router = useRouter()
+const route = useRoute()
 
 // ---- persisted view prefs -------------------------------------------------------------
 const PREFS = 'zentrainer.datasetView'
@@ -85,6 +86,11 @@ function review(job: CaptionJob) {
   activeSet.value = job.set_name
   filter.value = 'all'
 }
+// ?review=<caption job id>: opened from that job's page
+onMounted(async () => {
+  const id = route.query.review
+  if (typeof id === 'string' && id) review(await engine.captionJob(id))
+})
 
 const counts = computed(() => ({
   uncaptioned: items.value.filter((i) => !cap(i)).length,

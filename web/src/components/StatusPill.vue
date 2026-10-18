@@ -2,7 +2,8 @@
 import { computed } from 'vue'
 import type { RunStatus } from '@/api/engine'
 
-const props = defineProps<{ status: RunStatus }>()
+// runs and caption jobs share it: running/undone are caption job states
+const props = defineProps<{ status: RunStatus | 'running' | 'undone'; label?: string }>()
 // Status colour always comes with an icon and the word, never colour alone.
 const look = computed(
   () =>
@@ -10,6 +11,8 @@ const look = computed(
       queued: { icon: 'mdi mdi-clock-outline', tone: 'info' },
       loading: { icon: 'mdi mdi-database-arrow-down-outline', tone: 'info' },
       training: { icon: 'mdi mdi-progress-helper', tone: 'ok' },
+      running: { icon: 'mdi mdi-progress-helper', tone: 'ok' },
+      undone: { icon: 'mdi mdi-undo-variant', tone: 'info' },
       paused: { icon: 'mdi mdi-pause-circle-outline', tone: 'warn' },
       stopped: { icon: 'mdi mdi-stop-circle-outline', tone: 'warn' },
       done: { icon: 'mdi mdi-check-circle-outline', tone: 'ok' },
@@ -21,7 +24,7 @@ const look = computed(
 </script>
 
 <template>
-  <span class="pill" :class="look.tone"><i :class="look.icon" /> {{ status }}</span>
+  <span class="pill" :class="look.tone"><i :class="look.icon" /> {{ label ?? status }}</span>
 </template>
 
 <style scoped>

@@ -61,6 +61,7 @@ class CaptionJob:
     written: dict[str, str] = field(default_factory=dict)  # path -> the caption this job wrote
     previous: dict[str, str] = field(default_factory=dict)  # path -> the caption it replaced
     results: list[dict] = field(default_factory=list)  # preview: [{path, text}]
+    log: list[dict] = field(default_factory=list)  # [{t, level, msg}]: the job's own log
     created: float = field(default_factory=time.time)
     finished: float | None = None
 
@@ -180,6 +181,15 @@ def models() -> list[str]:
     return out
 
 
+def history() -> list[dict]:
+    """Every kept job, newest first, for the Jobs page (try-ons only while fresh)."""
+    now = time.time()
+    with _lock:
+        _load()
+        jobs = [j for j in _jobs.values() if not j.preview or j.status in ACTIVE or now - (j.finished or j.created) < PREVIEW_KEEP]
+    return [_light(j) for j in sorted(jobs, key=lambda j: j.created, reverse=True)]
+
+
 def recent(dataset: str | None = None) -> list[dict]:
     """The latest jobs (one dataset's, or all), plus any try-on still running or just
     finished, so a page opened mid-job (or reopened) picks it up."""
@@ -200,9 +210,19 @@ def active() -> list[dict]:
 
 def _light(job: CaptionJob) -> dict:
     d = job.public()
-    for k in ("prompt", "written", "paths"):
+    for k in ("prompt", "written", "paths", "log"):
         d.pop(k)
     return d
+
+
+LOG_KEEP = 1000
+
+
+def log(job: CaptionJob, msg: str, level: str = "info") -> None:
+    """A line in the job's log (kept with the job, shown on its page)."""
+    with _lock:
+        job.log.append({"t": time.time(), "level": level, "msg": msg})
+        del job.log[:-LOG_KEEP]
 
 
 def _emit(job: CaptionJob) -> None:
@@ -268,6 +288,7 @@ def run(job: CaptionJob) -> None:
 
     if job.status != "queued":  # cancelled while it waited
         return
+    log(job, f"started: {job.clip_name}, into “{job.set_name}”, {job.mode} images" + (f", try-on of {job.preview}" if job.preview else ""))
     update(job, status="running", message=f"loading {job.clip_name}")
     # ComfyUI's model compiler (CUDA graphs) breaks token-by-token generation: a device-side
     # assert on the second token that takes the whole server down. Off while captioning, as
@@ -278,7 +299,9 @@ def run(job: CaptionJob) -> None:
             root = _dataset_root(job)
             items = todo(job, scan(root, warn=False))
             update(job, total=len(items))
+            log(job, f"{len(items)} to caption")
             if not items:
+                log(job, "nothing to caption: every image already has one in this set")
                 update(job, status="done", message="nothing to caption: every image already has one in this set")
                 return
             # the stock chat model, not an image model's conditioning wrapper of the same file
@@ -305,13 +328,16 @@ def run(job: CaptionJob) -> None:
                         job.previous[rel] = target.read_text(encoding="utf-8")
                     target.write_text(text + "\n", encoding="utf-8")
                     job.written[rel] = text
+                log(job, f"{rel}: {text}")
                 update(job, done=job.done + 1, file=it.path.name, text=text, message="")  # loaded: the first one's in
                 pbar.update_absolute(job.done)  # also raises on ComfyUI interrupt
                 mm.throw_exception_if_processing_interrupted()
         if job.status == "running":
+            log(job, f"done: {len(job.written)} written, {len(job.previous)} of them replaced" if not job.preview else "done (try-on: nothing saved)")
             update(job, status="done", finished=time.time())
     except BaseException as e:
         stopped = type(e).__name__ == "InterruptProcessingException"
+        log(job, "interrupted" if stopped else f"failed: {type(e).__name__}: {e}", "warn" if stopped else "error")
         update(job, status="stopped" if stopped else "error", message=str(e) or type(e).__name__, finished=time.time())
         if not stopped:
             raise
@@ -340,6 +366,7 @@ def _picture(path: Path):
 def cancel(job: CaptionJob) -> None:
     """Stop at the next image (what's written stays, and can be undone)."""
     if job.status in ACTIVE:
+        log(job, "cancelled", "warn")
         update(job, status="stopped", message="cancelled", finished=time.time())
 
 
@@ -368,5 +395,6 @@ def undo(job: CaptionJob) -> int:
     msg = f"undid {restored} caption{'s' if restored != 1 else ''}"
     if kept:
         msg += f"; kept {kept} you edited since"
+    log(job, msg)
     update(job, status="undone", message=msg)
     return restored

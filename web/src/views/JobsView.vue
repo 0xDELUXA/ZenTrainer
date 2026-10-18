@@ -1,13 +1,35 @@
 <script setup lang="ts">
-// Runs and the training queue on one page: what's training now, what's next (in order, still
-// reorderable: those haven't been handed to ComfyUI yet), then everything that has finished.
+// Everything that runs, on one page: training runs with their queue (what's training now,
+// what's next, still reorderable: those haven't been handed to ComfyUI yet) and caption jobs;
+// then everything that has finished, newest first. Each opens its own page with its log.
 import { ZenButton, ZenEmpty } from '@nynxz/zenkit-ui'
-import { computed, onMounted } from 'vue'
-import { engine } from '@/api/engine'
+import { computed, onMounted, ref, watch } from 'vue'
+import { engine, type CaptionJob, type RunMeta } from '@/api/engine'
 import StatusPill from '@/components/StatusPill.vue'
+import { activeCaptions, captionJobs, startCaptionSync } from '@/captions'
 import { engineError, latest, queue, refreshQueue, refreshRuns, runs } from '@/runs'
 
-onMounted(() => Promise.all([refreshRuns(), refreshQueue()]))
+const captions = ref<CaptionJob[]>([])
+async function refreshCaptions() {
+  try {
+    captions.value = await engine.captionJobs()
+  } catch {
+    captions.value = []
+  }
+}
+onMounted(() => Promise.all([refreshRuns(), refreshQueue(), refreshCaptions(), startCaptionSync()]))
+// live caption events: merge them in, and pick up jobs started elsewhere
+watch(
+  () => Object.values(captionJobs).map((j) => `${j.job_id}:${j.status}:${j.done}`).join(),
+  () => {
+    const byId = new Map(captions.value.map((j) => [j.job_id, j]))
+    for (const j of Object.values(captionJobs)) byId.set(j.job_id, { ...byId.get(j.job_id), ...j })
+    captions.value = [...byId.values()].sort((a, b) => (b.created ?? 0) - (a.created ?? 0))
+  },
+)
+
+type Kind = 'all' | 'train' | 'caption'
+const kind = ref<Kind>('all')
 
 async function act(body: Parameters<typeof engine.editQueue>[0]) {
   await engine.editQueue(body)
@@ -23,18 +45,31 @@ function move(i: number, by: number) {
 
 const current = computed(() => queue.value.current)
 const queued = computed(() => queue.value.items)
-const history = computed(() => {
+type Row = { kind: 'train'; t: number; run: RunMeta } | { kind: 'caption'; t: number; job: CaptionJob }
+const history = computed<Row[]>(() => {
   const live = new Set([current.value?.run_id, ...queued.value.map((r) => r.run_id)])
-  return runs.value.filter((r) => !live.has(r.run_id))
+  const rows: Row[] = []
+  if (kind.value !== 'caption') for (const r of runs.value) if (!live.has(r.run_id)) rows.push({ kind: 'train', t: r.created, run: r })
+  if (kind.value !== 'train')
+    for (const j of captions.value) if (!['queued', 'running'].includes(j.status)) rows.push({ kind: 'caption', t: j.created ?? 0, job: j })
+  return rows.sort((a, b) => b.t - a.t)
 })
+const liveCaptions = computed(() => (kind.value === 'train' ? [] : activeCaptions.value))
+const capTitle = (j: CaptionJob) => `${j.preview ? 'Try captions' : 'Caption'} ${j.dataset}`
+const capMeta = (j: CaptionJob) =>
+  j.status === 'queued' ? j.message || 'waiting' : j.message?.startsWith('loading') ? 'loading model' : `${j.done}/${j.total || j.preview || '…'}`
+const capPct = (j: CaptionJob) => ((j.total || j.preview) ? (j.done / (j.total || j.preview || 1)) * 100 : 0)
+const capSub = (j: CaptionJob) =>
+  [`into “${j.set_name}”`, j.preview ? 'try-on' : `${j.written?.length ?? j.done} written`, j.clip_name.replace(/\.safetensors$/, '')].join(' · ')
 const progress = (id: string) => {
   const m = latest[id]
   return m?.total ? { step: m.step, total: m.total, pct: (m.step / m.total) * 100 } : null
 }
 const when = (t: number) => new Date(t * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
 const summary = computed(() => {
-  const parts = [`${runs.value.length} run${runs.value.length === 1 ? '' : 's'}`]
+  const parts = [`${runs.value.length} run${runs.value.length === 1 ? '' : 's'}`, `${captions.value.filter((j) => !j.preview).length} caption jobs`]
   if (current.value) parts.push('1 training')
+  if (activeCaptions.value.length) parts.push(`${activeCaptions.value.length} captioning`)
   if (queued.value.length) parts.push(`${queued.value.length} queued`)
   return parts.join(' · ')
 })
@@ -44,7 +79,7 @@ const summary = computed(() => {
   <div class="page">
     <div class="page-head">
       <div class="titles">
-        <h1>Runs</h1>
+        <h1>Jobs</h1>
         <p class="lede">
           {{ summary }}
           <template v-if="queue.paused"> · <b class="warn">queue paused</b></template>
@@ -61,13 +96,31 @@ const summary = computed(() => {
       <RouterLink to="/runs/new"><ZenButton variant="primary" icon="mdi mdi-plus">New run</ZenButton></RouterLink>
     </div>
     <div v-if="engineError" class="card muted">Can't reach the engine: {{ engineError }}</div>
-    <ZenEmpty v-else-if="!runs.length" title="No runs yet" icon="mdi mdi-chart-line">
-      Start one from <RouterLink to="/runs/new"><u>New run</u></RouterLink>.
+    <ZenEmpty v-else-if="!runs.length && !captions.length" title="Nothing has run yet" icon="mdi mdi-chart-line">
+      Start a training run from <RouterLink to="/runs/new"><u>New run</u></RouterLink>, or auto-caption a dataset.
     </ZenEmpty>
 
     <template v-else>
-      <section v-if="current" class="sec">
+      <div class="kinds">
+        <button :class="{ on: kind === 'all' }" @click="kind = 'all'">All</button>
+        <button :class="{ on: kind === 'train' }" @click="kind = 'train'"><i class="mdi mdi-chart-timeline-variant" /> Training</button>
+        <button :class="{ on: kind === 'caption' }" @click="kind = 'caption'"><i class="mdi mdi-creation-outline" /> Captioning</button>
+      </div>
+      <section v-if="liveCaptions.length || (current && kind !== 'caption')" class="sec">
         <div class="eyebrow">Now</div>
+        <RouterLink v-for="j in liveCaptions" :key="j.job_id" :to="`/jobs/caption/${j.job_id}`" class="row card now">
+          <div class="name">
+            <i class="mdi mdi-creation-outline kind-ic" />{{ capTitle(j) }}
+            <div class="muted mono small">{{ capSub(j) }}</div>
+          </div>
+          <div class="mini">
+            <div class="bar"><div :style="{ width: `${capPct(j)}%` }" /></div>
+            <span class="muted mono small">{{ capMeta(j) }}</span>
+          </div>
+          <StatusPill :status="j.status" :label="j.status === 'running' ? 'captioning' : undefined" />
+        </RouterLink>
+      </section>
+      <section v-if="current && kind !== 'caption'" class="sec">
         <RouterLink :to="`/runs/${current.run_id}`" class="row card now">
           <div class="name">
             {{ current.name }}
@@ -81,7 +134,7 @@ const summary = computed(() => {
         </RouterLink>
       </section>
 
-      <section v-if="queued.length" class="sec">
+      <section v-if="queued.length && kind !== 'caption'" class="sec">
         <div class="eyebrow">Up next · {{ queued.length }}</div>
         <div v-for="(r, i) in queued" :key="r.run_id" class="row card queued">
           <RouterLink :to="`/runs/${r.run_id}`" class="name">
@@ -103,21 +156,54 @@ const summary = computed(() => {
       </section>
 
       <section v-if="history.length" class="sec">
-        <div v-if="current || queued.length" class="eyebrow">History</div>
-        <RouterLink v-for="r in history" :key="r.run_id" :to="`/runs/${r.run_id}`" class="row card">
-          <div class="name">
-            {{ r.name }}
-            <div class="muted mono small">{{ r.run_id }}</div>
-          </div>
-          <div class="muted small">{{ when(r.created) }}</div>
-          <StatusPill :status="r.status" />
-        </RouterLink>
+        <div v-if="current || queued.length || liveCaptions.length" class="eyebrow">History</div>
+        <template v-for="h in history" :key="h.kind === 'train' ? h.run.run_id : h.job.job_id">
+          <RouterLink v-if="h.kind === 'train'" :to="`/runs/${h.run.run_id}`" class="row card">
+            <div class="name">
+              <i class="mdi mdi-chart-timeline-variant kind-ic" />{{ h.run.name }}
+              <div class="muted mono small">{{ h.run.run_id }}</div>
+            </div>
+            <div class="muted small">{{ when(h.run.created) }}</div>
+            <StatusPill :status="h.run.status" />
+          </RouterLink>
+          <RouterLink v-else :to="`/jobs/caption/${h.job.job_id}`" class="row card">
+            <div class="name">
+              <i class="mdi mdi-creation-outline kind-ic" />{{ capTitle(h.job) }}
+              <div class="muted mono small">{{ capSub(h.job) }}</div>
+            </div>
+            <div class="muted small">{{ when(h.t) }}</div>
+            <StatusPill :status="h.job.status" />
+          </RouterLink>
+        </template>
       </section>
     </template>
   </div>
 </template>
 
 <style scoped>
+.kinds {
+  display: flex;
+  gap: 4px;
+}
+.kinds button {
+  border: 1px solid color-mix(in srgb, var(--zen-border) 70%, transparent);
+  background: none;
+  color: var(--zen-muted);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+.kinds button.on {
+  background: var(--zen-surface-2);
+  color: var(--zen-text);
+}
+.kind-ic {
+  color: var(--zen-muted);
+  margin-right: 8px;
+  font-weight: 400;
+}
 .sec {
   display: flex;
   flex-direction: column;

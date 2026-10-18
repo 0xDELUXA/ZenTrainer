@@ -343,7 +343,7 @@ async function saveEdit() {
   error.value = null
   try {
     await engine.editRun(editing.value, spec)
-    router.push(retrying.value ? `/runs/${editing.value}` : '/runs')
+    router.push(retrying.value ? `/runs/${editing.value}` : '/jobs')
   } catch (e) {
     error.value = String((e as Error).message ?? e)
   } finally {
@@ -794,7 +794,7 @@ async function start(position: 'next' | 'end' = 'next') {
           <ZenButton variant="primary" icon="mdi mdi-content-save-outline" block :disabled="submitting || !!missing" :title="missing ?? (retrying ? 'Saves these settings and queues it to run next' : 'Keeps its place in the queue')" @click="saveEdit">
             {{ missing ?? (retrying ? 'Save & retry' : 'Save changes') }}
           </ZenButton>
-          <ZenButton icon="mdi mdi-close" block @click="router.push('/runs')">Cancel</ZenButton>
+          <ZenButton icon="mdi mdi-close" block @click="router.push('/jobs')">Cancel</ZenButton>
         </template>
         <template v-else>
           <ZenButton variant="primary" icon="mdi mdi-play" block :disabled="submitting || !!missing" :title="missing ?? 'Starts now, or right after the current run'" @click="start('next')">

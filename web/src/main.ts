@@ -12,10 +12,12 @@ import { initTheme } from './theme'
 const router = createRouter({
   history: createWebHistory('/zentrainer/'),
   routes: [
-    { path: '/', redirect: '/runs' },
-    { path: '/runs', component: () => import('./views/RunsView.vue') },
+    { path: '/', redirect: '/jobs' },
+    { path: '/jobs', component: () => import('./views/JobsView.vue') },
+    { path: '/jobs/caption/:id', component: () => import('./views/CaptionJobView.vue'), props: true },
+    { path: '/runs', redirect: '/jobs' },
     { path: '/runs/new', component: () => import('./views/NewRunView.vue') },
-    { path: '/queue', redirect: '/runs' },
+    { path: '/queue', redirect: '/jobs' },
     { path: '/runs/:id', component: () => import('./views/RunView.vue'), props: true },
     { path: '/datasets', component: () => import('./views/DatasetsView.vue') },
     { path: '/datasets/:name', component: () => import('./views/DatasetView.vue'), props: true },

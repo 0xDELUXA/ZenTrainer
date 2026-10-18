@@ -30,15 +30,15 @@ interface NavItem {
 }
 // five places: no group headings needed
 const items: NavItem[] = [
-  // training and queued (ACTIVE includes queued): the queue lives on the Runs page
-  { to: '/runs', icon: 'mdi mdi-chart-timeline-variant', label: 'Runs', count: () => activeRuns.value.length },
+  // everything that runs: training (and its queue) and caption jobs
+  { to: '/jobs', icon: 'mdi mdi-chart-timeline-variant', label: 'Jobs', count: () => activeRuns.value.length + activeCaptions.value.length },
   { to: '/datasets', icon: 'mdi mdi-image-multiple-outline', label: 'Datasets' },
   { to: '/models', icon: 'mdi mdi-cube-outline', label: 'Models' },
   { to: '/apps', icon: 'mdi mdi-view-grid-outline', label: 'Apps' },
   { to: '/gallery', icon: 'mdi mdi-image-album', label: 'Gallery' },
 ]
 const isActive = (to: string) =>
-  to === '/runs' ? route.path === '/runs' : route.path === to || route.path.startsWith(to + '/')
+  to === '/jobs' ? route.path.startsWith('/jobs') || (route.path.startsWith('/runs/') && route.path !== '/runs/new') : route.path === to || route.path.startsWith(to + '/')
 
 // ---- runs -------------------------------------------------------------------------
 const live = computed(() =>
@@ -120,7 +120,7 @@ onUnmounted(() => {
       :aria-expanded="!collapsed"
       @click="emit('toggle')"
     />
-    <RouterLink to="/runs" class="row brand" :title="training ? 'Training…' : undefined" @click="lotus?.bloom(); emit('navigate')">
+    <RouterLink to="/jobs" class="row brand" :title="training ? 'Training…' : undefined" @click="lotus?.bloom(); emit('navigate')">
       <span class="ic"><ZenLotus ref="lotus" class="lotus" :breathing="training" /></span>
       <span class="lbl">ZenTrainer</span>
     </RouterLink>
@@ -177,7 +177,7 @@ onUnmounted(() => {
 
     <RouterLink
       v-if="cap"
-      :to="`/datasets/${encodeURIComponent(cap.job.dataset)}`"
+      :to="`/jobs/caption/${cap.job.job_id}`"
       class="row mem"
       :title="cap.job.message || `${cap.job.preview ? 'Trying captions on' : 'Captioning'} ${cap.job.dataset}${cap.job.file ? `: ${cap.job.file}` : ''}`"
       @click="emit('navigate')"

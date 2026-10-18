@@ -228,6 +228,11 @@ export interface CaptionJob {
   /** how many existing captions it replaced (undo puts them back) */
   replaced?: number
   results?: { path: string; text: string }[]
+  /** the job's log (job endpoint only) */
+  log?: { t: number; level: 'info' | 'warn' | 'error'; msg: string }[]
+  /** path -> the caption it wrote (job endpoint only) */
+  captions?: Record<string, string>
+  prompt?: string
   created?: number
   finished?: number | null
 }
@@ -647,6 +652,7 @@ export const engine = {
     call<{ styles: CaptionStyle[]; models: string[]; jobs: CaptionJob[] }>(`/caption${dataset ? `?dataset=${encodeURIComponent(dataset)}` : ''}`),
   startCaption: (name: string, body: CaptionRequest) =>
     call<{ job: CaptionJob }>(`${dsPath(name)}/caption`, { method: 'POST', body: JSON.stringify({ ...body, client_id: getClientId() }) }),
+  captionJobs: () => call<{ jobs: CaptionJob[] }>('/caption?all=1').then((r) => r.jobs),
   captionActive: () => call<{ jobs: CaptionJob[] }>('/caption?active=1').then((r) => r.jobs),
   captionJob: (id: string) => call<{ job: CaptionJob }>(`/caption/${encodeURIComponent(id)}`).then((r) => r.job),
   captionAction: (id: string, action: 'cancel' | 'undo') =>

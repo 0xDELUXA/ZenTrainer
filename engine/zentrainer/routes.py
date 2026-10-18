@@ -95,6 +95,8 @@ def register(server) -> None:
 
         if request.query.get("active") == "1":
             return web.json_response({"jobs": captioner.active()})
+        if request.query.get("all") == "1":
+            return web.json_response({"jobs": captioner.history()})
         return web.json_response({
             "styles": [{"id": k, "label": v[0], "prompt": v[1]} for k, v in captioner.STYLES.items()],
             "models": await asyncio.to_thread(captioner.models),
@@ -161,7 +163,9 @@ def register(server) -> None:
         from . import captioner
 
         job = captioner.get(request.match_info["job_id"])
-        return web.json_response({"job": job.public()}) if job else _bad("no such job", 404)
+        if job is None:
+            return _bad("no such job", 404)
+        return web.json_response({"job": {**job.public(), "captions": dict(job.written)}})
 
     @routes.post("/zentrainer/api/caption/{job_id}/{action}")
     async def caption_action(request):
