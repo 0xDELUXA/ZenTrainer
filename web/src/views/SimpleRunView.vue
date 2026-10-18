@@ -10,7 +10,7 @@ import { eta } from '@/recipes'
 
 const props = defineProps<{ id: string }>()
 const d = ref<RunDetail | null>(null)
-const sampling = ref<{ index?: number; count?: number; s_step?: number; s_total?: number; preview?: string } | null>(null)
+const sampling = ref<{ index?: number; count?: number; s_step?: number; s_total?: number; preview?: string; manual?: boolean } | null>(null)
 const now = ref(Date.now() / 1000)
 let timer: ReturnType<typeof setInterval> | undefined
 let off = () => {}
@@ -28,7 +28,11 @@ onMounted(() => {
   off = onComfyMessage((m) => {
     if (!d.value || m.data.run_id !== props.id) return
     if (m.type === EVENTS.metrics) d.value.metrics.push(m.data as never)
-    else if (m.type === EVENTS.sample) d.value.samples.push(m.data as unknown as SampleRow)
+    else if (m.type === EVENTS.sample) {
+      const row = m.data as unknown as SampleRow
+      d.value.samples.push(row)
+      if (row.manual && !row.base) trying.value = Math.max(0, trying.value - 1)
+    }
     else if (m.type === EVENTS.checkpoint) d.value.checkpoints.push(m.data as unknown as CheckpointRow)
     else if (m.type === EVENTS.status) {
       d.value.run.status = m.data.status as never
@@ -59,6 +63,7 @@ const headline = computed(() => {
   if (!s) return 'Loading…'
   if (s === 'queued') return 'Waiting for its turn'
   if (s === 'loading') return 'Getting ready'
+  if (sampling.value?.manual) return 'Drawing your prompt'
   if (sampling.value) return step.value === 0 ? 'Making a "before" picture' : 'Making a new preview'
   if (s === 'training') return step.value ? 'Learning' : 'Starting'
   if (s === 'paused') return 'Paused'
@@ -79,7 +84,8 @@ const detailLine = computed(() => {
 // the samples: the first prompt's, in order (before first); the newest big
 const viewUrl = (x: SampleRow) => `/view?${new URLSearchParams({ filename: x.filename, subfolder: x.subfolder, type: x.type })}`
 const isVideo = (x: SampleRow) => /\.(mp4|webm)$/i.test(x.filename)
-const strip = computed(() => (d.value?.samples ?? []).filter((x) => x.index === 0).sort((a, b) => a.step - b.step))
+const runSamples = computed(() => (d.value?.samples ?? []).filter((x) => !x.manual))
+const strip = computed(() => runSamples.value.filter((x) => x.index === 0).sort((a, b) => a.step - b.step))
 const pick = ref<number | null>(null)
 const big = computed(() => (pick.value != null ? strip.value[pick.value] : strip.value.at(-1)) ?? null)
 const finalLora = computed(() => [...(d.value?.checkpoints ?? [])].reverse().find((c) => c.final)?.lora_name ?? null)
@@ -93,11 +99,12 @@ const cols = computed(() => Math.max(1, prompts.value.length))
 const rows = computed(() => {
   const r = d.value
   if (!r) return []
-  const steps = [...new Set(r.samples.map((x) => x.step))].sort((a, b) => a - b)
+  const samples = runSamples.value
+  const steps = [...new Set(samples.map((x) => x.step))].sort((a, b) => a - b)
   const at = (step: number) => {
     // the samples taken at this checkpoint, or the latest ones before it
     const s = [...steps].reverse().find((x) => x <= step)
-    return Array.from({ length: cols.value }, (_, i) => r.samples.find((x) => x.step === s && x.index === i) ?? null)
+    return Array.from({ length: cols.value }, (_, i) => samples.find((x) => x.step === s && x.index === i) ?? null)
   }
   const ck = [...r.checkpoints].sort((a, b) => b.step - a.step)
   const out = ck.map((c, n) => ({ key: `c${c.step}`, label: c.final ? 'Final' : `Step ${c.step}`, step: c.step, ckpt: c as CheckpointRow | null, recommended: n === 0, samples: at(c.step) }))
@@ -122,6 +129,40 @@ const lbItems = computed<LightboxItem[]>(() =>
   ),
 )
 const open = (row: number, col: number) => (lb.value = row * cols.value + col)
+
+// ---- the bar's notches: each preview (a checkpoint and its samples), filled once it's taken ----
+const marks = computed(() => {
+  const every = d.value?.spec.samples.every
+  if (!every) return []
+  const taken = new Set(runSamples.value.map((x) => x.step))
+  const out: { step: number; done: boolean }[] = []
+  for (let s = every; s <= total.value; s += every) out.push({ step: s, done: taken.has(s) })
+  return out
+})
+const nextPreview = computed(() => {
+  const m = marks.value.find((x) => !x.done && x.step > step.value)
+  if (!m || status.value !== 'training' || !last.value?.it_s) return null
+  return { step: m.step, in: eta((m.step - step.value) / last.value.it_s) }
+})
+
+// ---- Try a prompt: drawn with what it has learned so far, while it trains ----------------------
+const tryText = ref('')
+const trying = ref(0) // asked for, not back yet
+const tryError = ref('')
+const tries = computed(() => (d.value?.samples ?? []).filter((x) => x.manual && !x.base).sort((a, b) => b.index - a.index))
+async function tryIt() {
+  const prompt = tryText.value.trim()
+  if (!prompt) return
+  tryText.value = ''
+  tryError.value = ''
+  trying.value++
+  try {
+    await engine.control(props.id, 'sample', { prompt })
+  } catch (e) {
+    trying.value--
+    tryError.value = e instanceof Error ? e.message : String(e)
+  }
+}
 </script>
 
 <template>
@@ -135,9 +176,20 @@ const open = (row: number, col: number) => (lb.value = row * cols.value + col)
         </div>
         <i class="big-ic" :class="done ? 'mdi mdi-check-circle' : failed ? 'mdi mdi-alert-circle-outline' : 'mdi mdi-sprout-outline'" />
       </div>
-      <div v-if="!done && !failed" class="bar"><span :style="{ width: `${pct}%` }" /></div>
+      <div v-if="!done && !failed" class="track">
+        <div class="bar"><span :style="{ width: `${pct}%` }" /></div>
+        <span
+          v-for="m in marks"
+          :key="m.step"
+          class="notch"
+          :class="{ done: m.done }"
+          :style="{ left: `${(m.step / total) * 100}%` }"
+          :title="`Preview at step ${m.step}${m.done ? ' (taken)' : ''}`"
+        />
+      </div>
       <div class="meta small muted">
         <span v-if="!done && !failed">{{ Math.round(pct) }}%</span>
+        <span v-if="nextPreview">Next preview at step {{ nextPreview.step }}, {{ nextPreview.in }}</span>
         <span>Trigger word <b class="mono">{{ d.spec.dataset.trigger || '–' }}</b></span>
         <span class="spacer" />
         <RouterLink :to="`/runs/${id}`" class="muted">Details</RouterLink>
@@ -147,6 +199,33 @@ const open = (row: number, col: number) => (lb.value = row * cols.value + col)
         <RouterLink to="/simple"><ZenButton icon="mdi mdi-plus">Train another</ZenButton></RouterLink>
       </div>
     </div>
+
+    <section v-if="d && (status === 'training' || tries.length || trying)" class="card tries">
+      <div class="picks-head">
+        <div class="eyebrow">Try a prompt</div>
+        <span class="muted small">Drawn with what it has learned so far. Training waits while it draws.</span>
+      </div>
+      <div v-if="status === 'training'" class="try">
+        <input
+          v-model="tryText"
+          class="try-in"
+          :placeholder="`e.g. ${d.spec.dataset.trigger || 'it'} reading a book in a cafe`"
+          @keydown.enter="tryIt"
+        />
+        <ZenButton variant="primary" icon="mdi mdi-creation-outline" :disabled="!tryText.trim()" @click="tryIt">Try</ZenButton>
+      </div>
+      <div v-if="tryError" class="small danger">{{ tryError }}</div>
+      <div v-if="tries.length || trying" class="try-grid">
+        <div v-if="trying" class="tcell pending">
+          <img v-if="sampling?.manual && sampling.preview" :src="sampling.preview" alt="" />
+          <span class="small muted">{{ sampling?.manual ? `Drawing… ${sampling.s_step ?? 0}/${sampling.s_total ?? '?'}` : trying > 1 ? `${trying} waiting` : 'Waiting for the next step' }}</span>
+        </div>
+        <a v-for="x in tries" :key="x.filename" class="tcell" :href="viewUrl(x)" target="_blank" :title="x.prompt">
+          <img :src="viewUrl(x)" loading="lazy" alt="" />
+          <span class="small"><b>Step {{ x.step }}</b> <span class="muted ellipsis">{{ x.prompt }}</span></span>
+        </a>
+      </div>
+    </section>
 
     <section v-if="d && rows.length > 1" class="card picks">
       <div class="picks-head">
@@ -230,6 +309,92 @@ const open = (row: number, col: number) => (lb.value = row * cols.value + col)
   color: var(--zen-ok);
 }
 .failed .big-ic {
+  color: var(--zen-danger);
+}
+.track {
+  position: relative;
+}
+/* a dot at each preview: hollow until it's taken */
+.notch {
+  position: absolute;
+  top: 2px;
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
+  border-radius: 50%;
+  background: var(--zen-surface);
+  border: 1.5px solid var(--zen-muted);
+  box-sizing: border-box;
+  pointer-events: auto;
+}
+.notch.done {
+  background: var(--zen-text);
+  border-color: var(--zen-text);
+  opacity: 0.85;
+}
+.tries {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.try {
+  display: flex;
+  gap: 8px;
+}
+.try-in {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+  border-radius: var(--r-md);
+  border: 1px solid color-mix(in srgb, var(--zen-border) 70%, transparent);
+  background: var(--zen-field-bg, var(--zen-input));
+  color: var(--zen-text);
+}
+.try-in:focus {
+  outline: none;
+  border-color: var(--zen-accent);
+}
+.try-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+.tcell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+.tcell img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: var(--r-md);
+  background: var(--zen-surface-2);
+}
+.tcell > span {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+}
+.tcell.pending {
+  justify-content: center;
+}
+.tcell.pending img + span {
+  text-align: center;
+}
+.tcell.pending:not(:has(img))::before {
+  content: '';
+  display: block;
+  aspect-ratio: 1;
+  border-radius: var(--r-md);
+  background: var(--zen-surface-2);
+}
+.danger {
   color: var(--zen-danger);
 }
 .bar {
