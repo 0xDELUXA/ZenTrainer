@@ -158,9 +158,10 @@ OPTIMIZERS: dict[str, OptimizerDef] = {d.id: d for d in [
     OptimizerDef("Automagic3", "Automagic v3 (auto LR)",
                  lambda p, s: importlib.import_module(".automagic3", __package__).Automagic3(
                      p, lr=s.learning_rate, weight_decay=s.weight_decay, fused=False),
-                 lr_hint="1e-6 (start)", adaptive=True,
+                 lr_hint="1e-4 (start)", adaptive=True,
                  note="Ostris's v3: one LR per group that climbs while updates agree and backs off when they "
-                      "flip. Start at 1e-6; the schedule and warmup are ignored."),
+                      "flip. It moves only on a steady trend, which small batches rarely give, so start near "
+                      "a normal LoRA LR (1e-4); the schedule and warmup are ignored."),
     OptimizerDef("Prodigy", "Prodigy (auto LR)",
                  lambda p, s: importlib.import_module("prodigyopt").Prodigy(
                      p, lr=s.learning_rate, weight_decay=s.weight_decay, safeguard_warmup=True, use_bias_correction=True),
