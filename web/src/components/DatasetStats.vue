@@ -4,6 +4,7 @@
 // snapshot is kept whenever the dataset changed, so the history shows what each edit did.
 import { computed, onMounted, ref } from 'vue'
 import { engine, type DatasetStats } from '@/api/engine'
+import { ZenTip } from '@nynxz/zenkit-ui'
 import HealthPentagon from './HealthPentagon.vue'
 
 const props = defineProps<{ name: string }>()
@@ -35,54 +36,76 @@ interface Tile {
   key: string
   label: string
   value: string
+  /** a few words under the value */
   sub: string
+  /** what it measures and the full breakdown (the ⓘ) */
+  tip: string
 }
 const tiles = computed<Tile[]>(() => {
   const v = m.value
   if (!stats.value) return []
+  const n = v.pictures ?? 0
+  const reasons = [
+    v.below_target && `${v.below_target} small (short side under 768px)`,
+    v.blurry && `${v.blurry} blurry`,
+    v.bars && `${v.bars} with letterbox bars`,
+    v.flat && `${v.flat} flat`,
+    v.greyscale && `${v.greyscale} greyscale`,
+    v.too_dark && `${v.too_dark} dark`,
+    v.blown_out && `${v.blown_out} blown out`,
+  ].filter(Boolean) as string[]
   const out: Tile[] = [
-    { key: 'captions', label: 'Captions', value: `${v.captioned}/${v.pictures}`, sub: 'have a default caption' },
+    {
+      key: 'captions',
+      label: 'Captions',
+      value: `${v.captioned}/${n}`,
+      sub: 'captioned',
+      tip: 'Pictures with a caption in the default set. Uncaptioned pictures train on an empty caption.',
+    },
     {
       key: 'consistency',
       label: 'Consistency',
       value: `${v.caption_words_median} words`,
-      sub: `median · spread ${pct(v.caption_words_spread)} · ${v.caption_identical} identical · ${v.caption_short} under 5 words`,
+      sub: 'median caption',
+      tip: `How even the captions are. Length spread ${pct(v.caption_words_spread)}, ${v.caption_identical} identical, ${v.caption_short} under 5 words. Uneven or repeated captions teach the model less about each picture.`,
     },
     {
       key: 'quality',
       label: 'Quality',
       value: `${v.image_issues} flagged`,
-      sub: [
-        v.below_target && `${v.below_target} small`,
-        v.blurry && `${v.blurry} blurry`,
-        v.bars && `${v.bars} with bars`,
-        v.flat && `${v.flat} flat`,
-        v.greyscale && `${v.greyscale} greyscale`,
-      ]
-        .filter(Boolean)
-        .join(' · ') || `all sharp and ${v.short_side_median}px+ (median short side)`,
+      sub: reasons.length ? reasons.slice(0, 2).map((r) => r.split(' (')[0]).join(' · ') : 'all clear',
+      tip: `Pictures worth a look before training: ${reasons.join(', ') || 'none'}. Blurry is judged against this set's own median sharpness. Median short side ${v.short_side_median}px. Flags are hints: in a stylised set, bars or darkness can be the look.`,
     },
     {
       key: 'exposure',
       label: 'Exposure',
       value: pct(v.brightness_median),
-      sub: `median brightness · spread ${pct(v.brightness_spread)}${v.too_dark ? ` · ${v.too_dark} dark` : ''}${v.blown_out ? ` · ${v.blown_out} blown out` : ''}`,
+      sub: 'median brightness',
+      tip: `How bright the pictures are. Spread ${pct(v.brightness_spread)} (10th to 90th percentile), ${v.too_dark} dark, ${v.blown_out} blown out. A few very dark or very bright pictures can become part of what the LoRA learns.`,
     },
-    { key: 'uniqueness', label: 'Uniqueness', value: `${v.near_duplicates}`, sub: v.near_duplicates ? 'pictures with a near-identical twin' : 'no near-duplicates' },
+    {
+      key: 'uniqueness',
+      label: 'Uniqueness',
+      value: `${v.near_duplicates}`,
+      sub: v.near_duplicates ? 'near-duplicates' : 'no near-duplicates',
+      tip: 'Pictures with a near-identical twin (a difference hash a few bits apart, whatever the size or compression). Repeats make the LoRA overfit to them.',
+    },
   ]
   if (scores.value.faces != null)
     out.push({
       key: 'faces',
       label: 'Faces',
       value: v.face_one_identity ? `alike ${v.face_likeness_median ?? '–'}` : 'mixed people',
-      sub: `${v.face_one_identity ? 'faces agree (each vs the others; one person ≳ 0.5)' : `faces don't agree (median ${v.face_likeness_median ?? '–'}): likeness for runs is off`} · ${v.face_issues} issue${v.face_issues === 1 ? '' : 's'} · ${v.face_coverage}/${v.pictures} with a face`,
+      sub: `${v.face_coverage}/${n} faces · ${v.face_issues} issue${v.face_issues === 1 ? '' : 's'}`,
+      tip: `How much the faces look like one person: each face against the average of the others (one person is usually above 0.5, strangers below 0.3); median ${v.face_likeness_median ?? '–'}, lowest ${v.face_likeness_min ?? '–'}. ${v.face_one_identity ? 'Runs on this dataset score their samples\' likeness against it.' : 'These faces don\'t agree, so runs don\'t score likeness against them.'} Issues: no face, several people, or a face unlike the rest.`,
     })
   else
     out.push({
       key: 'balance',
       label: 'Balance',
       value: pct(v.aspect_top_share),
-      sub: 'share in the most common aspect ratio · run Faces for a likeness check',
+      sub: 'in one aspect ratio',
+      tip: 'How evenly the pictures spread over aspect ratios: one ratio holding most of a mixed set skews the buckets. Turn Faces on for a likeness score instead (character datasets).',
     })
   return out
 })
@@ -119,7 +142,7 @@ function spark(key: string) {
     <div class="tiles">
       <div v-for="t in tiles" :key="t.key" class="tile">
         <div class="t-head">
-          <span class="t-label">{{ t.label }}</span>
+          <span class="t-label">{{ t.label }} <ZenTip :text="t.tip" :label="`About ${t.label}`" /></span>
           <span v-if="scores[t.key] != null" class="t-score mono" :title="`Score ${Math.round(scores[t.key]! * 100)} of 100`">{{ Math.round(scores[t.key]! * 100) }}</span>
         </div>
         <div class="t-value">{{ t.value }}</div>
@@ -211,7 +234,14 @@ function spark(key: string) {
 .t-sub {
   font-size: 11px;
   line-height: 1.4;
-  min-height: 2.8em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.t-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 .t-foot {
   display: flex;
