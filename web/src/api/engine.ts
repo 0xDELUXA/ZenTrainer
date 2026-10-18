@@ -193,6 +193,8 @@ export interface CheckpointRow {
   lora_name: string
   /** bytes on disk; null if the file is gone */
   size?: number | null
+  /** its resumable training state (optimizer, RNG...), if one was kept */
+  state?: string | null
 }
 
 export interface SampleRow {

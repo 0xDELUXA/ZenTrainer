@@ -31,6 +31,26 @@ WEB_DIST = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
 RETRYABLE = ("error", "stopped", "interrupted", "rejected")
 
 
+def _keep_later(store, run_id: str, step: int) -> None:
+    """Before a resume retrains past `step`, move the LoRAs and sample pictures saved after it into
+    a `replaced-<time>` folder beside them: retraining writes the same file names, and those files
+    are someone's results until they say otherwise."""
+    import shutil
+
+    import folder_paths
+
+    tag = f"replaced-{time.strftime('%Y%m%d-%H%M%S')}"
+    out = Path(folder_paths.get_output_directory())
+    files = [Path(c["path"]) for c in store.read(run_id, "checkpoints") if c.get("step", 0) > step and c.get("path")]
+    files += [out / r.get("subfolder", "") / r["filename"] for r in store.read(run_id, "samples")
+              if r.get("step", 0) > step and r.get("filename") and r.get("type", "output") == "output"]
+    for f in files:
+        if f.is_file():
+            keep = f.parent / tag / f.name
+            keep.parent.mkdir(exist_ok=True)
+            shutil.move(str(f), str(keep))
+
+
 def _bad(message: str, status: int = 400, **extra) -> web.Response:
     return web.json_response({"error": message, **extra}, status=status)
 
@@ -363,6 +383,8 @@ def register(server) -> None:
         return web.json_response({"runs": state.store().list()})
 
     def _with_size(c: dict) -> dict:
+        # a cleaned-up training state can't be resumed from: say so rather than offer it
+        c = {**c, "state": c["state"] if c.get("state") and Path(c["state"]).is_file() else None}
         try:
             return {**c, "size": Path(c["path"]).stat().st_size}
         except (OSError, KeyError):
@@ -463,6 +485,11 @@ def register(server) -> None:
                 return _bad("that checkpoint has no saved training state", 400)
         ckpt = max(resumable, key=lambda c: c["step"]) if resumable else None
         step = ckpt["step"] if ckpt else 0
+        if ckpt is None and (store.read(run_id, "checkpoints") or store.read(run_id, "metrics")):
+            # starting over would drop its history and retrain over its saved LoRAs and samples
+            return _bad("this run has no saved training state to continue from (Resume states was off, or "
+                        "they were cleaned up). Duplicate it to train again from the start.", 409)
+        _keep_later(store, run_id, step)
         for stream in ("metrics", "samples", "checkpoints", "validation", "likeness"):
             store.truncate(run_id, stream, step)
         store.update(run_id, resume_from=ckpt["path"] if ckpt else None,

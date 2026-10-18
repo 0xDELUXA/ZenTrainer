@@ -625,10 +625,18 @@ async function send(cmd: Command, args?: Record<string, unknown>) {
 const resumable = computed(() => ['error', 'stopped', 'interrupted', 'rejected'].includes(status.value ?? ''))
 // ended before it trained a step: its settings can still change (the backend requeues it)
 const retryable = computed(() => resumable.value && !detail.value?.metrics.length && !detail.value?.checkpoints.length)
+// the newest checkpoint that kept its training state: where Resume continues from
 const resumePoint = computed(() => {
-  const c = detail.value?.checkpoints ?? []
+  const c = (detail.value?.checkpoints ?? []).filter((x) => x.state)
   return c.length ? Math.max(...c.map((x) => x.step)) : 0
 })
+// trained, but no state left to continue from: only Duplicate starts it again
+const canResume = computed(() => resumable.value && (!!resumePoint.value || retryable.value))
+async function resumeFrom(c: CheckpointRow) {
+  const later = (detail.value?.checkpoints ?? []).filter((x) => x.step > c.step).length
+  if (later && !confirm(`Go back to step ${c.step} and train on from there? The ${later} checkpoint${later === 1 ? '' : 's'} after it, and their samples, move to a "replaced" folder beside them (kept, not deleted).`)) return
+  await resume(c.path)
+}
 async function resume(checkpoint?: string) {
   busy.value = 'resume'
   error.value = null
@@ -684,8 +692,8 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
             <ZenButton variant="danger" icon="mdi mdi-stop" :disabled="!!busy" @click="send('stop')">Stop</ZenButton>
           </template>
           <RouterLink v-if="retryable" :to="`/runs/new?edit=${id}`"><ZenButton icon="mdi mdi-pencil-outline" title="Change its settings, then it goes back in the queue">Edit &amp; retry</ZenButton></RouterLink>
-          <RouterLink v-else-if="resumable" :to="`/runs/new?edit=${id}`"><ZenButton icon="mdi mdi-tune-variant" title="Change memory, samples, learning rate or length, then resume from its last state">Edit &amp; resume</ZenButton></RouterLink>
-          <ZenButton v-if="resumable" variant="primary" icon="mdi mdi-play-circle-outline" :disabled="!!busy" @click="resume()">
+          <RouterLink v-else-if="canResume" :to="`/runs/new?edit=${id}`"><ZenButton icon="mdi mdi-tune-variant" title="Change memory, samples, learning rate or length, then resume from its last state">Edit &amp; resume</ZenButton></RouterLink>
+          <ZenButton v-if="canResume" variant="primary" icon="mdi mdi-play-circle-outline" :disabled="!!busy" @click="resume()">
             {{ resumePoint ? `Resume from ${resumePoint}` : 'Restart' }}
           </ZenButton>
           <ZenButton icon="mdi mdi-content-copy" title="New run with these settings" @click="router.push(`/runs/new?from=${id}`)">Duplicate</ZenButton>
@@ -979,7 +987,7 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
                 </span>
                 <span class="ck-acts">
                   <RouterLink class="ib" :to="`/apps/test-lora?run=${id}&lora=${encodeURIComponent(c.lora_name)}`" title="Test: try it in Test LoRA, on this run's model"><i class="mdi mdi-flask-outline" /></RouterLink>
-                  <button v-if="resumable && !c.final" class="ib" title="Resume this run from here, optimizer state and all" @click="resume(c.path)"><i class="mdi mdi-play-outline" /></button>
+                  <button v-if="resumable && !c.final && c.state" class="ib" title="Resume this run from here, optimizer state and all" @click="resumeFrom(c)"><i class="mdi mdi-play-outline" /></button>
                   <RouterLink v-else class="ib" :to="`/runs/new?from=${id}&init=${encodeURIComponent(c.lora_name)}`" title="Train more: a new run with these settings that starts from this LoRA"><i class="mdi mdi-fast-forward-outline" /></RouterLink>
                   <button class="ib" :title="copied === c.lora_name ? 'Copied' : `Copy LoRA name: ${c.lora_name}`" @click="copy(c.lora_name)">
                     <i :class="copied === c.lora_name ? 'mdi mdi-check' : 'mdi mdi-content-copy'" />

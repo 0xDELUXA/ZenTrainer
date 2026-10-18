@@ -12,12 +12,15 @@ Files rather than a database so a run can be inspected, copied or deleted by han
 from __future__ import annotations
 
 import json
+import logging
 import os
 import secrets
 import threading
 import time
 from pathlib import Path
 from typing import Any
+
+from . import safeio
 
 _lock = threading.Lock()
 
@@ -39,7 +42,7 @@ class RunStore:
     def create(self, run_id: str, spec: dict[str, Any], prompt_id: str | None = None) -> dict[str, Any]:
         d = self.dir(run_id)
         d.mkdir(parents=True, exist_ok=False)
-        (d / "spec.json").write_text(json.dumps(spec, indent=2))
+        safeio.write_json(d / "spec.json", spec)
         now = time.time()
         meta = {
             "run_id": run_id,
@@ -56,7 +59,7 @@ class RunStore:
     def set_spec(self, run_id: str, spec: dict[str, Any]) -> dict[str, Any]:
         """Replace a run's spec (only for a run that hasn't started: the caller checks)."""
         with _lock:
-            (self.dir(run_id) / "spec.json").write_text(json.dumps(spec, indent=2))
+            safeio.write_json(self.dir(run_id) / "spec.json", spec)
             meta = self.meta(run_id)
             meta.update(name=spec.get("name", run_id), updated=time.time())
             self._write_meta(run_id, meta)
@@ -92,21 +95,28 @@ class RunStore:
     def truncate(self, run_id: str, stream: str, keep_through_step: int) -> None:
         """Drop rows after a step (they're about to be re-trained on resume)."""
         rows = [r for r in self.read(run_id, stream) if r.get("step", 0) <= keep_through_step]
-        with _lock, open(self.dir(run_id) / f"{stream}.jsonl", "w") as f:
-            f.writelines(json.dumps(r) + "\n" for r in rows)
+        self.rewrite(run_id, stream, rows)
 
     def rewrite(self, run_id: str, stream: str, rows: list[dict[str, Any]]) -> None:
-        with _lock, open(self.dir(run_id) / f"{stream}.jsonl", "w") as f:
-            f.writelines(json.dumps(r) + "\n" for r in rows)
+        # swapped in whole: a crash or a full disk mid-write leaves the old stream, never an empty one
+        with _lock:
+            safeio.write_text(self.dir(run_id) / f"{stream}.jsonl", "".join(json.dumps(r) + "\n" for r in rows))
 
     def read(self, run_id: str, stream: str) -> list[dict[str, Any]]:
         p = self.dir(run_id) / f"{stream}.jsonl"
         if not p.is_file():
             return []
-        return [json.loads(line) for line in p.read_text().splitlines() if line.strip()]
+        out = []
+        for line in p.read_text().splitlines():
+            if not line.strip():
+                continue
+            try:
+                out.append(json.loads(line))
+            except ValueError:
+                # a line cut short (the disk filled, or the trainer is mid-append): skip it, keep the rest
+                logging.debug("[ZenTrainer] %s/%s.jsonl: skipped an unreadable line", run_id, stream)
+        return out
 
     def _write_meta(self, run_id: str, meta: dict[str, Any]) -> None:
         p = self.dir(run_id) / "run.json"
-        tmp = p.with_suffix(".tmp")
-        tmp.write_text(json.dumps(meta, indent=2))
-        tmp.replace(p)
+        safeio.write_json(p, meta)

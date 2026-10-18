@@ -10,6 +10,7 @@ import json
 import re
 from pathlib import Path
 
+from . import safeio
 from .harness import video
 from .harness.data import IMAGE_EXTS, MASK_SUFFIXES, MEDIA_EXTS, SET_NAME, caption_path, caption_sets, find_mask, scan
 
@@ -169,12 +170,10 @@ def set_muted(name: str, set_name: str, paths: list[str], on: bool) -> dict[str,
     cur = mutes.setdefault(set_name, set())
     cur.update(paths) if on else cur.difference_update(paths)
     f = d / MUTES_FILE
-    try:
-        data = json.loads(f.read_text())
-    except (OSError, ValueError):
-        data = {}
+    data = safeio.read_json(f, {})
+    data = data if isinstance(data, dict) else {}
     data["muted"] = {s: sorted(v) for s, v in mutes.items() if v}
-    f.write_text(json.dumps(data, indent=2))
+    safeio.write_json(f, data)
     return data["muted"]
 
 
@@ -195,8 +194,8 @@ def _settings_file() -> Path:
 
 def get_settings(name: str) -> dict:
     try:
-        saved = json.loads(_settings_file().read_text()).get(name, {})
-    except (OSError, ValueError, ImportError):  # ImportError: outside ComfyUI (tests, tools)
+        saved = safeio.read_json(_settings_file(), {}).get(name, {})
+    except (OSError, ImportError, AttributeError):  # ImportError: outside ComfyUI (tests, tools)
         saved = {}
     return {**DEFAULT_SETTINGS, **{k: v for k, v in saved.items() if k in DEFAULT_SETTINGS}}
 
@@ -204,14 +203,12 @@ def get_settings(name: str) -> dict:
 def put_settings(name: str, changes: dict) -> dict:
     folder(name)  # must exist
     f = _settings_file()
-    try:
-        allx = json.loads(f.read_text())
-    except (OSError, ValueError):
-        allx = {}
+    allx = safeio.read_json(f, {})
+    allx = allx if isinstance(allx, dict) else {}
     cur = {**get_settings(name), **{k: type(v)(changes[k]) for k, v in DEFAULT_SETTINGS.items() if k in changes}}
     cur["caption_subject"] = cur["caption_subject"].strip()
     allx[name] = cur
-    f.write_text(json.dumps(allx, indent=2))
+    safeio.write_json(f, allx)
     return cur
 
 
@@ -219,7 +216,7 @@ def set_caption(name: str, rel: str, caption: str, caption_ext: str = ".txt", se
     img = _inside(folder(name), rel)
     if img.suffix.lower() not in MEDIA_EXTS or not img.is_file():
         raise DatasetError(f"{rel!r} is not an image or video in this dataset")
-    caption_path(img, _set(set_name), caption_ext).write_text(caption.strip() + "\n", encoding="utf-8")
+    safeio.write_text(caption_path(img, _set(set_name), caption_ext), caption.strip() + "\n")
 
 
 def bulk(name: str, op: str, text: str = "", find: str = "", caption_ext: str = ".txt", set_name: str = "default") -> int:
@@ -249,9 +246,18 @@ def delete(name: str, rel: str, caption_ext: str = ".txt") -> None:
         raise DatasetError(f"{rel!r} is not an image or video in this dataset")
     mask = find_mask(img)
     sets = caption_sets(img, caption_ext)
+    # files another picture also owns stay: `foo.jpg` + `foo.png` share foo.txt and the mask,
+    # and `frame.001.png`'s own caption, frame.001.txt, looks like a caption set of frame.png
+    others = [p for p in img.parent.iterdir() if p != img and p.suffix.lower() in MEDIA_EXTS and p.is_file()]
+    shared = any(o.stem == img.stem for o in others)
+    theirs = {caption_path(o, "default", caption_ext) for o in others}
     img.unlink()
+    if shared:
+        return
     for set_name in sets:
-        caption_path(img, set_name, caption_ext).unlink(missing_ok=True)
+        cap = caption_path(img, set_name, caption_ext)
+        if cap not in theirs:
+            cap.unlink(missing_ok=True)
     if mask:
         mask.unlink(missing_ok=True)
 
@@ -265,7 +271,8 @@ def create(name: str) -> None:
 
 def save_upload(name: str, filename: str, data: bytes) -> str:
     """An image, a caption file, or a mask (`<stem>-masklabel.png` / `<stem>.mask.png`,
-    stored as `_masks/<stem>.png`), written into the dataset folder."""
+    stored as `_masks/<stem>.png`), written into the dataset folder. Never over an existing
+    file: the same bytes again are skipped, different ones get `name (2).ext`."""
     base = Path(filename).name
     p = Path(base)
     if p.suffix.lower() not in MEDIA_EXTS | {".txt"} or base.startswith("."):
@@ -277,7 +284,11 @@ def save_upload(name: str, filename: str, data: bytes) -> str:
         target = _inside(d, f"_masks/{stem}{p.suffix.lower()}")
     else:
         target = _inside(d, base)
-    target.write_bytes(data)
+    if target.exists():
+        if target.is_file() and target.stat().st_size == len(data) and target.read_bytes() == data:
+            return str(target.relative_to(d))  # already there
+        target = safeio.free_name(target)
+    safeio.write_bytes(target, data)
     return str(target.relative_to(d))
 
 
@@ -325,6 +336,7 @@ def split_videos(name: str, seconds: float = 3.0, count: int = 20, longer_than: 
         clips += len(video.split(it.path, it.path.parent, seconds, count, stem=stem))
         keep = d / "_long" / it.path.relative_to(d)
         keep.parent.mkdir(parents=True, exist_ok=True)
+        keep = safeio.free_name(keep)  # an earlier original of the same name stays
         it.path.rename(keep)
         moved.append(str(keep.relative_to(d)))
     return {"clips": clips, "moved": moved}
