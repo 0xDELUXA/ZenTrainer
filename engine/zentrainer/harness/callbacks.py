@@ -375,7 +375,8 @@ class Samples(Callback):
                         ref, it = _control(t, it, comp)
                         from .edit import with_refs
 
-                        pos, neg = with_refs(pos, [ref]), with_refs(neg, [ref])
+                        how = getattr(t, "edit_method", None)
+                        pos, neg = with_refs(pos, [ref], how), with_refs(neg, [ref], how)
                     t_lat = _latent_frames(vae, it.frames)
                     latent = torch.zeros([1, channels] + ([t_lat] if t_lat else []) + [it.height // comp, it.width // comp])
                     latent = comfy.sample.fix_empty_latent_channels(model, latent)

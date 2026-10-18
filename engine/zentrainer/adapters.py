@@ -64,6 +64,9 @@ CURATED = [
     Adapter("ostris-krea2-turbo", "Ostris Krea 2 Turbo adapter", "ostris/krea2_turbo_training_adapter",
             "krea2_turbo_training_adapter_v1.safetensors", ["krea-2"],
             "Train on Krea 2 Turbo without breaking its few-step sampling.", size=228587504),
+    Adapter("nynxz-nk2e-v03", "NK2E v0.3 edit base (Krea 2)", "nynxz/NK2E", "comfy/v0.3/NK2E-v0.3.safetensors",
+            ["krea-2"], "Nynxz's in-context edit LoRA: train a specialist edit (Edit training on) on top of it, "
+            "then use both together.", size=385418784),
     Adapter("ostris-zimage-turbo-v2", "Ostris Z-Image Turbo adapter v2", "ostris/zimage_turbo_training_adapter",
             "zimage_turbo_training_adapter_v2.safetensors", ["z-image-turbo"],
             "Train on Z-Image Turbo without breaking its few-step sampling.", size=340194488),

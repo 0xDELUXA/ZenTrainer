@@ -44,6 +44,9 @@ class DatasetSpec:
     # (passed as reference latents), the caption is the instruction. Models that take reference
     # images (Flux 3 Klein, Flux 2, Kontext, Qwen Image Edit...).
     edit: bool = False
+    # how the input picture joins the sequence: "" = the model's own way ("index" for models
+    # without one, like Krea 2), or "index", "offset", "index_timestep_zero"
+    edit_method: str = ""
     caption_dropout: float = 0.0
     # Caption sets: <img>.txt is "default", <img>.<set>.txt the others (tags, nl, bbox, ...).
     # Train on one set, or mix several: each step picks one of the image's sets at random.
@@ -327,6 +330,8 @@ class TrainSpec:
             raise SpecError("memory.tread is a share of the video tokens, from 0 (off) to below 1")
         if not 0.0 <= self.objective.uniform_mix <= 1.0:
             raise SpecError("objective.uniform_mix is a share between 0 and 1")
+        if self.dataset.edit_method not in ("", "index", "offset", "index_timestep_zero", "negative_index", "uxo"):
+            raise SpecError("dataset.edit_method is one of index, offset, index_timestep_zero (or empty for the model's own)")
         if not 0.0 <= self.optim.ema < 1.0:
             raise SpecError("optim.ema is a decay between 0 (off) and below 1, e.g. 0.98")
         if self.optim.lora_plus < 0:

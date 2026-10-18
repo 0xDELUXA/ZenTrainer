@@ -25,12 +25,26 @@ def takes_references(model) -> bool:
     return False
 
 
-def with_refs(conditioning: list, refs: list[torch.Tensor]) -> list:
+def method(model, chosen: str = "") -> str | None:
+    """How the references join the sequence ("index", "offset", "index_timestep_zero"...): the
+    spec's choice, else the model's own default; a model without one (Krea 2) would ignore them,
+    so it gets "index" (each reference tagged on the position axis the image doesn't use, the
+    NK2E / Kontext-style scheme)."""
+    if chosen:
+        return chosen
+    dm = getattr(model, "diffusion_model", None)
+    own = getattr(dm, "default_ref_method", None) or getattr(getattr(dm, "params", None), "default_ref_method", None)
+    return None if own else "index"
+
+
+def with_refs(conditioning: list, refs: list[torch.Tensor], ref_method: str | None = None) -> list:
     """A copy of a CLIP conditioning ([[cond, {...}]]) carrying these raw latents, as the
     ReferenceLatent node adds them (batch dim on, appended to any already there)."""
     out = []
     for cond, opts in conditioning:
         opts = dict(opts)
         opts["reference_latents"] = list(opts.get("reference_latents") or []) + [r if r.ndim == 4 else r[None] for r in refs]
+        if ref_method:
+            opts["reference_latents_method"] = ref_method
         out.append([cond, opts])
     return out

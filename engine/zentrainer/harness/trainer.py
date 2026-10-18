@@ -235,8 +235,9 @@ class Trainer:
         self.dataset = data.build(s.dataset, _Lazy(lambda: self.models.clip), self.models.vae, root, cache, encoder_id,
                                   progress=lambda i, n, msg: self._status("loading", message=f"{msg} ({i}/{n})"),
                                   audio_vae=self.models.audio_vae)
+        self.edit_method = None
         if s.dataset.edit:
-            from .edit import takes_references
+            from .edit import method, takes_references
 
             if not takes_references(patcher.model):
                 raise ValueError(f"{type(patcher.model).__name__} doesn't take reference images, so it can't train "
@@ -244,7 +245,9 @@ class Trainer:
             pairs = sum(sm.refs is not None for sm in self.dataset.samples)
             if not pairs:
                 raise ValueError("edit training, but no image has a <name>_control picture beside it")
-            logging.info("[ZenTrainer] edit training: %d of %d images have an input picture", pairs, len(self.dataset.samples))
+            self.edit_method = method(patcher.model, s.dataset.edit_method)
+            logging.info("[ZenTrainer] edit training: %d of %d images have an input picture (references: %s)",
+                         pairs, len(self.dataset.samples), self.edit_method or "the model's own")
         self.batches = data.Batches(self.dataset, s.optim.batch_size, s.seed)
 
         if s.memory.training_dtype != "fp32":
@@ -529,7 +532,7 @@ class Trainer:
             if sample.refs:
                 from .edit import with_refs
 
-                cond = with_refs(cond, sample.refs)
+                cond = with_refs(cond, sample.refs, self.edit_method)
             with torch.no_grad():
                 self._conds[key] = self.denoiser.prepare(cond, x0[:1], self.device, shapes)
         return self._conds[key]
