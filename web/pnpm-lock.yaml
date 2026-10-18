@@ -12,11 +12,11 @@ importers:
         specifier: ^7.4.47
         version: 7.4.47
       '@nynxz/zenkit-client':
-        specifier: ^0.3.2
-        version: 0.3.2(vue@3.5.42(typescript@5.9.3))
+        specifier: ^0.4.0
+        version: 0.4.0(vue@3.5.42(typescript@5.9.3))
       '@nynxz/zenkit-ui':
-        specifier: link:../../comfyui_nodepacks/ZenKit/packages/ui
-        version: link:../../comfyui_nodepacks/ZenKit/packages/ui
+        specifier: ^0.4.0
+        version: 0.4.0(@nynxz/zenkit-client@0.4.0(vue@3.5.42(typescript@5.9.3)))(vue@3.5.42(typescript@5.9.3))
       vue:
         specifier: 3.5.42
         version: 3.5.42(typescript@5.9.3)
@@ -225,10 +225,19 @@ packages:
     os: [linux]
     libc: [glibc]
 
-  '@nynxz/zenkit-client@0.3.2':
-    resolution: {integrity: sha512-13rzskElXoN3zubgL0xTlSAu7ukeOXp/22NC0TA8nWkAyar+BfDxGErCbty3Cg1R4JepyPRgZ7PiKS61hGH1pw==}
+  '@nynxz/zenkit-client@0.4.0':
+    resolution: {integrity: sha512-KSqfFa7hc054+oBmSyfiMBl22LivKGKanV9Ol8vxYmLuRMTd4Y44H0eOvyNFSPoGZXFNFpWo9aIt8SMNoI13tA==}
     peerDependencies:
       vue: ^3.5.0
+
+  '@nynxz/zenkit-ui@0.4.0':
+    resolution: {integrity: sha512-pqsMoOFJBuR58yd9l0jAZY3TplWtupYnmg2SoEK8T/ipgJuhfhcyJN5yhAZ+NGRJyHe3i0BeWKfe6iqD7cCOlg==}
+    peerDependencies:
+      '@nynxz/zenkit-client': ^0.4.0
+      vue: ^3.5.0
+    peerDependenciesMeta:
+      '@nynxz/zenkit-client':
+        optional: true
 
   '@rollup/rollup-android-arm-eabi@4.64.7':
     resolution: {integrity: sha512-GFF2tHk0NqYVObrK0+/ps/LEXsV/v2q6Lyiy7mZr+Ej24fpQScvqK2ziz9NHeEQYnKWKym38Ml7dZbPtC9tuAw==}
@@ -666,9 +675,15 @@ snapshots:
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     optional: true
 
-  '@nynxz/zenkit-client@0.3.2(vue@3.5.42(typescript@5.9.3))':
+  '@nynxz/zenkit-client@0.4.0(vue@3.5.42(typescript@5.9.3))':
     dependencies:
       vue: 3.5.42(typescript@5.9.3)
+
+  '@nynxz/zenkit-ui@0.4.0(@nynxz/zenkit-client@0.4.0(vue@3.5.42(typescript@5.9.3)))(vue@3.5.42(typescript@5.9.3))':
+    dependencies:
+      vue: 3.5.42(typescript@5.9.3)
+    optionalDependencies:
+      '@nynxz/zenkit-client': 0.4.0(vue@3.5.42(typescript@5.9.3))
 
   '@rollup/rollup-android-arm-eabi@4.64.7':
     optional: true

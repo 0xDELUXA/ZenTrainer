@@ -97,7 +97,6 @@ export const RECIPES: Recipe[] = [
     photos: style,
     cover: { from: '#a855f7', to: '#1e1b4b', icon: 'mdi mdi-palette-outline' },
     logo: '/templates/logo/krea.jpg',
-    thumb: { src: '/templates/image_krea2_turbo_int8_image_style_reference-1.webp' },
     files: {
       diffusion_models: ['krea2_raw_int8_convrot.safetensors', 'krea2_raw_bf16.safetensors'],
       text_encoders: ['qwen3vl_4b_int8_convrot.safetensors', 'qwen3vl_4b_fp8_scaled.safetensors'],
