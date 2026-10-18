@@ -263,12 +263,18 @@ onUnmounted(() => {
 })
 
 // ---- edit pairs -----------------------------------------------------------------------------
+// the remembered view, except Pairs on a dataset without any (it shows the grid there)
+const layout = computed(() => (view.value === 'pairs' && !counts.value.pairs ? 'grid' : view.value))
 const isVideoPath = (p: string) => /\.(mp4|webm|mov|mkv)$/i.test(p)
 // an input file sits beside its result: same folder, so /view takes the result's subfolder
 const ctrlView = (it: DatasetItem, p: string) =>
   `${viewUrl({ filename: p.split('/').at(-1)!, subfolder: it.subfolder, type: 'input' })}&v=${bust.value}`
 const aspect = (it: DatasetItem) => (it.width && it.height ? `${it.width} / ${it.height}` : '1')
 const isSimplePair = (it: DatasetItem) => it.controls?.length === 1 && it.kind !== 'video' && !isVideoPath(it.controls[0]!)
+
+// the lightbox's other caption sets: a few lines each until clicked open (no inner scrollbars)
+const openSets = reactive(new Set<string>())
+const toggleSet = (st: string) => (openSets.has(st) ? openSets.delete(st) : openSets.add(st))
 
 // what holding Shift over an item shows: the file itself (a video plays), not its thumbnail
 const full = (it: DatasetItem) => `${viewUrl({ ...it, type: 'input' })}&v=${bust.value}`
@@ -330,11 +336,11 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
       </template>
       <template v-else>
       <div class="seg" role="tablist" aria-label="View">
-        <button :class="{ on: view === 'grid' }" title="Grid" @click="view = 'grid'"><i class="mdi mdi-view-grid-outline" /></button>
-        <button :class="{ on: view === 'list' }" title="Table" @click="view = 'list'"><i class="mdi mdi-view-list-outline" /></button>
-        <button v-if="counts.pairs" :class="{ on: view === 'pairs' }" title="Edit pairs: inputs → result, with the instruction" @click="view = 'pairs'"><i class="mdi mdi-swap-horizontal" /></button>
+        <button :class="{ on: layout === 'grid' }" title="Grid" @click="view = 'grid'"><i class="mdi mdi-view-grid-outline" /></button>
+        <button :class="{ on: layout === 'list' }" title="Table" @click="view = 'list'"><i class="mdi mdi-view-list-outline" /></button>
+        <button v-if="counts.pairs" :class="{ on: layout === 'pairs' }" title="Edit pairs: inputs → result, with the instruction" @click="view = 'pairs'"><i class="mdi mdi-swap-horizontal" /></button>
       </div>
-      <template v-if="view === 'grid' || view === 'pairs'">
+      <template v-if="layout === 'grid' || layout === 'pairs'">
         <label class="zoom" title="Card size">
           <i class="mdi mdi-image-size-select-small" />
           <ZenSlider v-model="zoom" :min="120" :max="420" :step="10" />
@@ -395,7 +401,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
     </ZenEmpty>
 
     <!-- grid -->
-    <div v-else-if="view === 'grid'" class="grid" :style="{ '--card': `${zoom}px` }">
+    <div v-else-if="layout === 'grid'" class="grid" :style="{ '--card': `${zoom}px` }">
       <article
         v-for="(it, i) in shown"
         :key="it.path"
@@ -427,7 +433,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
     </div>
 
     <!-- edit pairs: every input, then the result, the instruction beside them -->
-    <div v-else-if="view === 'pairs'" class="pairs" :style="{ '--ph': `${zoom}px` }">
+    <div v-else-if="layout === 'pairs'" class="pairs" :style="{ '--ph': `${zoom}px` }">
       <article v-for="(it, i) in shown" :key="it.path" class="pair card" :class="{ sel: selected.has(it.path), dirty: drafts[k(it)] != null }">
         <label class="check" :class="{ on: selected.has(it.path) }" @click.prevent="toggleSelect(it, i, $event)">
           <i :class="selected.has(it.path) ? 'mdi mdi-checkbox-marked' : 'mdi mdi-checkbox-blank-outline'" />
@@ -540,7 +546,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
               <span class="spacer" />
               <button class="mini" :title="`Copy this into “${activeSet}”`" @click="useCaption(shown[index], text)">Use this</button>
             </div>
-            <p>{{ text }}</p>
+            <p :class="{ open: openSets.has(st) }" :title="openSets.has(st) ? '' : 'Show all'" @click="toggleSet(st)">{{ text }}</p>
           </div>
           <div v-if="shown[index].mask" class="mask-info">
             <img :src="thumb({ path: shown[index].mask! }, 256)" alt="" />
@@ -716,9 +722,15 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
   font-size: 12px;
   line-height: 1.45;
   color: var(--zen-muted);
-  max-height: 110px;
-  overflow: auto;
-  scrollbar-width: thin;
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  cursor: pointer;
+}
+.other-set p.open {
+  display: block;
+  cursor: default;
 }
 .other-head {
   display: flex;
@@ -1120,7 +1132,9 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
   background: transparent;
   color: var(--zen-text);
 }
+/* longer than 4 lines: the end fades out, no scrollbar until it's clicked into (focus opens it up) */
 .cap-edit.clamped:not(:focus) {
+  overflow-y: hidden;
   mask-image: linear-gradient(to bottom, #000 calc(100% - 2.2em), transparent calc(100% - 4px));
 }
 .cap-edit:hover {
