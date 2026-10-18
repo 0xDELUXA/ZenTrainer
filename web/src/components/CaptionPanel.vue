@@ -22,7 +22,7 @@ const loraLink = ref('')
 const loraChoices = ref<{ file: string; size: number | null }[]>([])
 const loraNote = ref('')
 try {
-  loras.value = JSON.parse(localStorage.getItem(`${PREFS}.loras`) ?? '[]')
+  loras.value = JSON.parse(localStorage.getItem("zentrainer.caption.loras") ?? '[]')
 } catch {
   // storage blocked
 }
@@ -30,7 +30,7 @@ watch(
   loras,
   (v) => {
     try {
-      localStorage.setItem(`${PREFS}.loras`, JSON.stringify(v))
+      localStorage.setItem("zentrainer.caption.loras", JSON.stringify(v))
     } catch {
       // storage blocked
     }
