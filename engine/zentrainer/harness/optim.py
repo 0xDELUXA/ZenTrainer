@@ -218,6 +218,6 @@ def set_mode(opt: torch.optim.Optimizer, training: bool) -> None:
 
 def set_lr(opt: torch.optim.Optimizer, sched, lr: float) -> None:
     """Change the base LR mid-run; the schedule keeps shaping it."""
-    sched.base_lrs = [lr for _ in sched.base_lrs]
-    for group, mult in zip(opt.param_groups, [f(sched.last_epoch) for f in sched.lr_lambdas]):
-        group["lr"] = lr * mult
+    sched.base_lrs = [lr * g.get("lr_mult", 1.0) for g in opt.param_groups]  # LoRA+ keeps its ratio
+    for group, base, f in zip(opt.param_groups, sched.base_lrs, sched.lr_lambdas):
+        group["lr"] = base * f(sched.last_epoch)

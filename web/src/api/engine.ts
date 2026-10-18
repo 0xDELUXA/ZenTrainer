@@ -57,6 +57,8 @@ export interface TrainSpec {
     steps: number
     batch_size: number
     grad_accumulation_steps: number
+    /** LoRA+: up matrices learn this many times faster (0 = off) */
+    lora_plus?: number
   }
   objective: {
     loss: 'mse' | 'l1' | 'huber' | 'smooth_l1'
@@ -147,6 +149,8 @@ export interface MetricRow {
   train_time?: number
   step_time?: number
   it_s: number
+  /** the step's peak VRAM (bytes, PyTorch allocations) */
+  vram_peak?: number
 }
 
 export interface CheckpointRow {

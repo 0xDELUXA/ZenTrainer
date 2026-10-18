@@ -60,6 +60,11 @@ class Metrics(Callback):
             "step_time": round(dt, 4),
             "it_s": round(self._rate, 3),
         }
+        if torch.cuda.is_available():
+            # the step's peak VRAM (PyTorch's allocations: weights resident, activations, LoRA,
+            # optimizer): what the offloading headroom has to cover
+            row["vram_peak"] = torch.cuda.max_memory_allocated()
+            torch.cuda.reset_peak_memory_stats()
         t.emit(events.METRICS, row)
         if t.store:
             t.store.append(t.run_id, "metrics", row)

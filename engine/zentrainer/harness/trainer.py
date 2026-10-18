@@ -256,7 +256,8 @@ class Trainer:
             logging.info("[ZenTrainer] training adapter %s on %d layers (off for samples and the saved LoRA)",
                          s.network.training_adapter, len(assist))
         self.network = Network(patcher, s.network, self.device, bypass=bypass, init_weights=init, assist=assist)
-        self.optimizer, self.scheduler = optim.build(self.network.trainable(), s.optim)
+        self.optimizer, self.scheduler = optim.build(
+            self.network.param_groups(s.optim.learning_rate, s.optim.lora_plus), s.optim)
         self.objective = Objective(s.objective)
         self.denoiser = Denoiser(patcher, attention_override(s.memory.attention))
         self.streams = Streams(patcher.model)

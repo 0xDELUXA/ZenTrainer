@@ -228,6 +228,7 @@ const statGroups = computed((): { title: string; items: Stat[] }[] => {
         { k: 'Total', v: dur(wall.value) }, // start to now, loading and sampling included
         { k: 'Speed', v: `${l?.it_s?.toFixed(2) ?? '–'} it/s` },
         { k: 'Epoch', v: String(l?.epoch ?? '–') },
+        ...(l?.vram_peak ? [{ k: 'Peak VRAM', v: `${gb(l.vram_peak)} GB` }] : []),
       ],
     },
     {

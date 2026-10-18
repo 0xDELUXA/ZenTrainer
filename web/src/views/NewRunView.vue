@@ -598,6 +598,13 @@ async function start(position: 'next' | 'end' = 'next') {
                 <ZenField label="Warmup steps" stack><ZenNumber v-model="spec.optim.warmup_steps" :min="0" :step="10" :precision="0" /></ZenField>
                 <ZenField label="Batch size" stack><ZenNumber v-model="spec.optim.batch_size" :min="1" :step="1" :precision="0" /></ZenField>
                 <ZenField label="Grad accumulation" stack><ZenNumber v-model="spec.optim.grad_accumulation_steps" :min="1" :step="1" :precision="0" /></ZenField>
+                <ZenField label="LoRA+" stack tip="The LoRA's up matrices learn this many times faster than the down ones: trains faster at the same stability. 4 is a safe start, the paper uses 16. Off for LoHa/LoKr/OFT">
+                  <div class="sw-row">
+                    <ZenSwitch :model-value="(spec.optim.lora_plus ?? 0) > 1" @update:model-value="spec.optim.lora_plus = $event ? 4 : 0" />
+                    <ZenNumber v-if="(spec.optim.lora_plus ?? 0) > 1" :model-value="spec.optim.lora_plus ?? 4" :min="1.5" :max="32" :step="1" :precision="1" @update:model-value="spec.optim.lora_plus = $event" />
+                    <span v-else class="sw-state">Off</span>
+                  </div>
+                </ZenField>
                 <ZenField label="Weight decay" stack><ZenNumber v-model="spec.optim.weight_decay" :min="0" :step="0.001" :precision="4" /></ZenField>
                 <ZenField label="Grad clip" stack tip="Max grad norm; 0 = off"><ZenNumber v-model="spec.optim.max_grad_norm" :min="0" :step="0.1" :precision="2" /></ZenField>
               </div>

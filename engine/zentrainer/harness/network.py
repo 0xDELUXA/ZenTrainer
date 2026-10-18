@@ -252,6 +252,16 @@ class Network:
     def trainable(self) -> list[torch.nn.Parameter]:
         return [p for p in self.params.values() if p.requires_grad]
 
+    def param_groups(self, lr: float, lora_plus: float = 0.0) -> list:
+        """The trainable tensors, or with LoRA+ two groups: up (B) matrices at lr × lora_plus."""
+        if lora_plus <= 1:
+            return self.trainable()
+        up = [p for k, p in self.params.items() if p.requires_grad and ".lora_up." in f"{k}."]
+        rest = [p for k, p in self.params.items() if p.requires_grad and ".lora_up." not in f"{k}."]
+        if not up:  # LoHa, LoKr, OFT: no up matrices to speed up
+            return self.trainable()
+        return [{"params": rest, "lr": lr}, {"params": up, "lr": lr * lora_plus, "lr_mult": lora_plus}]
+
     def state_dict(self) -> dict[str, torch.Tensor]:
         """Tensors in ComfyUI's LoRA-file layout, detached on CPU."""
         return {k: v.detach().to("cpu", self.dtype).contiguous() for k, v in self.params.items()}

@@ -158,3 +158,15 @@ def test_sample_prompts_fill_from_the_run():
     a, b = sample_prompts(s)
     assert (a.prompt, a.width, a.height, a.frames, a.seed) == ("a", 1024, 1024, 1, 7)
     assert (b.prompt, b.width, b.height, b.frames, b.seed) == ("b", 480, 832, 73, 8)
+
+
+def test_lora_plus_groups_keep_their_ratio_through_set_lr():
+    from zentrainer.harness import optim
+    from zentrainer.spec import OptimSpec
+
+    down, up = torch.nn.Parameter(torch.zeros(2)), torch.nn.Parameter(torch.zeros(2))
+    spec = OptimSpec(learning_rate=1e-4, lora_plus=4)
+    opt, sched = optim.build([{"params": [down], "lr": 1e-4}, {"params": [up], "lr": 4e-4, "lr_mult": 4.0}], spec)
+    assert [g["lr"] for g in opt.param_groups] == [1e-4, 4e-4]
+    optim.set_lr(opt, sched, 2e-4)
+    assert [round(g["lr"], 12) for g in opt.param_groups] == [2e-4, 8e-4]

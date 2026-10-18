@@ -101,6 +101,9 @@ class OptimSpec:
     steps: int = 1000
     batch_size: int = 1
     grad_accumulation_steps: int = 1
+    # LoRA+: the up (B) matrices learn this many times faster than the down (A) ones, which
+    # trains a LoRA faster for the same stability (paper: 16; 4 is a safe start). 0 or 1 = off.
+    lora_plus: float = 0.0
 
 
 @dataclass
@@ -283,6 +286,8 @@ class TrainSpec:
                     raise SpecError("sample width/height must be multiples of 16")
             elif not isinstance(p, str):
                 raise SpecError("samples.prompts holds prompts (text) or {prompt, width, height, frames, seed}")
+        if self.optim.lora_plus < 0:
+            raise SpecError("optim.lora_plus must be >= 0 (0 = off)")
         if self.samples.frames < 1 or self.samples.fps <= 0:
             raise SpecError("samples.frames must be >= 1 and samples.fps > 0")
         if self.save_every < 0 or self.samples.every < 0:
