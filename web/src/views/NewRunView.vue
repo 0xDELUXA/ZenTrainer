@@ -628,6 +628,13 @@ async function start(position: 'next' | 'end' = 'next') {
                     <span v-else class="sw-state">Off</span>
                   </div>
                 </ZenField>
+                <ZenField label="Weight averaging" stack tip="Checkpoints, samples and the saved LoRA use a running average of the recent steps (EMA) instead of whichever step the save landed on: steadier likeness, less wobble between checkpoints. 0.98 ≈ the last 50 steps">
+                  <div class="sw-row">
+                    <ZenSwitch :model-value="(spec.optim.ema ?? 0) > 0" @update:model-value="spec.optim.ema = $event ? 0.98 : 0" />
+                    <ZenNumber v-if="(spec.optim.ema ?? 0) > 0" :model-value="spec.optim.ema ?? 0.98" :min="0.5" :max="0.999" :step="0.005" :precision="3" @update:model-value="spec.optim.ema = $event" />
+                    <span v-else class="sw-state">Off</span>
+                  </div>
+                </ZenField>
                 <ZenField label="Weight decay" stack><ZenNumber v-model="spec.optim.weight_decay" :min="0" :step="0.001" :precision="4" /></ZenField>
                 <ZenField label="Grad clip" stack tip="Max grad norm; 0 = off"><ZenNumber v-model="spec.optim.max_grad_norm" :min="0" :step="0.1" :precision="2" /></ZenField>
               </div>

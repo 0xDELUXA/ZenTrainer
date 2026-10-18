@@ -126,6 +126,7 @@ class OptimizerDef:
     lr_hint: str = "1e-4"
     note: str = ""
     schedule_free: bool = False  # needs optimizer.train()/eval() around evaluation
+    adaptive: bool = False  # steers its own LR: the schedule stays flat
 
 
 def _bnb(name):
@@ -154,6 +155,12 @@ OPTIMIZERS: dict[str, OptimizerDef] = {d.id: d for d in [
                  lambda p, s: Automagic(p, lr=s.learning_rate, weight_decay=s.weight_decay),
                  lr_hint="1e-6 (start)",
                  note="Each weight tunes its own LR (1e-7 to 1e-3). Start at 1e-6, constant schedule."),
+    OptimizerDef("Automagic3", "Automagic v3 (auto LR)",
+                 lambda p, s: importlib.import_module(".automagic3", __package__).Automagic3(
+                     p, lr=s.learning_rate, weight_decay=s.weight_decay, fused=False),
+                 lr_hint="1e-6 (start)", adaptive=True,
+                 note="Ostris's v3: one LR per group that climbs while updates agree and backs off when they "
+                      "flip. Start at 1e-6; the schedule and warmup are ignored."),
     OptimizerDef("Prodigy", "Prodigy (auto LR)",
                  lambda p, s: importlib.import_module("prodigyopt").Prodigy(
                      p, lr=s.learning_rate, weight_decay=s.weight_decay, safeguard_warmup=True, use_bias_correction=True),
@@ -202,7 +209,7 @@ def build(params: Iterable[torch.nn.Parameter], spec: OptimSpec):
     if not available(d):
         raise RuntimeError(f"{d.label} needs `{d.pip}`: run `scripts/zt extras optimizers` (or pip install {d.pip})")
     opt = d.build(list(params), spec)
-    if d.schedule_free:  # its own warmup; the schedule must stay flat
+    if d.schedule_free or d.adaptive:  # its own warmup / LR control; the schedule must stay flat
         sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda i: 1.0)
     else:
         sched = torch.optim.lr_scheduler.LambdaLR(opt, _schedule(spec))
@@ -214,6 +221,15 @@ def set_mode(opt: torch.optim.Optimizer, training: bool) -> None:
     fn = getattr(opt, "train" if training else "eval", None)
     if callable(fn):
         fn()
+
+
+def current_lr(opt: torch.optim.Optimizer) -> float:
+    """The LR steps are taking now: an adaptive optimizer's own, else the first group's."""
+    for name in ("mean_lr", "get_avg_learning_rate"):
+        fn = getattr(opt, name, None)
+        if callable(fn):
+            return float(fn())
+    return opt.param_groups[0]["lr"]
 
 
 def set_lr(opt: torch.optim.Optimizer, sched, lr: float) -> None:

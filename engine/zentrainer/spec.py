@@ -111,6 +111,9 @@ class OptimSpec:
     # LoRA+: the up (B) matrices learn this many times faster than the down (A) ones, which
     # trains a LoRA faster for the same stability (paper: 16; 4 is a safe start). 0 or 1 = off.
     lora_plus: float = 0.0
+    # Weight averaging: checkpoints, samples and the saved LoRA use a running average of the
+    # adapter (0.98 = roughly the last 50 steps). 0 = off.
+    ema: float = 0.0
 
 
 @dataclass
@@ -314,6 +317,8 @@ class TrainSpec:
             raise SpecError("memory.tread is a share of the video tokens, from 0 (off) to below 1")
         if not 0.0 <= self.objective.uniform_mix <= 1.0:
             raise SpecError("objective.uniform_mix is a share between 0 and 1")
+        if not 0.0 <= self.optim.ema < 1.0:
+            raise SpecError("optim.ema is a decay between 0 (off) and below 1, e.g. 0.98")
         if self.optim.lora_plus < 0:
             raise SpecError("optim.lora_plus must be >= 0 (0 = off)")
         if self.samples.frames < 1 or self.samples.fps <= 0:

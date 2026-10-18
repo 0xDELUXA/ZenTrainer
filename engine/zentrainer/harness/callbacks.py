@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 import torch
 
 from .. import events
+from . import optim
 from .streams import first_stream
 
 SAMPLE_HEADROOM = 6 * 1024 ** 3  # extra VRAM kept free while an offloaded model samples (see render)
@@ -53,7 +54,7 @@ class Metrics(Callback):
             "step": t.step,
             "total": t.spec.optim.steps,
             "loss": t.last_loss,
-            "lr": t.optimizer.mean_lr() if hasattr(t.optimizer, "mean_lr") else t.optimizer.param_groups[0]["lr"],
+            "lr": optim.current_lr(t.optimizer),
             "grad_norm": t.last_grad_norm,
             "epoch": t.batches.epoch,
             "elapsed": round(now - self._t0, 3),
@@ -294,7 +295,15 @@ class Samples(Callback):
 
     def render(self, t: Trainer, manual: int | None = None, base: bool = False, stay: bool = False) -> list[dict]:
         """The run's samples (or, from render_manual, one try). `stay` leaves the model set up
-        for sampling afterwards: the caller renders more and switches back once."""
+        for sampling afterwards: the caller renders more and switches back once. With weight
+        averaging on, samples show the average, as the checkpoints do."""
+        ema = getattr(t, "ema", None)
+        if ema is not None and not base:
+            with ema.applied():
+                return self._render(t, manual, base, stay)
+        return self._render(t, manual, base, stay)
+
+    def _render(self, t: Trainer, manual: int | None = None, base: bool = False, stay: bool = False) -> list[dict]:
         if self._conds is None:
             self.on_start(t)
         if not self._conds:

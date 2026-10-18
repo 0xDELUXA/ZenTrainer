@@ -67,6 +67,7 @@ export interface TrainSpec {
     grad_accumulation_steps: number
     /** LoRA+: up matrices learn this many times faster (0 = off) */
     lora_plus?: number
+    ema?: number
   }
   objective: {
     loss: 'mse' | 'l1' | 'huber' | 'smooth_l1'

@@ -268,6 +268,9 @@ class Trainer:
                                preview=preview, preview_strength=s.samples.turbo_strength)
         self.optimizer, self.scheduler = optim.build(
             self.network.param_groups(s.optim.learning_rate, s.optim.lora_plus), s.optim)
+        from .ema import EMA
+
+        self.ema = EMA(self.network.params, s.optim.ema) if s.optim.ema > 0 else None
         self.objective = Objective(s.objective)
         self.denoiser = Denoiser(patcher, attention_override(s.memory.attention))
         self.streams = Streams(patcher.model)
@@ -291,6 +294,13 @@ class Trainer:
         self.optimizer.load_state_dict(state["optimizer"])
         self.scheduler.load_state_dict(state["scheduler"])
         self.step = int(state["step"])
+        if state.get("live"):  # the checkpoint's LoRA file holds the average; training goes on from these
+            with torch.no_grad():
+                for k, v in state["live"].items():
+                    if k in self.network.params:
+                        self.network.params[k].copy_(v.to(self.network.params[k]))
+        if self.ema is not None and state.get("ema"):
+            self.ema.load_state_dict(state["ema"])
         self.generator.set_state(state["rng"])
         self.batches.epoch = int(state.get("batches_epoch", 0))
         self.train_seconds = float(state.get("train_seconds", 0.0))
@@ -447,6 +457,8 @@ class Trainer:
             self.scaler.update()
         else:
             self.optimizer.step()
+        if self.ema is not None:
+            self.ema.update(self.step)
         self.scheduler.step()
         self.optimizer.zero_grad(set_to_none=True)
         lap("optimizer")
@@ -562,11 +574,14 @@ class Trainer:
 
         optim.set_mode(self.optimizer, training=False)  # schedule-free: save the eval weights
         try:
-            return self._save(tag, final, folder_paths, safetensors.torch)
+            if self.ema is None:
+                return self._save(tag, final, folder_paths, safetensors.torch)
+            with self.ema.applied() as live:  # the LoRA file is the average; the state keeps the live weights
+                return self._save(tag, final, folder_paths, safetensors.torch, live)
         finally:
             optim.set_mode(self.optimizer, training=True)
 
-    def _save(self, tag, final, folder_paths, sft) -> str:
+    def _save(self, tag, final, folder_paths, sft, live: dict | None = None) -> str:
         root, base = lora_root(self.spec.output.lora_dir)
         name = f"{slugify(self.spec.name)}_{self.run_id}" + ("" if final else f"_{tag}")
         folder = base / slugify(self.spec.name) if final else base / "checkpoints" / self.run_id
@@ -584,6 +599,7 @@ class Trainer:
                 "step": self.step, "optimizer": self.optimizer.state_dict(), "scheduler": self.scheduler.state_dict(),
                 "rng": self.generator.get_state(), "batches_epoch": self.batches.epoch,
                 "train_seconds": self.train_seconds,
+                **({"live": {k: v.cpu() for k, v in live.items()}, "ema": self.ema.state_dict()} if live is not None else {}),
             }, str(state))
             if keep == "latest":  # resume only ever needs the newest
                 for old in state.parent.glob("*.pt"):

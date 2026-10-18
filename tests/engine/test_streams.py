@@ -306,3 +306,44 @@ def test_tread_routes_video_tokens_around_the_middle_blocks():
     routed = h[6:34, 0]
     assert ((routed == text_total) | (routed == text_total - sum(range(2, 7)))).all()  # video: all, or skipped 2-6
     assert int((routed != text_total).sum()) == 14
+
+
+def test_ema_average_applied_and_restored():
+    from zentrainer.harness.ema import EMA
+
+    p = torch.nn.Parameter(torch.zeros(3))
+    ema = EMA({"a": p}, 0.9)
+    for step in range(200):
+        with torch.no_grad():
+            p.fill_(1.0)
+        ema.update(step)
+    assert torch.allclose(ema.shadow["a"], torch.ones(3), atol=1e-3)
+    with torch.no_grad():
+        p.fill_(5.0)
+    with ema.applied() as live:
+        assert torch.allclose(p, torch.ones(3), atol=1e-3) and torch.all(live["a"] == 5.0)
+    assert torch.all(p == 5.0)  # the live weights are back
+    st = ema.state_dict()
+    other = EMA({"a": torch.nn.Parameter(torch.zeros(3))}, 0.9)
+    other.load_state_dict(st)
+    assert torch.allclose(other.shadow["a"], ema.shadow["a"])
+
+
+def test_automagic3_trains_and_keeps_its_own_lr():
+    from zentrainer.harness import optim
+    from zentrainer.spec import OptimSpec
+
+    torch.manual_seed(0)
+    w = torch.nn.Parameter(torch.randn(8, 8) * 0.1)
+    target = torch.randn(8, 8)
+    opt, sched = optim.build([w], OptimSpec(optimizer="Automagic3", learning_rate=1e-3, warmup_steps=10))
+    first = None
+    for _ in range(60):
+        loss = ((w - target) ** 2).mean()
+        first = first if first is not None else loss.item()
+        opt.zero_grad()
+        loss.backward()
+        opt.step()
+        sched.step()
+    assert loss.item() < first
+    assert optim.current_lr(opt) != 1e-3  # it steered the LR itself
