@@ -2,7 +2,7 @@
 // One run. Header with the controls; progress beside the latest samples; the loss and
 // validation curves; then samples as a prompt × step grid, so a prompt's row reads as
 // its training progression (click a cell to page through that row in the lightbox).
-import { ZenButton, ZenCombo, ZenLightbox, ZenModal, ZenNumber, ZenSlider, ZenSwitch } from '@nynxz/zenkit-ui'
+import { ZenButton, ZenCombo, ZenLightbox, ZenModal, ZenNumber, ZenSlider, ZenSwitch, ZenTip } from '@nynxz/zenkit-ui'
 import type { LightboxItem } from '@nynxz/zenkit-ui'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { playTogether } from '../videoSync'
@@ -293,6 +293,8 @@ const fmtLr = (v?: number | null) => (v == null ? '–' : v === 0 ? '0' : v.toEx
 interface Stat {
   k: string
   v: string
+  /** what it means, behind an ⓘ */
+  tip?: string
   mono?: boolean
   delta?: { good: boolean; text: string } | null
 }
@@ -311,21 +313,31 @@ const statGroups = computed((): { title: string; items: Stat[] }[] => {
     {
       title: 'Time',
       items: [
-        { k: 'Training', v: dur(l?.train_time) },
-        { k: 'Total', v: dur(wall.value) }, // start to now, loading and sampling included
-        { k: 'Speed', v: `${l?.it_s?.toFixed(2) ?? '–'} it/s` },
-        { k: 'Epoch', v: String(l?.epoch ?? '–') },
-        ...(l?.vram_peak ? [{ k: 'Peak VRAM', v: `${gb(l.vram_peak)} GB` }] : []),
-        ...(l?.phases ? [{ k: 'Forward / back', v: `${l.phases.forward.toFixed(1)} / ${l.phases.backward.toFixed(1)} s` }, { k: 'Data / optimizer', v: `${l.phases.data.toFixed(2)} / ${l.phases.optimizer.toFixed(2)} s` }] : []),
+        { k: 'Training', v: dur(l?.train_time), tip: 'Time spent in training steps only: no loading, sampling or validation' },
+        { k: 'Total', v: dur(wall.value), tip: 'From start to now, with loading, sampling and validation' }, // start to now, loading and sampling included
+        { k: 'Speed', v: `${l?.it_s?.toFixed(2) ?? '–'} it/s`, tip: 'Training steps per second, lately. The first steps are slower (caching, compiling)' },
+        { k: 'Epoch', v: String(l?.epoch ?? '–'), tip: 'Passes through the dataset so far, repeats included' },
+        ...(l?.vram_peak ? [{ k: 'Peak VRAM', v: `${gb(l.vram_peak)} GB`, tip: 'The most GPU memory a training step has used. Sampling can use more, briefly' }] : []),
+        ...(l?.phases
+          ? [
+              { k: 'Forward / back', v: `${l.phases.forward.toFixed(1)} / ${l.phases.backward.toFixed(1)} s`, tip: 'Seconds per step running the model forward, and back for the gradients: nearly all of a step' },
+              { k: 'Data / optimizer', v: `${l.phases.data.toFixed(2)} / ${l.phases.optimizer.toFixed(2)} s`, tip: 'Seconds per step fetching the batch, and updating the LoRA. Near 0 is right' },
+            ]
+          : []),
       ],
     },
     {
       title: 'Learning',
       items: [
-        { k: 'Learning rate', v: fmtLr(l?.lr) },
-        { k: 'Grad norm', v: l?.grad_norm?.toFixed(3) ?? '–' },
-        { k: 'Validation', v: valLast.value ? valLast.value.val_loss.toFixed(4) : '–', delta: valDelta },
-        { k: 'Loss', v: l?.loss?.toFixed(4) ?? '–' },
+        { k: 'Learning rate', v: fmtLr(l?.lr), tip: "The step size now. Automagic and Prodigy set their own as they go; others follow the schedule" },
+        { k: 'Grad norm', v: l?.grad_norm?.toFixed(3) ?? '–', tip: 'How strongly this step pulled on the LoRA (before clipping). Spikes are hard pictures; a steady climb can mean it’s going unstable' },
+        {
+          k: 'Validation',
+          v: valLast.value ? valLast.value.val_loss.toFixed(4) : '–',
+          delta: valDelta,
+          tip: 'Loss on a fixed set: the same pictures at the same noise, every time, so it moves only when the LoRA does (the training loss jumps with each step’s random noise). The arrow: change since before training. It’s drawn from the training pictures, so it shows learning, not overfitting: judge that by the samples',
+        },
+        { k: 'Loss', v: l?.loss?.toFixed(4) ?? '–', tip: 'This step’s loss. Noisy: each step picks a random picture and noise level. The chart’s smoothed line is the trend' },
       ],
     },
   ]
@@ -842,7 +854,7 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
             <header class="sec-head"><span class="sec-title">{{ g.title }}</span></header>
             <dl class="sgrid">
               <div v-for="it in g.items" :key="it.k" class="scell">
-                <dt>{{ it.k }}</dt>
+                <dt>{{ it.k }}<ZenTip v-if="it.tip" :text="it.tip" :label="`About ${it.k}`" /></dt>
                 <dd :class="{ mono: it.mono !== false }">
                   {{ it.v }}<span v-if="it.delta" class="delta" :class="it.delta.good ? 'good' : 'bad'">{{ it.delta.text }}</span>
                 </dd>
@@ -876,7 +888,7 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
 
           <section class="card">
             <header class="sec-head">
-              <span class="sec-title">Checkpoints</span>
+              <span class="sec-title">Checkpoints <ZenTip text="The LoRA saved along the way. Best: the highest likeness when faces are scored (a character), else the lowest validation loss. Hover a row to test it, train more from it, or copy its name" label="About checkpoints" /></span>
               <span class="sec-sub">{{ saveLine }}</span>
             </header>
             <div v-if="!ckRows.length" class="muted small">
@@ -1172,6 +1184,12 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
 }
 .scell dt {
   font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.scell dt :deep(.zen-tip) {
+  opacity: 0.7;
 }
 .scell dd {
   margin: 2px 0 0;
