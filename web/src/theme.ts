@@ -1,6 +1,6 @@
 // Theming: ZenKit's JSON packs, applied outside ComfyUI.
 //
-// Packs are shadcn-style semantic tokens (--background, --primary, ...). zenkit-theme
+// Packs are shadcn-style semantic tokens (--background, --primary, ...). ZenKit's theme engine
 // writes them to :root, and zenAliases derives the --zen-* tokens zenkit-ui reads.
 // The engine serves the packs (/zentrainer/api/themes): the bundled set, a linked
 // ZenKit's, and the shared user drop-in folder, so there's no dependency on ZenKit.
@@ -16,16 +16,16 @@ import {
   registerPacks,
   resolveTokens,
   zenAliases,
-} from '@nynxz/zenkit-theme'
+} from '@nynxz/zenkit-ui/theme'
 import type { ThemeMode } from '@nynxz/zenkit-client'
 import { computed, ref } from 'vue'
 
 const SERVER_KEY = 'ZenTrainer.theme' // in ComfyUI's per-user settings
 const STORAGE_KEY = 'zentrainer.theme'
 
-// zenkit-theme's BASE_TOKENS are dark-only (inside ComfyUI the host palette fills the
+// the theme engine's BASE_TOKENS are dark-only (inside ComfyUI the host palette fills the
 // gaps). Standalone, a partial light pack would keep dark surfaces under dark text, so
-// light mode gets a light base beneath the pack. UPSTREAM: belongs in zenkit-theme.
+// light mode gets a light base beneath the pack. UPSTREAM: belongs in ZenKit's theme engine.
 const LIGHT_BASE: Record<string, string> = {
   '--background': '#fafafa',
   '--foreground': '#18181b',

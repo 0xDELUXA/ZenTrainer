@@ -14,9 +14,6 @@ importers:
       '@nynxz/zenkit-client':
         specifier: ^0.3.2
         version: 0.3.2(vue@3.5.42(typescript@5.9.3))
-      '@nynxz/zenkit-theme':
-        specifier: link:../../comfyui_nodepacks/ZenKit/packages/theme
-        version: link:../../comfyui_nodepacks/ZenKit/packages/theme
       '@nynxz/zenkit-ui':
         specifier: link:../../comfyui_nodepacks/ZenKit/packages/ui
         version: link:../../comfyui_nodepacks/ZenKit/packages/ui
