@@ -14,6 +14,7 @@ import { settings } from '@/settings'
 const props = defineProps<{ id?: string }>()
 const router = useRouter()
 const r = computed<Recipe | null>(() => (props.id ? findRecipe(props.id) : null))
+const asset = (p: string) => `${import.meta.env.BASE_URL}${p.replace(/^\//, '')}`
 
 // ---- the gallery ---------------------------------------------------------------------------
 const kinds = [
@@ -210,15 +211,22 @@ void leaving
         <button v-for="k in kinds" :key="k.id" :class="{ on: kind === k.id }" @click="kind = k.id">{{ k.label }}</button>
       </div>
       <div class="cards">
-        <RouterLink v-for="x in shown" :key="x.id" :to="`/simple/${x.id}`" class="rcard">
-          <div class="cover" :style="{ '--a': x.cover.from, '--b': x.cover.to }">
-            <i :class="x.cover.icon" />
-            <span class="badge">{{ x.kind === 'character' ? 'Character' : x.kind === 'style' ? 'Style' : 'Video' }}</span>
+        <RouterLink v-for="x in shown" :key="x.id" :to="`/simple/${x.id}`" class="rcard" :style="{ '--a': x.cover.from }">
+          <div v-if="x.covers?.length" class="cover">
+            <img v-for="(c, i) in x.covers" :key="c" :src="asset(c)" :class="{ alt: i > 0 }" alt="" loading="lazy" />
           </div>
           <div class="rbody">
-            <b>{{ x.title }}</b>
+            <div class="rtop">
+              <span class="ric"><i :class="x.cover.icon" /></span>
+              <span class="chip">{{ x.model }}</span>
+              <span class="kind-tag">{{ x.kind === 'character' ? 'Character' : x.kind === 'style' ? 'Style' : 'Video' }}</span>
+            </div>
+            <b>{{ x.title.split(' · ')[1] ?? x.title }}</b>
             <p>{{ x.blurb }}</p>
-            <span class="muted small">{{ x.photos.ideal }} · {{ eta(stepsFor(x, 25) * x.secPerStep + 180) }}</span>
+            <div class="rfoot muted small">
+              <span><i class="mdi mdi-image-multiple-outline" /> {{ x.photos.ideal }}</span>
+              <span><i class="mdi mdi-timer-outline" /> {{ eta(stepsFor(x, 25) * x.secPerStep + 180) }}</span>
+            </div>
           </div>
         </RouterLink>
       </div>
@@ -226,7 +234,7 @@ void leaving
 
     <!-- one recipe -->
     <template v-else>
-      <div class="page-head">
+      <div class="page-head flow-head">
         <div class="titles">
           <h1><RouterLink to="/simple" class="crumb">Train</RouterLink> {{ r.title }}</h1>
           <p class="lede">{{ r.blurb }}</p>
@@ -357,9 +365,14 @@ void leaving
   opacity: 0.4;
   cursor: default;
 }
+.simple {
+  width: 100%;
+  max-width: 1080px;
+  margin-inline: auto;
+}
 .cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 16px;
 }
 .rcard {
@@ -374,48 +387,80 @@ void leaving
     border-color var(--zen-dur-fast) ease;
 }
 .rcard:hover {
-  border-color: var(--zen-accent);
+  border-color: color-mix(in srgb, var(--a) 70%, var(--zen-border));
   transform: translateY(-2px);
 }
 .cover {
   position: relative;
-  aspect-ratio: 16 / 9;
-  display: grid;
-  place-items: center;
-  background:
-    radial-gradient(circle at 30% 20%, color-mix(in srgb, var(--a) 90%, white 10%), transparent 60%),
-    linear-gradient(135deg, var(--a), var(--b));
-  color: rgba(255, 255, 255, 0.92);
-  font-size: 48px;
+  aspect-ratio: 16 / 10;
+  background: var(--zen-surface-2);
+  overflow: hidden;
 }
-.cover i {
-  transition: transform var(--zen-dur) ease;
-}
-.rcard:hover .cover i {
-  transform: scale(1.12) rotate(-4deg);
-}
-.badge {
+.cover img {
   position: absolute;
-  top: 10px;
-  left: 10px;
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.35);
-  color: #fff;
-  backdrop-filter: blur(6px);
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: opacity 0.4s ease;
+}
+.cover img.alt {
+  opacity: 0;
+}
+.rcard:hover .cover img.alt {
+  opacity: 1;
 }
 .rbody {
-  padding: 12px 14px 14px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
+  flex: 1;
+}
+.rtop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ric {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-md);
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--a) 18%, transparent);
+  color: var(--a);
+  font-size: 17px;
+}
+.chip {
+  font-size: 12px;
+  font-weight: 600;
+}
+.kind-tag {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--zen-border) 80%, transparent);
+  color: var(--zen-muted);
+}
+.rbody b {
+  font-size: 15px;
 }
 .rbody p {
   margin: 0;
   font-size: 13px;
   color: var(--zen-muted);
-  line-height: 1.45;
+  line-height: 1.5;
+}
+.rfoot {
+  display: flex;
+  gap: 14px;
+  margin-top: auto;
+  padding-top: 4px;
+}
+.rfoot i {
+  margin-right: 3px;
 }
 .titles h1 {
   display: flex;
@@ -426,7 +471,14 @@ void leaving
   display: flex;
   flex-direction: column;
   gap: 14px;
-  max-width: 820px;
+  width: 100%;
+  max-width: 780px;
+  margin-inline: auto;
+}
+.flow-head {
+  width: 100%;
+  max-width: 780px;
+  margin-inline: auto;
 }
 .step {
   display: grid;

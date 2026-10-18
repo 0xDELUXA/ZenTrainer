@@ -18,8 +18,10 @@ export interface Recipe {
   blurb: string
   /** what to put in: shown beside the drop zone */
   photos: { min: number; ideal: string; tips: string[] }
-  /** cover art: two tones and an icon (images later, from runs we can show) */
+  /** the card's accent and icon */
   cover: { from: string; to: string; icon: string }
+  /** example images for the card (web/public/recipes/), shown in turn on hover; none = a text card */
+  covers?: string[]
   /** preferred files per folder; the family's recommended file when not installed */
   files: Partial<Record<Folder, string[]>>
   /** steps from the number of photos: perPhoto × photos, clamped */
