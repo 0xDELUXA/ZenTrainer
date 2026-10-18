@@ -60,6 +60,16 @@ async function load() {
       }
     }
   }
+  // opened from Merge LoRAs (?loras=[{name, strength}]): that stack, which renders exactly as
+  // the merged file would (before any shrink)
+  if (typeof q.loras === 'string') {
+    try {
+      const stack = (JSON.parse(q.loras) as { name: string; strength: number }[]).map((r) => ({ ...r, on: true }))
+      for (const inp of app.value.inputs) if (inp.type === 'loras') values[inp.id] = stack
+    } catch {
+      // a bad link: keep the saved stack
+    }
+  }
   if (typeof q.run === 'string') {
     const spec = await engine.run(q.run).then((r) => r.spec).catch(() => null)
     const model = app.value.inputs.find((i) => i.type === 'model')

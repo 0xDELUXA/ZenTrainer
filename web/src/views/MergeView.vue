@@ -71,6 +71,13 @@ async function run() {
       </div>
       <div class="foot">
         <button class="add" @click="add"><i class="mdi mdi-plus" /> Add a LoRA</button>
+        <RouterLink
+          v-if="members.some((m) => m.name)"
+          :to="{ path: '/apps/text-to-image', query: { loras: JSON.stringify(members.filter((m) => m.name)) } }"
+          title="Generate with these LoRAs stacked at these strengths: the same result as the merged file, before any shrink"
+        >
+          <ZenButton size="sm" icon="mdi mdi-creation-outline">Test in Text to Image</ZenButton>
+        </RouterLink>
         <span class="muted small">Total strength {{ total.toFixed(2) }}. A soup of 3 runs on one subject: 0.7 each; 2 runs: 0.95. Too strong (waxy, ignores prompts)? Lower them; no retraining.</span>
       </div>
     </section>
