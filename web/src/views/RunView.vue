@@ -328,13 +328,38 @@ const statGroups = computed((): { title: string; items: Stat[] }[] => {
         { k: 'Loss', v: l?.loss?.toFixed(4) ?? '–' },
       ],
     },
+  ]
+})
+// what the run is, as label/value lines that wrap rather than cut off
+const OPT_NAMES: Record<string, string> = { Automagic3: 'Automagic v3', AdamWScheduleFree: 'AdamW schedule-free', AdamW8bit: 'AdamW 8-bit' }
+const ADAPTIVE = new Set(['Automagic', 'Automagic3', 'Prodigy']) // they set their own LR: the schedule hardly matters
+const setup = computed((): { k: string; v: string; title?: string }[] => {
+  const sp = detail.value?.spec
+  if (!sp) return []
+  const model = sp.model.unet_name ?? sp.model.ckpt_name ?? ''
+  const m = sp.memory
+  const mem = [
+    m.offloading ? 'offload' : '',
+    m.int8_forward !== false && /int8/i.test(model) ? 'int8 fwd' : '',
+    m.w8a8_backward ? 'W8A8' : m.fused_int8_backward ? 'fused int8' : '',
+    m.compile_blocks ? 'compile' : '',
+    m.gradient_checkpointing ? (m.checkpoint_skip ? `checkpoint · keep ${m.checkpoint_skip}` : 'checkpoint') : '',
+    m.tread ? `TREAD ${Math.round(m.tread * 100)}%` : '',
+  ].filter(Boolean)
+  const opt = sp.optim
+  return [
+    { k: 'Model', v: model.replace(/\.safetensors$/, ''), title: model },
     {
-      title: 'Setup',
-      items: [
-        { k: 'Optimizer', v: `${d.spec.optim.optimizer} · ${d.spec.optim.scheduler}`, mono: false },
-        { k: 'Network', v: `${d.spec.network.algorithm} r${d.spec.network.rank}` },
-      ],
+      k: 'Dataset',
+      v: [sp.dataset.folder, sp.dataset.caption_set && sp.dataset.caption_set !== 'default' ? sp.dataset.caption_set : '', sp.dataset.trigger ? `“${sp.dataset.trigger}”` : ''].filter(Boolean).join(' · '),
     },
+    { k: 'Training', v: `${opt.steps} steps · batch ${opt.batch_size} · ${sp.dataset.resolution}px` },
+    {
+      k: 'Optimizer',
+      v: [OPT_NAMES[opt.optimizer] ?? opt.optimizer, `from ${fmtLr(opt.learning_rate)}`, ADAPTIVE.has(opt.optimizer) ? '' : opt.scheduler].filter(Boolean).join(' · '),
+    },
+    { k: 'Network', v: `${sp.network.algorithm} r${sp.network.rank} · ${Array.isArray(sp.network.targets) ? `${sp.network.targets.length} layer types` : sp.network.targets.replace('_', ' + ')}${sp.dataset.masked_loss ? ' · masked' : ''}` },
+    ...(mem.length ? [{ k: 'Memory', v: mem.join(' · ') }] : []),
   ]
 })
 // validation loss at a checkpoint: the latest evaluation at or before its step
@@ -813,22 +838,35 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
           </section>
         </div>
         <aside class="rail">
+          <section v-for="g in statGroups" :key="g.title" class="card">
+            <header class="sec-head"><span class="sec-title">{{ g.title }}</span></header>
+            <dl class="sgrid">
+              <div v-for="it in g.items" :key="it.k" class="scell">
+                <dt>{{ it.k }}</dt>
+                <dd :class="{ mono: it.mono !== false }">
+                  {{ it.v }}<span v-if="it.delta" class="delta" :class="it.delta.good ? 'good' : 'bad'">{{ it.delta.text }}</span>
+                </dd>
+              </div>
+            </dl>
+          </section>
           <section class="card">
-            <div v-for="g in statGroups" :key="g.title" class="sgroup">
-              <div class="sg-title">{{ g.title }}</div>
-              <dl class="sgrid">
-                <div v-for="it in g.items" :key="it.k" class="scell">
-                  <dt>{{ it.k }}</dt>
-                  <dd :class="{ mono: it.mono !== false }">
-                    {{ it.v }}<span v-if="it.delta" class="delta" :class="it.delta.good ? 'good' : 'bad'">{{ it.delta.text }}</span>
-                  </dd>
-                </div>
-              </dl>
-            </div>
-            <button class="link spec-link" @click="specOpen = true"><i class="mdi mdi-code-json" /> Full spec</button>
+            <header class="sec-head">
+              <span class="sec-title">Setup</span>
+              <span class="spacer" />
+              <button class="link" @click="specOpen = true"><i class="mdi mdi-code-json" /> Full spec</button>
+            </header>
+            <dl class="kv">
+              <div v-for="it in setup" :key="it.k" class="kv-row">
+                <dt>{{ it.k }}</dt>
+                <dd :title="it.title ?? it.v">{{ it.v }}</dd>
+              </div>
+            </dl>
           </section>
           <section v-if="runLoaded.length" class="card loaded-card">
-            <div class="eyebrow">Loaded now</div>
+            <header class="sec-head">
+              <span class="sec-title">In VRAM</span>
+              <span class="sec-sub">loaded now</span>
+            </header>
             <div v-for="m in runLoaded" :key="m.file ?? m.name" class="lrow" :title="`${m.file}: ${gb(m.vram)} of ${gb(m.bytes)} GB in VRAM`">
               <span class="lname ellipsis">{{ (m.file ?? m.name).replace(/\.safetensors$/, '') }}</span>
               <span class="mono small muted">{{ gb(m.vram) }}/{{ gb(m.bytes) }} GB</span>
@@ -913,9 +951,7 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
 .lede {
   margin: 4px 0 0;
   font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere; /* the run id and model wrap rather than cut off */
 }
 .actions {
   display: flex;
@@ -957,6 +993,9 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+.loaded-card .sec-head {
+  margin-bottom: 4px;
 }
 .lrow {
   display: grid;
@@ -1099,17 +1138,28 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
   border-color: var(--zen-text);
   opacity: 0.85;
 }
-.sgroup + .sgroup {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid color-mix(in srgb, var(--zen-border) 50%, transparent);
+/* setup: label / value lines; values wrap instead of cutting off */
+.kv {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
 }
-.sg-title {
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+.kv-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 10px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.kv-row dt {
   color: var(--zen-muted);
-  margin-bottom: 8px;
+}
+.kv-row dd {
+  margin: 0;
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
 }
 .sgrid {
   margin: 0;
@@ -1493,10 +1543,10 @@ dd {
   line-height: 1.4;
   color: var(--zen-muted);
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  min-height: 2.8em; /* two lines, so tiles line up */
+  min-height: 4.2em; /* three lines, so tiles line up; the whole prompt is its tooltip */
 }
 .tile-num {
   position: absolute;
@@ -1515,6 +1565,11 @@ dd {
 .samples-head {
   align-items: center;
   min-height: 30px;
+  flex-wrap: wrap; /* narrow: the controls drop to a second line rather than spill out */
+  row-gap: 8px;
+}
+.samples-head .sec-sub {
+  flex-shrink: 0;
 }
 /* the view switch and Sample now share one height */
 .samples-head .seg,
@@ -1746,10 +1801,6 @@ dd {
 .ib:hover {
   color: var(--zen-text);
   background: var(--zen-surface-2);
-}
-.spec-link {
-  margin-top: 12px;
-  padding: 0;
 }
 .link {
   border: none;
