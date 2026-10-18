@@ -165,9 +165,12 @@ class Samples(Callback):
     def _encode(self, t, s):
         from .data import apply_trigger
 
+        from ..spec import sample_prompts
+
         trig = t.spec.dataset.trigger
+        self.items = sample_prompts(s)
         # samples only substitute [trigger]; they're never rewritten otherwise
-        self.prompts = [p.replace("[trigger]", trig) if trig else p.replace("[trigger]", "") for p in s.prompts]
+        self.prompts = [p.prompt.replace("[trigger]", trig) if trig else p.prompt.replace("[trigger]", "") for p in self.items]
         negative = apply_trigger(s.negative, trig, False)
         # cached like captions, so a run with nothing new to encode never loads the text encoder
         path = _prompt_cache(t, self.prompts, negative)
@@ -239,10 +242,11 @@ class Samples(Callback):
                 for i, (pos, neg) in enumerate(self._conds):
                     progress(i, 0, s.steps)
                     channels = model.model.latent_format.latent_channels
-                    t_lat = _latent_frames(vae, s.frames)
-                    latent = torch.zeros([1, channels] + ([t_lat] if t_lat else []) + [s.height // comp, s.width // comp])
+                    it = self.items[i]
+                    t_lat = _latent_frames(vae, it.frames)
+                    latent = torch.zeros([1, channels] + ([t_lat] if t_lat else []) + [it.height // comp, it.width // comp])
                     latent = comfy.sample.fix_empty_latent_channels(model, latent)
-                    noise = comfy.sample.prepare_noise(latent, s.seed + i)
+                    noise = comfy.sample.prepare_noise(latent, it.seed)
                     def cb(step, x0, _x, total, _i=i):
                         progress(_i, step + 1, total, x0)
 
@@ -250,7 +254,7 @@ class Samples(Callback):
                     # model's bf16 activations, and only autocast reconciles the two
                     with torch.autocast(t.device.type, dtype=t.train_dtype, enabled=t.train_dtype != torch.float32):
                         out = comfy.sample.sample(model, noise, s.steps, s.cfg, s.sampler, s.scheduler,
-                                                  pos, neg, latent, seed=s.seed + i, disable_pbar=True, callback=cb)
+                                                  pos, neg, latent, seed=it.seed, disable_pbar=True, callback=cb)
                     img = vae.decode(first_stream(out))
                     img = img.reshape(-1, *img.shape[-3:])  # (frames, H, W, 3)
                     if t_lat:

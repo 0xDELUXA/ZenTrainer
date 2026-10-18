@@ -8,6 +8,7 @@ import { computed, nextTick, onMounted, reactive, ref, toRaw, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { inputChoices } from '@/api/comfy'
 import AdapterPicker from '@/components/AdapterPicker.vue'
+import SamplePromptList from '@/components/SamplePromptList.vue'
 import FamilyPicker, { type SampleSuggestion } from '@/components/FamilyPicker.vue'
 import { downloadFor, fmtBytes } from '@/downloads'
 import { setSetting, settings } from '@/settings'
@@ -15,6 +16,7 @@ import {
   EngineError,
   defaultSpec,
   engine,
+  promptText,
   thumbUrl,
   type DatasetInfo,
   type OptimizerInfo,
@@ -228,10 +230,8 @@ async function savePromptSet(name: string) {
 }
 
 // ---- bound helpers ---------------------------------------------------------------------------
-const promptsText = computed({
-  get: () => spec.samples.prompts.join('\n'),
-  set: (v: string) => (spec.samples.prompts = v.split('\n').map((s) => s.trim()).filter(Boolean)),
-})
+// video models get a frames field per sample (and the run's own)
+const isVideoModel = computed(() => familyId.value === 'minimax-h3' || (spec.samples.frames ?? 1) > 1)
 const alphaAuto = computed({
   get: () => spec.network.alpha == null,
   set: (v: boolean) => (spec.network.alpha = v ? null : spec.network.rank),
@@ -265,7 +265,7 @@ function toggleSet(st: string) {
   spec.dataset.caption_mix = next.length > 1 ? next : []
 }
 const insertTrigger = () => {
-  promptsText.value = promptsText.value ? `${promptsText.value}\n[trigger], ` : '[trigger], '
+  spec.samples.prompts = [...spec.samples.prompts, '[trigger], ']
 }
 const firstThumb = (d: DatasetInfo) => {
   const t = d.thumbs[0]
@@ -311,7 +311,7 @@ const warnings = computed(() => {
   const w: string[] = []
   if (!spec.dataset.trigger) w.push('No trigger word: the likeness has nothing specific to attach to.')
   if (!spec.samples.prompts.length) w.push('No sample prompts: you will only see the loss curves.')
-  else if (spec.dataset.trigger && !spec.samples.prompts.some((p) => p.includes('[trigger]') || p.includes(spec.dataset.trigger)))
+  else if (spec.dataset.trigger && !spec.samples.prompts.map(promptText).some((p) => p.includes('[trigger]') || p.includes(spec.dataset.trigger)))
     w.push("Sample prompts don't use [trigger].")
   if (opt.value?.id === 'Prodigy' && spec.optim.learning_rate < 0.5) w.push('Prodigy sets its own step size: use LR 1.0.')
   if (opt.value && opt.value.id !== 'Prodigy' && spec.optim.learning_rate >= 0.01) w.push('That LR is very high for this optimizer.')
@@ -677,9 +677,14 @@ async function start(position: 'next' | 'end' = 'next') {
             <span class="spacer" />
             <ZenButton size="sm" icon="mdi mdi-tag-plus-outline" @click="insertTrigger">Insert [trigger]</ZenButton>
           </div>
-          <ZenField label="Prompts" stack :hint="`One per line. [trigger] becomes ${spec.dataset.trigger ? `“${spec.dataset.trigger}”` : 'your trigger word'}.`">
-            <ZenInput v-model="promptsText" type="textarea" :rows="4" placeholder="[trigger], a portrait photo, soft light" />
-          </ZenField>
+          <SamplePromptList
+            v-model="spec.samples.prompts"
+            :width="spec.samples.width"
+            :height="spec.samples.height"
+            :frames="spec.samples.frames ?? 1"
+            :video="isVideoModel"
+            :trigger="spec.dataset.trigger"
+          />
           <div v-if="sampleSuggestion && !usingSuggestion" class="suggest">
             <i class="mdi mdi-lightning-bolt-outline" />
             <span>
@@ -719,6 +724,12 @@ async function start(position: 'next' | 'end' = 'next') {
                 <ZenNumber v-model="spec.samples.width" :min="256" :step="64" :precision="0" />
                 <span class="muted">×</span>
                 <ZenNumber v-model="spec.samples.height" :min="256" :step="64" :precision="0" />
+              </div>
+            </ZenField>
+            <ZenField v-if="isVideoModel" label="Frames / fps" stack tip="Video samples: frames per sample (snapped to a length the VAE decodes; 1 = a still) and the frame rate they're saved at">
+              <div class="inline">
+                <ZenNumber :model-value="spec.samples.frames ?? 1" :min="1" :max="361" :step="17" :precision="0" @update:model-value="spec.samples.frames = $event" />
+                <ZenNumber :model-value="spec.samples.fps ?? 24" :min="1" :max="60" :step="1" :precision="0" @update:model-value="spec.samples.fps = $event" />
               </div>
             </ZenField>
             <ZenField label="Steps / CFG" stack>

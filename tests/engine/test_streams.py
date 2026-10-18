@@ -149,3 +149,12 @@ def test_pack_trains_a_real_soundtrack(monkeypatch):
     assert torch.all(p.x0[0, 0, n:] == 0.5) and torch.all(p.x0[1, 0, n:] == 0)
     assert torch.all(p.weight[0, 0, n:] == 1) and torch.all(p.weight[1, 0, n:] == 0)  # only heard audio counts
     assert torch.all(p.weight[:, 0, :n] == 1)
+
+
+def test_sample_prompts_fill_from_the_run():
+    from zentrainer.spec import SampleSpec, sample_prompts
+
+    s = SampleSpec(prompts=["a", {"prompt": "b", "width": 480, "height": 832, "frames": 73}], width=1024, height=1024, seed=7)
+    a, b = sample_prompts(s)
+    assert (a.prompt, a.width, a.height, a.frames, a.seed) == ("a", 1024, 1024, 1, 7)
+    assert (b.prompt, b.width, b.height, b.frames, b.seed) == ("b", 480, 832, 73, 8)

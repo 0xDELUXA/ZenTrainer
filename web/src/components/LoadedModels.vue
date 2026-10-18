@@ -68,7 +68,8 @@ const pct = (v: number, b: number) => (b ? Math.round((v / b) * 100) : 0)
     <div v-else-if="!rows.length" class="muted small">Nothing loaded.</div>
     <div v-for="m in rows" :key="m.name" class="model">
       <div class="line">
-        <b>{{ m.name }}</b>
+        <b class="ellipsis" :title="m.file ?? m.name">{{ m.file ?? m.name }}</b>
+        <span class="muted small kind">{{ m.kind ?? '' }}{{ m.file ? ` · ${m.name}` : '' }}</span>
         <span v-if="m.dynamic" class="tag" title="Streams weights into VRAM as it needs them (dynamic VRAM)">streaming</span>
         <span class="spacer" />
         <span class="mono small">{{ gb(m.vram) }} / {{ gb(m.bytes) }} GB · {{ pct(m.vram, m.bytes) }}%</span>
@@ -118,6 +119,10 @@ const pct = (v: number, b: number) => (b ? Math.round((v / b) * 100) : 0)
 }
 .line b {
   font-size: 12px;
+  min-width: 0;
+}
+.kind {
+  white-space: nowrap;
 }
 .tag {
   font-size: 10px;

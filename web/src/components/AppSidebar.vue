@@ -10,6 +10,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { activeRuns, latest, lossTrail } from '@/runs'
 import { activeCaptions, startCaptionSync } from '@/captions'
 import { settings } from '@/settings'
+import { loadedModels, watchLoaded } from '@/loaded'
 import { activeDownloads, fmtBytes, startDownloadSync } from '@/downloads'
 import { disks, gb, memLatest, startSystemSync } from '@/system'
 import { drawerOpen, toggleDrawer, unseenErrors } from '@/logs'
@@ -94,6 +95,19 @@ const cap = computed(() => {
   return { job: cur, pct: total ? cur.done / total : 0, meta, more: list.length - 1 }
 })
 
+// ---- loaded models: under the memory meters -----------------------------------------
+const loadedRows = computed(() =>
+  loadedModels.value.slice(0, 4).map((m, i) => ({
+    key: `${m.file ?? m.name}${i}`,
+    label: (m.file ?? m.name).replace(/\.(safetensors|ckpt|pt|gguf)$/i, ''),
+    vram: m.vram,
+    icon: m.kind === 'vae' ? 'mdi mdi-image-filter-center-focus' : m.kind === 'text encoder' ? 'mdi mdi-text-box-outline' : 'mdi mdi-cube-outline',
+    title: `${m.file ?? m.name} (${m.kind ?? m.name}): ${gb(m.vram)} of ${gb(m.bytes)} GB in VRAM`,
+  })),
+)
+
+let stopLoaded = () => {}
+
 // ---- folding & keys ------------------------------------------------------------------
 function onKey(e: KeyboardEvent) {
   const t = e.target as HTMLElement
@@ -106,10 +120,12 @@ onMounted(() => {
   startSystemSync()
   startDownloadSync()
   startCaptionSync()
+  stopLoaded = watchLoaded()
   addEventListener('keydown', onKey)
 })
 onUnmounted(() => {
   removeEventListener('keydown', onKey)
+  stopLoaded()
 })
 </script>
 
@@ -209,6 +225,10 @@ onUnmounted(() => {
         <span v-for="m in meters" :key="m.label" class="mem-row">
           <span class="mem-head"><span>{{ m.label }}</span><span class="mono">{{ 'text' in m ? m.text : `${gb(m.used)}/${gb(m.total)} GB` }}</span></span>
           <span class="meter"><span :style="{ width: `${(m.used / m.total) * 100}%` }" :class="{ hot: m.used / m.total > 0.9 }" /></span>
+        </span>
+        <!-- what's in VRAM: each loaded model's file and how much of it is on the GPU -->
+        <span v-for="lm in loadedRows" :key="lm.key" class="loaded" :title="lm.title">
+          <i :class="lm.icon" /><span class="ellipsis">{{ lm.label }}</span><span class="mono">{{ gb(lm.vram) }}</span>
         </span>
       </span>
     </RouterLink>
@@ -552,6 +572,22 @@ nav {
   gap: 5px;
   padding: 6px 10px 6px 0;
   font-size: 11px;
+}
+.loaded {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  font-size: 10.5px;
+  color: var(--zen-muted);
+}
+.loaded i {
+  font-size: 11px;
+}
+.loaded .ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .mem-row {
   display: flex;

@@ -200,7 +200,7 @@ defineExpose({
     right 0.15s ease,
     background 0.15s ease;
   touch-action: none;
-  cursor: default;
+  cursor: pointer;
 }
 .track:hover .thumb,
 .thumb:active {

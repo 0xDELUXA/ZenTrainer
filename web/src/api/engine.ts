@@ -80,7 +80,8 @@ export interface TrainSpec {
   }
   samples: {
     every: number
-    prompts: string[]
+    /** a prompt, or a sample with its own size/length/seed */
+    prompts: (string | SamplePrompt)[]
     negative: string
     width: number
     height: number
@@ -379,6 +380,9 @@ export interface GalleryItem {
 }
 /** a model ComfyUI holds, and how much of it (per block) is in VRAM */
 export interface LoadedModel {
+  /** the file it was loaded from (several joined with " + ") */
+  file?: string | null
+  kind?: 'diffusion model' | 'text encoder' | 'vae'
   name: string
   dynamic?: boolean
   bytes: number
@@ -547,6 +551,15 @@ export interface TrainingAdapter {
   /** the repo page */
   url: string
 }
+/** a sample with its own settings (unset ones follow the run's) */
+export interface SamplePrompt {
+  prompt: string
+  width?: number
+  height?: number
+  frames?: number
+  seed?: number
+}
+export const promptText = (p: string | SamplePrompt) => (typeof p === 'string' ? p : p.prompt)
 export interface ModelProfile {
   id: string
   families: string[]

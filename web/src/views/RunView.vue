@@ -6,11 +6,14 @@ import { ZenButton, ZenLightbox, ZenModal, ZenNumber, ZenSlider } from '@nynxz/z
 import type { LightboxItem } from '@nynxz/zenkit-ui'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { loadedModels, watchLoaded } from '@/loaded'
+import { gb } from '@/system'
 import { onComfyMessage } from '@/api/comfy'
 import {
   ACTIVE,
   EVENTS,
   engine,
+  promptText as specPrompt,
   viewUrl,
   type CheckpointRow,
   type Command,
@@ -196,7 +199,7 @@ const latestByIndex = computed(() => {
   return by
 })
 const latestFor = (i: number) => latestByIndex.value.get(i)
-const promptText = (i: number) => latestFor(i)?.prompt ?? prompts.value.find(([k]) => k === i)?.[1] ?? detail.value?.spec.samples.prompts[i] ?? ''
+const promptText = (i: number) => latestFor(i)?.prompt ?? prompts.value.find(([k]) => k === i)?.[1] ?? (detail.value?.spec.samples.prompts[i] != null ? specPrompt(detail.value.spec.samples.prompts[i]!) : '')
 const specOpen = ref(false)
 const sampleView = ref<'latest' | 'grid'>('latest')
 const fmtLr = (v?: number | null) => (v == null ? '–' : v === 0 ? '0' : v.toExponential(1))
@@ -316,6 +319,21 @@ watch([() => steps.value.length, sampleView], async () => {
 })
 
 const lb = ref<{ items: LightboxItem[]; index: number; grid?: number } | null>(null)
+// the run's own models among what ComfyUI holds (matched by file), while it's live
+const runLoaded = computed(() => {
+  const m = detail.value?.spec.model
+  if (!m || !running.value) return []
+  const files = new Set(
+    [m.unet_name, m.ckpt_name, m.clip_name, m.vae_name, (m as { audio_vae_name?: string | null }).audio_vae_name, detail.value?.spec.samples.model_name]
+      .filter(Boolean)
+      .map((f) => String(f).split('/').pop()),
+  )
+  return loadedModels.value.filter((x) => x.file && x.file.split(' + ').some((f) => files.has(f)))
+})
+let stopLoaded = () => {}
+onMounted(() => (stopLoaded = watchLoaded()))
+onUnmounted(() => stopLoaded())
+
 // tiles take the samples' own shape, so neither stills nor videos are cropped
 const sampleAspect = computed(() => {
   const sp = detail.value?.spec.samples
@@ -550,6 +568,14 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
           </section>
         </div>
         <aside class="rail">
+          <section v-if="runLoaded.length" class="card loaded-card">
+            <div class="eyebrow">Loaded now</div>
+            <div v-for="m in runLoaded" :key="m.file ?? m.name" class="lrow" :title="`${m.file}: ${gb(m.vram)} of ${gb(m.bytes)} GB in VRAM`">
+              <span class="lname ellipsis">{{ (m.file ?? m.name).replace(/\.safetensors$/, '') }}</span>
+              <span class="mono small muted">{{ gb(m.vram) }}/{{ gb(m.bytes) }} GB</span>
+              <div class="lbar"><span :style="{ width: `${m.bytes ? (m.vram / m.bytes) * 100 : 0}%` }" /></div>
+            </div>
+          </section>
           <section class="card">
             <div v-for="g in statGroups" :key="g.title" class="sgroup">
               <div class="sg-title">{{ g.title }}</div>
@@ -674,6 +700,34 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
 }
 .spacer {
   flex: 1;
+}
+.loaded-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 8px;
+  font-size: 12px;
+}
+.lbar {
+  grid-column: span 2;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--zen-surface-2);
+  overflow: hidden;
+}
+.lbar span {
+  display: block;
+  height: 100%;
+  background: var(--zen-accent);
+}
+.lname {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .phase .pl-step {
   color: var(--zen-accent);

@@ -139,9 +139,20 @@ class MemorySpec:
 
 
 @dataclass
+class SamplePrompt:
+    """One sample: its prompt and, optionally, its own size/length/seed (else the run's)."""
+    prompt: str
+    width: int | None = None
+    height: int | None = None
+    frames: int | None = None
+    seed: int | None = None
+
+
+@dataclass
 class SampleSpec:
     every: int = 0  # 0 = off
-    prompts: list[str] = field(default_factory=list)
+    # each a prompt, or {"prompt", "width"?, "height"?, "frames"?, "seed"?} for its own size
+    prompts: list = field(default_factory=list)
     negative: str = ""
     width: int = 1024
     height: int = 1024
@@ -261,6 +272,17 @@ class TrainSpec:
             _choice("network.targets", self.network.targets, ("attn", "attn_mlp", "all"))
         if self.optim.steps < 1:
             raise SpecError("optim.steps must be >= 1")
+        for p in self.samples.prompts:
+            if isinstance(p, dict):
+                if not isinstance(p.get("prompt"), str):
+                    raise SpecError("each sample needs a prompt")
+                for k in ("width", "height", "frames", "seed"):
+                    if p.get(k) is not None and (not isinstance(p[k], int) or p[k] < (0 if k == "seed" else 1)):
+                        raise SpecError(f"sample {k} must be a positive whole number")
+                if any(p.get(k) and p[k] % 16 for k in ("width", "height")):
+                    raise SpecError("sample width/height must be multiples of 16")
+            elif not isinstance(p, str):
+                raise SpecError("samples.prompts holds prompts (text) or {prompt, width, height, frames, seed}")
         if self.samples.frames < 1 or self.samples.fps <= 0:
             raise SpecError("samples.frames must be >= 1 and samples.fps > 0")
         if self.save_every < 0 or self.samples.every < 0:
@@ -287,3 +309,13 @@ def _choice(name: str, value: str, options: tuple[str, ...]) -> None:
 
 def slugify(name: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]+", "-", name).strip("-").lower() or "run"
+
+
+def sample_prompts(s: SampleSpec) -> list[SamplePrompt]:
+    """The samples with every field filled from the run's defaults."""
+    out = []
+    for i, p in enumerate(s.prompts):
+        d = p if isinstance(p, dict) else {"prompt": p}
+        out.append(SamplePrompt(d["prompt"], d.get("width") or s.width, d.get("height") or s.height,
+                                d.get("frames") or s.frames, s.seed + i if d.get("seed") is None else d["seed"]))
+    return out

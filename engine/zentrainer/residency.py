@@ -60,9 +60,35 @@ def _model(patcher) -> dict:
     total = sum(b for b, _ in groups.values())
     in_vram = sum(v for _, v in groups.values())
     return {
+        "file": _file(patcher),
+        "kind": _kind(type(model).__name__),
         "name": type(model).__name__,
         "dynamic": vbar is not None,
         "bytes": int(total),
         "vram": int(in_vram),
         "groups": [{"name": k, "bytes": int(b), "vram": int(v)} for k, (b, v) in groups.items() if b > 0],
     }
+
+
+def _file(patcher) -> str | None:
+    """The file a model was loaded from: ComfyUI's loaders record how to reload it
+    (`cached_patcher_init` = (loader, (path or [paths], ...)))."""
+    import os
+
+    init = getattr(patcher, "cached_patcher_init", None)
+    try:
+        arg = init[1][0]
+        paths = arg if isinstance(arg, (list, tuple)) else [arg]
+        names = [os.path.basename(str(x)) for x in paths if x]
+        return " + ".join(names) or None
+    except (TypeError, IndexError):
+        return None
+
+
+def _kind(cls: str) -> str:
+    c = cls.lower()
+    if "vae" in c:
+        return "vae"
+    if "temodel" in c or "clip" in c or "textencoder" in c or c.endswith("te"):
+        return "text encoder"
+    return "diffusion model"
