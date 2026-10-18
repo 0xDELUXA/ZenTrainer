@@ -206,6 +206,8 @@ def cache_key(items: list[Item], spec: DatasetSpec, encoder_id: str) -> str:
             h.update(b"audio")
         if spec.video_avoid_cuts:
             h.update(b"avoid_cuts")
+        if spec.clip_stills:
+            h.update(b"clip_stills")
     for it in items:
         st = it.path.stat()
         h.update(f"{it.path}|{st.st_mtime_ns}|{st.st_size}|{it.caption}".encode())
@@ -306,6 +308,11 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
                 owners.append(n)
                 if progress:
                     progress(n + 1, len(items) + len(captions), f"encoding {it.path.name} ({k + 1}/{len(windows)})")
+            if spec.clip_stills and windows:  # its sharpest frame, trained as a photo with the clip's caption
+                f = video.sharpest_frame(it.path, p)
+                still = video.read(it.path, [f], pick_bucket(p.width, p.height, sizes))
+                samples.append(Sample(_encode(vae, still, it.path), idx[0], None, idx))
+                owners.append(n)
             continue
         with Image.open(it.path) as im:
             w, h = im.size

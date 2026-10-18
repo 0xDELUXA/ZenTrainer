@@ -86,6 +86,9 @@ class DatasetSpec:
     # Keep clips inside one shot: hard cuts are detected and no clip spans one. Off for edits
     # where the cutting is the point (music videos, PMVs).
     video_avoid_cuts: bool = False
+    # Clip stills: each clip also trains its sharpest frame as a photo (with the clip's caption).
+    # Stills are never TREAD-routed and anchor the LoRA's detail; Fizgig's H3 default.
+    clip_stills: bool = False
 
 
 @dataclass

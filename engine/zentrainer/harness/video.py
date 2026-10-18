@@ -140,6 +140,18 @@ def plan_shots(p: Probe, fps: float, frames: int, mode: str, clips: int, lengths
     return [[min(int(round((s + i) * step)), p.frames - 1) for i in range(n)] for s in starts]
 
 
+def sharpest_frame(path: Path, p: "Probe", look: int = 24) -> int:
+    """The index of the sharpest of `look` frames spread over the clip (variance of the
+    Laplacian of a small grey copy, as Fizgig's still picker ranks them)."""
+    n = max(p.frames, 1)
+    idx = sorted({min(n - 1, round((n - 1) * (i + 0.5) / look)) for i in range(look)})
+    scale = min(1.0, 384 / max(p.width, p.height))
+    size = (max(16, round(p.width * scale)), max(16, round(p.height * scale)))
+    g = read(path, idx, size).mean(-1)  # (T, H, W)
+    lap = -4 * g[:, 1:-1, 1:-1] + g[:, :-2, 1:-1] + g[:, 2:, 1:-1] + g[:, 1:-1, :-2] + g[:, 1:-1, 2:]
+    return idx[int(lap.flatten(1).var(1).argmax())]
+
+
 def read(path: Path, indices: list[int], size: tuple[int, int]) -> torch.Tensor:
     """These source frames, resized to cover `size` (w, h) and center-cropped: (T, H, W, 3) in [0, 1]."""
     import av

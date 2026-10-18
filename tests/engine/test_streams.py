@@ -459,3 +459,21 @@ def test_failed_run_frames_let_go_of_their_tensors():
         _release_frames(kept)
     gc.collect()
     assert ref() is None and "step 1" in str(kept)
+
+
+def test_sharpest_frame_picks_the_detailed_one(tmp_path):
+    import numpy as np
+
+    from zentrainer.harness import video
+
+    frames = []
+    rng = np.random.default_rng(0)
+    for i in range(12):  # flat grey frames, one noisy (sharp) frame at index 7
+        f = np.full((64, 64, 3), 0.5, dtype=np.float32)
+        if i == 7:
+            f = rng.random((64, 64, 3)).astype(np.float32)
+        frames.append(f)
+    path = tmp_path / "clip.mp4"
+    video.write(path, torch.from_numpy(np.stack(frames)), 12)
+    p = video.probe(path)
+    assert abs(video.sharpest_frame(path, p, look=12) - 7) <= 0
