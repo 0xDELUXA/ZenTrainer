@@ -39,6 +39,24 @@ _BLOCK = re.compile(r"^\d+$")
 _PREPARED = re.compile(r"(^|\.)(token_refiner|condition_proj|to_gate_compress)(\.|$)")
 
 
+_BLOCK_INDEX = re.compile(r"(?:^|\.)(?:blocks|double_blocks|single_blocks|joint_blocks|transformer_blocks|layers)\.(\d+)(?:\.|$)")
+
+
+def in_blocks(name: str, blocks: str) -> bool:
+    """Is the layer inside the block range ("20-49", "20-", "-10", "7")? Layers outside any
+    numbered block (embedders, final layers) are out when a range is set."""
+    if not blocks.strip():
+        return True
+    m = _BLOCK_INDEX.search(name)
+    if m is None:
+        return False
+    i = int(m.group(1))
+    lo, _, hi = blocks.replace(" ", "").partition("-")
+    if not _:  # a single block
+        return i == int(lo)
+    return (not lo or i >= int(lo)) and (not hi or i <= int(hi))
+
+
 def matches(name: str, targets: str | list[str]) -> bool:
     """Should the layer at module path `name` get an adapter?"""
     if not isinstance(targets, str):
@@ -176,7 +194,7 @@ class Network:
             if not hasattr(m, "weight_function") or getattr(m, "weight", None) is None:
                 continue
             if m.weight.ndim >= 2:
-                if not matches(name, spec.targets):
+                if not matches(name, spec.targets) or not in_blocks(name, getattr(spec, "blocks", "")):
                     continue
                 key = f"{name}.weight"
                 adapter = None

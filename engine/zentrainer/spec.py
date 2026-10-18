@@ -91,6 +91,10 @@ class NetworkSpec:
     # e.g. a de-distillation adapter for a guidance-distilled model (MiniMax H3), so training
     # sits on an undistilled base and the result runs on the real one.
     training_adapter: str | None = None
+    # Only these transformer blocks get adapters, e.g. "20-49" (MiniMax H3's identity blocks,
+    # Fizgig's default) or "10-": the backward then stops at the first one, so steps are
+    # quicker, and the model's early (layout, motion) blocks stay untouched. "" = every block.
+    blocks: str = ""
 
 
 @dataclass
@@ -292,6 +296,8 @@ class TrainSpec:
                     raise SpecError("sample width/height must be multiples of 16")
             elif not isinstance(p, str):
                 raise SpecError("samples.prompts holds prompts (text) or {prompt, width, height, frames, seed}")
+        if self.network.blocks and not re.fullmatch(r"\s*\d*\s*-?\s*\d*\s*", self.network.blocks):
+            raise SpecError("network.blocks is a range like 20-49, 20- or 10")
         if not 0.0 <= self.objective.uniform_mix <= 1.0:
             raise SpecError("objective.uniform_mix is a share between 0 and 1")
         if self.optim.lora_plus < 0:

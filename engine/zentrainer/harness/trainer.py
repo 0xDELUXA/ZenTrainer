@@ -165,7 +165,8 @@ class Trainer:
                 self._status("training")
                 with gradient_checkpointing(self.models.patcher.model.diffusion_model, self.spec.memory.gradient_checkpointing,
                                             self.spec.memory.checkpoint_depth, self.spec.memory.offloading,
-                                            self.spec.memory.checkpoint_skip):
+                                            self.spec.memory.checkpoint_skip) as ckpt:
+                    self._input_grad = ckpt.input_grad
                     self.enter_training()
                     try:
                         for cb in self.callbacks:
@@ -411,9 +412,10 @@ class Trainer:
             x_t = self.objective.noisy(ms, sigma, noise, x0)
             lap("data")
 
-            # requires_grad on the input keeps custom-Function checkpointing in the graph
+            # the input needs grad only for ComfyUI's per-layer offload checkpoint (see memory.py);
+            # otherwise it stays grad-free so the backward ends at the first trained layer
             with torch.autocast(self.device.type, dtype=self.train_dtype, enabled=self.train_dtype != torch.float32):
-                x0_pred = self.denoiser(x_t.requires_grad_(True), sigma, conds)
+                x0_pred = self.denoiser(x_t.requires_grad_(getattr(self, "_input_grad", True)), sigma, conds)
             loss = self.objective.loss(x_t.detach(), x0, x0_pred, sigma, weight).mean()
             lap("forward")
             scaled = loss / acc

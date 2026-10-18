@@ -162,7 +162,7 @@ export const RECIPES: Recipe[] = [
     caption: { prompt: NL, subject: true },
     spec: {
       dataset: { resolution: 1024 },
-      network: { rank: 16, training_adapter: 'training_adapters/minimax_h3_image_training_adapter.safetensors' },
+      network: { rank: 16, blocks: '20-49', training_adapter: 'training_adapters/minimax_h3_image_training_adapter.safetensors' },
       optim: { optimizer: 'AdamW', learning_rate: 1e-4, scheduler: 'constant', batch_size: 1 },
       objective: { timesteps: 'logit_normal', shift: 3 },
       memory: { offloading: true },

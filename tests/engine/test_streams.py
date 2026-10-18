@@ -218,3 +218,31 @@ def test_manual_tries_batch_into_one_session_and_pick_up_late_ones():
     t.control.send("sample", prompt="b")
     t._apply(t.control.drain())
     assert calls == [("session", ["a", "b"], ["late"])]
+
+
+def test_block_range():
+    from zentrainer.harness.network import in_blocks
+
+    assert in_blocks("diffusion_model.blocks.25.attn.qkv", "20-49")
+    assert not in_blocks("diffusion_model.blocks.3.attn.qkv", "20-49")
+    assert in_blocks("diffusion_model.double_blocks.7.img_mlp.0", "5-")
+    assert in_blocks("diffusion_model.layers.2.mlp", "-2") and not in_blocks("diffusion_model.layers.3.mlp", "-2")
+    assert not in_blocks("diffusion_model.final_layer.linear", "20-49")
+    assert in_blocks("diffusion_model.final_layer.linear", "")
+
+
+def test_late_blocks_train_without_input_grad_and_early_blocks_skip_backward():
+    import torch.utils.checkpoint as cp
+
+    early, late = torch.nn.Linear(4, 4), torch.nn.Linear(4, 4)
+    early.requires_grad_(False)
+    late.requires_grad_(False)
+    lora = torch.nn.Parameter(torch.zeros(4))  # stands in for an adapter on the late block
+    hits = []
+    early.register_full_backward_hook(lambda *a: hits.append("early"))
+    x = torch.randn(2, 4)  # no requires_grad: the input carries none
+    h = cp.checkpoint(early, x, use_reentrant=False)
+    y = cp.checkpoint(lambda t: late(t) + lora, h, use_reentrant=False)
+    y.sum().backward()
+    assert lora.grad is not None and torch.all(lora.grad == 2)
+    assert hits == []  # nothing flowed back into the untrained early block

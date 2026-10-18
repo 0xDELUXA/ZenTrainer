@@ -52,6 +52,8 @@ export interface TrainSpec {
     init_from: string | null
     /** a LoRA applied while training only (not in samples or the saved file): a de-distillation adapter */
     training_adapter: string | null
+    /** only these blocks get adapters, e.g. "20-49" ("" = all): the backward stops at the first */
+    blocks?: string
   }
   optim: {
     optimizer: string

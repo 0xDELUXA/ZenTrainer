@@ -641,6 +641,9 @@ async function start(position: 'next' | 'end' = 'next') {
                 <ZenField label="Training adapter" stack class="span-2" tip="A LoRA applied while training only, never in samples or the saved file. Guidance-distilled models (MiniMax H3) train much better on a de-distillation adapter">
                   <AdapterPicker v-model="trainingAdapter" :family="familyId" />
                 </ZenField>
+                <ZenField label="Blocks" stack tip="Only these transformer blocks get adapters, e.g. 20-49: the backward stops at the first one, so steps are quicker, and the early blocks (layout, motion) stay untouched. Empty = every block">
+                  <ZenInput :model-value="spec.network.blocks ?? ''" placeholder="all" @update:model-value="spec.network.blocks = String($event).trim()" />
+                </ZenField>
                 <ZenField label="Train biases & norms" stack><div class="sw-row"><ZenSwitch v-model="spec.network.train_bias_norm" /><span class="sw-state">{{ spec.network.train_bias_norm ? 'On' : 'Off' }}</span></div></ZenField>
               </div>
             </div>

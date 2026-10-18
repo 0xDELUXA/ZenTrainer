@@ -46,8 +46,12 @@ def gradient_checkpointing(diffusion_model, enabled: bool, depth: int, offloadin
     every activation at once and saves nothing. Checkpointing per block is what bounds
     memory to roughly one block's activations. `skip` leaves the last blocks as they are
     (keeping their activations, no recompute)."""
+    import types
+
+    import torch.nn as nn
+
     if not enabled:
-        yield 0
+        yield types.SimpleNamespace(blocks=0, input_grad=False)
         return
     from comfy_extras.nodes_train import patch, unpatch
 
@@ -60,8 +64,13 @@ def gradient_checkpointing(diffusion_model, enabled: bool, depth: int, offloadin
         patch(m, offloading=offloading)
     logging.info("[ZenTrainer] gradient checkpointing on %d blocks (depth %d%s)", len(blocks), depth,
                  f", last {skip} kept" if skip > 0 else "")
+    # ComfyUI's per-layer offload checkpoint (a custom autograd Function, used when a patched
+    # module is itself a Linear/Conv) only records when its input requires grad; block-level
+    # checkpointing is torch's non-reentrant one, which doesn't. Without that need, the input
+    # stays grad-free and the backward stops at the first trained layer.
+    input_grad = offloading and any(isinstance(m, (nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d)) for m in blocks)
     try:
-        yield len(blocks)
+        yield types.SimpleNamespace(blocks=len(blocks), input_grad=input_grad)
     finally:
         for m in diffusion_model.modules():
             unpatch(m)
