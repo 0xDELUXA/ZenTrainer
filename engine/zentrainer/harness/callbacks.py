@@ -123,6 +123,47 @@ class Samples(Callback):
         if t.spec.samples.baseline and self._conds and t.step == 0:
             self.render(t)  # the base model's look, before any training
 
+    # ---- baselines: the untrained model's samples depend only on the model and the sample
+    # settings, so a run that shares them with an earlier one copies its files instead of
+    # rendering them again (output/zentrainer/samples/_baseline/<key>.<ext>)
+    def _baseline_key(self, t, i: int) -> str:
+        import hashlib
+
+        m, s, it = t.spec.model, t.spec.samples, self.items[i]
+        parts = [m.kind, m.ckpt_name, m.unet_name, m.unet_weight_dtype, m.clip_name, m.clip_type, m.vae_name,
+                 getattr(m, "audio_vae_name", None), s.model_name, s.model_weight_dtype, t.spec.network.init_from,
+                 self.prompts[i], s.negative, it.width, it.height, it.frames, s.fps, it.seed, s.steps, s.cfg,
+                 s.sampler, s.scheduler, s.slg_mode, s.slg_layers, s.slg_double_layers, s.slg_scale, s.slg_start,
+                 s.slg_end, s.lora_strength if t.spec.network.init_from else None]
+        return hashlib.sha1(json.dumps(parts, default=str).encode()).hexdigest()[:20]
+
+    def _baseline_dir(self) -> Path:
+        import folder_paths
+
+        return Path(folder_paths.get_output_directory()) / "zentrainer" / "samples" / "_baseline"
+
+    def _baseline_hit(self, t, i: int, out_dir: str) -> dict | None:
+        import shutil
+
+        key = self._baseline_key(t, i)
+        for src in self._baseline_dir().glob(f"{key}.*"):
+            name = f"step000000_{i:02d}{src.suffix}"
+            shutil.copyfile(src, Path(out_dir) / name)
+            return {"run_id": t.run_id, "step": 0, "index": i, "prompt": self.prompts[i], "filename": name,
+                    "subfolder": f"zentrainer/samples/{t.run_id}", "type": "output", "model": t.spec.samples.model_name or None,
+                    "reused": True}
+        return None
+
+    def _baseline_keep(self, t, i: int, path: Path) -> None:
+        import shutil
+
+        try:
+            d = self._baseline_dir()
+            d.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(path, d / f"{self._baseline_key(t, i)}{path.suffix}")
+        except OSError:
+            pass
+
     def _sampling_model(self, t):
         """The training patcher itself, or the alternate model with the current LoRA."""
         s = t.spec.samples
@@ -213,6 +254,16 @@ class Samples(Callback):
         os.makedirs(out_dir, exist_ok=True)
         rows = []
 
+        if t.step == 0 and all(any(self._baseline_dir().glob(f"{self._baseline_key(t, i)}.*")) for i in range(len(self._conds))):
+            # every baseline rendered before with these exact settings: copy them, load nothing
+            for i in range(len(self._conds)):
+                row = self._baseline_hit(t, i, out_dir)
+                rows.append(row)
+                t.emit(events.SAMPLE, row)
+                if t.store:
+                    t.store.append(t.run_id, "samples", row)
+            return rows
+
         previewer = _previewer(t)
         count = len(self._conds)
 
@@ -240,6 +291,13 @@ class Samples(Callback):
                 if guided is not None:
                     model.model_options = guided  # put back in finally
                 for i, (pos, neg) in enumerate(self._conds):
+                    reused = self._baseline_hit(t, i, out_dir) if t.step == 0 else None
+                    if reused is not None:
+                        rows.append(reused)
+                        t.emit(events.SAMPLE, reused)
+                        if t.store:
+                            t.store.append(t.run_id, "samples", reused)
+                        continue
                     progress(i, 0, s.steps)
                     channels = model.model.latent_format.latent_channels
                     it = self.items[i]
@@ -266,6 +324,8 @@ class Samples(Callback):
                         name = f"step{t.step:06d}_{i:02d}.png"
                         Image.fromarray((img[0].clamp(0, 1).cpu().numpy() * 255).astype("uint8")).save(
                             os.path.join(out_dir, name))
+                    if t.step == 0:
+                        self._baseline_keep(t, i, Path(out_dir) / name)
                     row = {
                         "run_id": t.run_id, "step": t.step, "index": i, "prompt": self.prompts[i],
                         "filename": name, "subfolder": f"zentrainer/samples/{t.run_id}", "type": "output",
