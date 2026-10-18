@@ -28,8 +28,9 @@ except ImportError:  # pragma: no cover
 if TRITON_AVAILABLE:
 
     @triton.jit
-    def _quantize_rows_kernel(G, S, Q, R, N, stride_g, stride_q, seed, BLOCK: tl.constexpr):
+    def _quantize_rows_kernel(G, S, Q, R, N, stride_g, stride_q, SEED, BLOCK: tl.constexpr):
         row = tl.program_id(0)
+        seed = tl.load(SEED)  # read on the device: no host round trip, so torch.compile traces through
         g_row = G + row.to(tl.int64) * stride_g
         q_row = Q + row.to(tl.int64) * stride_q
         amax = tl.zeros((), dtype=tl.float32)
@@ -89,9 +90,13 @@ if TRITON_AVAILABLE:
         tl.store(O + offs_m[:, None] * s_om + offs_k[None, :] * s_ok, out.to(tl.bfloat16), mask=mask_m[:, None] & mask_k[None, :])
 
 
-def quantize_rows(grad: torch.Tensor, scale: torch.Tensor, seed: int) -> tuple[torch.Tensor, torch.Tensor]:
-    """grad (M, N) any float, scale (N,): int8 (M, N) of grad * scale, and each row's step (M,)."""
+def quantize_rows(grad: torch.Tensor, scale: torch.Tensor, seed: int | torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """grad (M, N) any float, scale (N,): int8 (M, N) of grad * scale, and each row's step (M,).
+    `seed`: the rounding noise's seed, an int or a one-element int32 tensor on grad's device (a
+    tensor keeps it off the host, so a compiled caller needn't break its graph to read it)."""
     grad = grad.contiguous()
+    if not isinstance(seed, torch.Tensor):
+        seed = torch.tensor([seed], device=grad.device, dtype=torch.int32)
     m, n = grad.shape
     q = torch.empty((m, n), device=grad.device, dtype=torch.int8)
     steps = torch.empty((m,), device=grad.device, dtype=torch.float32)

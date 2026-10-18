@@ -76,7 +76,8 @@ def w8a8_input_grad(grad_2d: torch.Tensor, q: torch.Tensor, scale: torch.Tensor,
     except Exception:
         TRITON_AVAILABLE = False
     if TRITON_AVAILABLE:  # two fused kernels (kernels/w8a8_backward.py), then the rotation in bf16
-        gq, step = quantize_rows(grad_2d, scale, int(torch.randint(0, 2**31 - 1, (1,)).item()))
+        seed = torch.randint(0, 2**31 - 1, (1,), device=grad_2d.device, dtype=torch.int32)  # no .item(): compile-safe
+        gq, step = quantize_rows(grad_2d, scale, seed)
         g = int8_matmul(gq, q, step)
         if group:
             h = _hadamard(group, g.device, torch.bfloat16)
