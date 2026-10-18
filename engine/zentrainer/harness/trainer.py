@@ -222,10 +222,6 @@ class Trainer:
         from . import int8_backward
 
         int8_backward.enable("w8a8" if s.memory.w8a8_backward else "fused" if s.memory.fused_int8_backward else "")
-        # weight-only int8 layers that need a gradient: int8 forward instead of a dequantized bf16 one
-        n8 = int8_backward.install(patcher.model)
-        if n8:
-            logging.info("[ZenTrainer] int8 training path on %d layers", n8)
         lora_root(s.output.lora_dir)  # a bad save folder fails now, not at the first save
         torch.manual_seed(s.seed)
         random.seed(s.seed)
@@ -235,6 +231,12 @@ class Trainer:
         patcher = self.models.patcher
         compat.prune_unused(patcher)
         self._auto_offload(patcher)
+        from . import int8_backward
+
+        # weight-only int8 layers that need a gradient: int8 forward instead of a dequantized bf16 one
+        n8 = int8_backward.install(patcher.model)
+        if n8:
+            logging.info("[ZenTrainer] int8 training path on %d layers", n8)
         self.device = patcher.load_device
         self.train_dtype = _DTYPES[s.memory.training_dtype]
 
