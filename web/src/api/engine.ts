@@ -181,10 +181,15 @@ export interface DatasetInfo {
   images: number
   /** how many of `images` are videos */
   videos?: number
+  masked?: number
+  /** total size of the media files */
+  bytes?: number
+  /** newest media file's mtime (s) */
+  modified?: number
   steps_per_epoch: number
   captioned: number
   sets: string[]
-  thumbs: { subfolder: string; filename: string }[]
+  thumbs: { subfolder: string; filename: string; path?: string }[]
 }
 
 export interface DatasetItem {

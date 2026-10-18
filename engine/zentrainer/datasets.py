@@ -49,9 +49,13 @@ def summary() -> list[dict]:
         items = scan(d, warn=False)
         if not items:
             continue
+        stats = [i.path.stat() for i in items if i.path.exists()]
         out.append({
             "folder": d.name,
             "images": len(items),
+            "masked": sum(1 for i in items if getattr(i, "mask", None)),
+            "bytes": sum(st.st_size for st in stats),
+            "modified": max((st.st_mtime for st in stats), default=0),
             "videos": sum(1 for i in items if video.is_video(i.path)),
             "steps_per_epoch": sum(i.repeats for i in items),
             "captioned": sum(1 for i in items if i.caption),
