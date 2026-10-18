@@ -31,7 +31,10 @@
     },
     "memory": {
       "offloading": true,
-      "gradient_checkpointing": true
+      "gradient_checkpointing": true,
+      "w8a8_backward": true,
+      "int8_forward": true,
+      "tread": 0.0
     },
     "network": {
       "blocks": "20-49"
@@ -46,13 +49,14 @@
   },
   "notes": [
     "H3 is guidance-distilled: sample at CFG 1, as its released sampler does (CFG doubles the time and overcooks).",
-    "Training straight on a distilled model spends the LoRA undoing the distillation (validation loss starts ~3x higher, worst at high noise). Put a de-distillation adapter under it: Network → Training adapter. circlestone-labs' image adapter suits image datasets; it's applied while training only, never in samples or the saved LoRA.",
+    "Training straight on a distilled model spends the LoRA undoing the distillation (validation loss starts ~3x higher, worst at high noise). Put a de-distillation adapter under it: Network \u2192 Training adapter. circlestone-labs' image adapter suits image datasets; it's applied while training only, never in samples or the saved LoRA.",
     "Video and stereo audio are denoised together; an image trains as a one-frame clip with silence beside it, and only the picture counts toward the loss.",
     "One image per step: the model takes batch size 1. Use gradient accumulation for a bigger batch.",
-    "The int8 build (~21 GB) mostly stays in VRAM and trains about twice as fast as the bf16 one (~40 GB, streamed): ~1.3 s/step at 1024² on a 5090.",
+    "The int8 build (~21 GB) mostly stays in VRAM and trains about twice as fast as the bf16 one (~40 GB, streamed): ~1.3 s/step at 1024\u00b2 on a 5090.",
     "Training shift 3 (sampling uses 12) spends more steps on detail: likeness and faces.",
     "Sides are multiples of 32 (16x VAE, 2x2 patches); 64-step buckets satisfy that.",
     "The text encoder is a 32B vision-language model: captions and sample prompts are encoded once, cached, and it's never loaded again for that dataset.",
-    "Adapters go on blocks 20-49 only (Fizgig's default, measured there to keep the model's motion and layout and reach likeness sooner): the backward stops at block 20, so steps are quicker. Clear Network → Blocks to train all 50."
+    "Adapters go on blocks 20-49 only (Fizgig's default, measured there to keep the model's motion and layout and reach likeness sooner): the backward stops at block 20, so steps are quicker. Clear Network \u2192 Blocks to train all 50.",
+    "Speed defaults from a one-change-at-a-time ablation against a known-good audio run (Oct 2026): int8 forward + W8A8 backward + blocks 20-49 keep samples, beat and loss in line with it at about half the step time (6.0 -> 3.1 s). TREAD distorted both picture and audio on clip-only datasets, so it stays off here; turn on Clip stills before trying it."
   ]
 }
