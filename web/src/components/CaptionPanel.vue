@@ -18,7 +18,10 @@ const hasVideo = computed(() => props.items.some((it) => it.kind === 'video'))
 const senses = ref<Record<string, ModelSenses>>({})
 // each model's senses as icons, coloured for this dataset: fine, short of what it needs (warn), or not needed (dim)
 function senseIcons(name: string) {
-  const s = senses.value[name]
+  // an older engine sends only which models hear: those take whole clips, the rest stills
+  const s = senses.value[name] ?? (models.value.includes(name)
+    ? { image: true, video: hearing.value.includes(name) ? 'clip' : 'stills', audio: hearing.value.includes(name), frames: 4 }
+    : null)
   if (!s) return []
   const vid = hasVideo.value
   return [
@@ -274,14 +277,14 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
         >
           <template #option="{ item }">
             <span class="mopt">
-              <span class="mname">{{ item.label }}</span>
               <span class="senses"><i v-for="s in senseIcons(String(item.value))" :key="s.icon" :class="[s.icon, s.tone]" :title="s.tip" /></span>
+              <span class="mname">{{ item.label }}</span>
             </span>
           </template>
           <template #selected="{ item }">
             <span v-if="item" class="mopt">
-              <span class="mname">{{ item.label }}</span>
               <span class="senses"><i v-for="s in senseIcons(String(item.value))" :key="s.icon" :class="[s.icon, s.tone]" :title="s.tip" /></span>
+              <span class="mname">{{ item.label }}</span>
             </span>
             <span v-else class="muted">A vision-language model</span>
           </template>
@@ -644,8 +647,9 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
 }
 .senses {
   display: inline-flex;
-  gap: 4px;
+  gap: 3px;
   flex: none;
+  width: 52px; /* a fixed column: names line up after it */
   font-size: 14px;
 }
 .senses .ok {

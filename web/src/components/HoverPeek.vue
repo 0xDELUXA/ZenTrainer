@@ -1,12 +1,29 @@
 <script setup lang="ts">
 // Hold Shift over any picture or video (sample tiles, dataset items, cards) for a large copy of
-// it in the middle of the screen, videos playing with sound. An element can name what to show
-// with data-peek="url" (a still that stands for a clip, a thumb for a full-size file).
+// it in the middle of the screen, videos playing with sound at a quarter volume (M while peeking
+// mutes or unmutes, remembered). An element can name what to show with data-peek="url" (a still that
+// stands for a clip, a thumb for a full-size file).
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 const src = ref<string | null>(null)
 const video = ref(false)
 const time = ref(0)
+const SOUND = 'zentrainer.peek.sound'
+const sound = ref((() => {
+  try {
+    return localStorage.getItem(SOUND) !== '0'
+  } catch {
+    return true
+  }
+})())
+function toggleSound() {
+  sound.value = !sound.value
+  try {
+    localStorage.setItem(SOUND, sound.value ? '1' : '0')
+  } catch {
+    // storage blocked
+  }
+}
 let shift = false
 let x = 0
 let y = 0
@@ -39,6 +56,11 @@ function onMove(e: PointerEvent) {
   if (shift || src.value) update()
 }
 function onKey(e: KeyboardEvent) {
+  if (e.type === 'keydown' && src.value && video.value && (e.key === 'm' || e.key === 'M')) {
+    e.preventDefault()
+    toggleSound()
+    return
+  }
   if (e.key !== 'Shift') return
   const t = e.target as HTMLElement | null
   if (e.type === 'keydown' && t?.closest('input, textarea, [contenteditable="true"]')) return // typing capitals
@@ -71,8 +93,9 @@ onBeforeUnmount(() => {
 <template>
   <Transition name="peek">
     <div v-if="src" class="peek" aria-hidden="true">
-      <video v-if="video" :key="src" :src="src" autoplay loop playsinline @loadedmetadata="start" />
+      <video v-if="video" :key="src" :src="src" autoplay loop playsinline :muted="!sound" :volume="0.25" @loadedmetadata="start" />
       <img v-else :src="src" alt="" />
+      <span v-if="video" class="peek-hint"><i :class="sound ? 'mdi mdi-volume-high' : 'mdi mdi-volume-off'" /> M</span>
     </div>
   </Transition>
 </template>
@@ -97,6 +120,17 @@ onBeforeUnmount(() => {
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
   background: #000;
   display: block;
+}
+.peek-hint {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
 }
 .peek-enter-active,
 .peek-leave-active {
