@@ -261,7 +261,19 @@ class Trainer:
         self.batches = data.Batches(self.dataset, s.optim.batch_size, s.seed)
 
         if s.memory.training_dtype != "fp32":
-            patcher.set_model_compute_dtype(self.train_dtype)
+            if any(getattr(m, "layout_type", None) is not None for m in patcher.model.modules()):
+                # a quantized base: only the cast dtype. ComfyUI's set_model_compute_dtype also
+                # forces every layer to cast its weights, which turns the int8/fp8 matmuls off
+                # (each layer dequantized to bf16 every pass): measured on H3 int8, every
+                # forward matmul ran in bf16. Also clears the flag a previous run left on the
+                # cached model.
+                import uuid
+
+                patcher.add_object_patch("manual_cast_dtype", self.train_dtype)
+                patcher.force_cast_weights = False
+                patcher.patches_uuid = uuid.uuid4()  # the next load re-applies the per-layer flags
+            else:
+                patcher.set_model_compute_dtype(self.train_dtype)
         mm.training_fp8_bwd = s.memory.quantized_backward
 
         init = None
