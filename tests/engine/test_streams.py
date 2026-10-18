@@ -419,3 +419,17 @@ def test_w8a8_kernels_match_torch():
     ref = (gq.float() @ q.float()) * step[:, None]
     out = int8_matmul(gq, q, step).float()
     assert ((out - ref).norm() / ref.norm()) < 5e-3
+
+
+def test_compiled_blocks_are_undone():
+    from zentrainer.harness.compile import compiled_blocks
+
+    class Net(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.blocks = torch.nn.ModuleList(torch.nn.Linear(4, 4) for _ in range(3))
+
+    net = Net()
+    with compiled_blocks(net, True) as n:
+        assert n == 3 and all("forward" in b.__dict__ for b in net.blocks)
+    assert not any("forward" in b.__dict__ for b in net.blocks)  # the cached model is left as it was

@@ -172,6 +172,9 @@ class MemorySpec:
     # input gradients run on int8 tensor cores (Triton kernels: 2x the bf16 backward on H3's
     # clip-size layers, RTX 5090). Some gradient precision for the speed (OneTrainer's W8A8).
     w8a8_backward: bool = False
+    # torch.compile the repeated transformer block: fuses the elementwise work around the matmuls.
+    # The first steps (and the first sample) take longer while it compiles.
+    compile_blocks: bool = False
     # With offloading: VRAM kept free for activations, the LoRA and its optimizer (GB);
     # the rest holds as much of the model as fits. 0 = auto: 8 GB, more for long video clips.
     vram_headroom: float = 0.0

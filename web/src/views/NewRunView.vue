@@ -895,6 +895,9 @@ async function start(position: 'next' | 'end' = 'next') {
                 <span v-else class="sw-state">Off</span>
               </div>
             </ZenField>
+            <ZenField label="Compile blocks" stack tip="torch.compile on the model's repeated transformer block: the small operations around the big matmuls (norms, modulation, activations, the LoRA add) fuse into fewer kernels. The first steps and the first sample are slower while it compiles">
+              <div class="sw-row"><ZenSwitch :model-value="!!spec.memory.compile_blocks" @update:model-value="spec.memory.compile_blocks = $event" /><span class="sw-state">{{ spec.memory.compile_blocks ? 'On' : 'Off' }}</span></div>
+            </ZenField>
             <ZenField label="int8 backward (W8A8)" stack tip="int8 ConvRot bases (MiniMax H3, Krea 2 int8): the gradient is quantized to int8 too, so each frozen layer's input gradient runs on int8 tensor cores (about 2× the bf16 backward on an RTX 5090). Rounded stochastically so it stays unbiased; noisier per step than 16-bit">
               <div class="sw-row"><ZenSwitch :model-value="!!spec.memory.w8a8_backward" @update:model-value="spec.memory.w8a8_backward = $event" /><span class="sw-state">{{ spec.memory.w8a8_backward ? 'On' : 'Off' }}</span></div>
             </ZenField>

@@ -163,9 +163,14 @@ class Trainer:
                 self._status("loading")
                 self.setup()
                 self._status("training")
-                with gradient_checkpointing(self.models.patcher.model.diffusion_model, self.spec.memory.gradient_checkpointing,
-                                            self.spec.memory.checkpoint_depth, self.spec.memory.offloading,
-                                            self.spec.memory.checkpoint_skip) as ckpt:
+                from .compile import compiled_blocks
+
+                dm = self.models.patcher.model.diffusion_model
+                # compiled first, so checkpointing wraps the compiled forward
+                with compiled_blocks(dm, self.spec.memory.compile_blocks), \
+                        gradient_checkpointing(dm, self.spec.memory.gradient_checkpointing,
+                                               self.spec.memory.checkpoint_depth, self.spec.memory.offloading,
+                                               self.spec.memory.checkpoint_skip) as ckpt:
                     self._input_grad = ckpt.input_grad
                     self.enter_training()
                     try:
