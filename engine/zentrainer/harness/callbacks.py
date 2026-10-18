@@ -132,8 +132,10 @@ class Samples(Callback):
         if getattr(self, "_liker", None) is None:
             from .. import faces
 
-            if not faces.available():
-                self._liker = False
+            from .. import datasets
+
+            if not faces.available() or not datasets.get_settings(t.spec.dataset.folder).get("faces"):
+                self._liker = False  # likeness for datasets with faces on
                 return
             self._liker = faces.LikenessWorker(t.store, t.run_id, t.spec.dataset.folder)
         if self._liker:

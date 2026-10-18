@@ -5,6 +5,8 @@ Every path from a request is resolved and checked to stay inside its dataset fol
 
 from __future__ import annotations
 
+import json
+
 import re
 from pathlib import Path
 
@@ -146,7 +148,41 @@ def items(name: str, caption_ext: str = ".txt") -> dict:
             # a mask is stretched to its image: a different shape means it won't line up
             rows[-1]["mask_mismatch"] = bool(w and h and abs(mw / mh - w / h) > 0.02)
     sets = sorted({s for r in rows for s in r["captions"]} | {"default"}, key=lambda s: (s != "default", s))
-    return {"folder": name, "items": rows, "sets": sets}
+    return {"folder": name, "items": rows, "sets": sets, "settings": get_settings(name)}
+
+
+# ---- per-dataset settings (kept beside ZenTrainer's other state, not in the dataset folder) ------
+
+DEFAULT_SETTINGS = {"faces": False}  # faces: face report on open, faces in the stats, sample likeness
+
+
+def _settings_file() -> Path:
+    import folder_paths
+
+    p = Path(folder_paths.get_user_directory()) / "zentrainer" / "dataset_settings.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def get_settings(name: str) -> dict:
+    try:
+        saved = json.loads(_settings_file().read_text()).get(name, {})
+    except (OSError, ValueError):
+        saved = {}
+    return {**DEFAULT_SETTINGS, **{k: v for k, v in saved.items() if k in DEFAULT_SETTINGS}}
+
+
+def put_settings(name: str, changes: dict) -> dict:
+    folder(name)  # must exist
+    f = _settings_file()
+    try:
+        allx = json.loads(f.read_text())
+    except (OSError, ValueError):
+        allx = {}
+    cur = {**get_settings(name), **{k: changes[k] for k in DEFAULT_SETTINGS if k in changes}}
+    allx[name] = cur
+    f.write_text(json.dumps(allx, indent=2))
+    return cur
 
 
 def set_caption(name: str, rel: str, caption: str, caption_ext: str = ".txt", set_name: str = "default") -> None:

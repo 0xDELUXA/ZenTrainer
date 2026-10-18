@@ -238,6 +238,12 @@ export interface DatasetStats {
   history: { at: number; scores: Record<string, number>; metrics: Record<string, unknown> }[]
 }
 
+/** a dataset's own settings (engine datasets.get_settings) */
+export interface DatasetSettings {
+  /** face report on open, faces in the stats, sample likeness in runs */
+  faces: boolean
+}
+
 /** a dataset's faces (engine faces.dataset_faces) */
 export interface DatasetFaces {
   available: boolean
@@ -788,7 +794,9 @@ export const engine = {
       body: JSON.stringify({ checkpoint, client_id: getClientId() }),
     }).then((r) => r.run),
 
-  dataset: (name: string) => call<{ folder: string; items: DatasetItem[]; sets: string[] }>(dsPath(name)),
+  dataset: (name: string) => call<{ folder: string; items: DatasetItem[]; sets: string[]; settings?: DatasetSettings }>(dsPath(name)),
+  datasetSettings: (name: string, changes: Partial<DatasetSettings>) =>
+    call<DatasetSettings>(`${dsPath(name)}/settings`, { method: 'PUT', body: JSON.stringify(changes) }),
   createDataset: (name: string) => call<{ ok: true }>('/datasets', { method: 'POST', body: JSON.stringify({ name }) }),
   setCaption: (name: string, path: string, caption: string, set = 'default') =>
     call<{ ok: true }>(`${dsPath(name)}/caption`, { method: 'PUT', body: JSON.stringify({ path, caption, set }) }),

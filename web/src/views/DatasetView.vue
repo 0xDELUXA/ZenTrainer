@@ -64,6 +64,11 @@ async function load() {
   try {
     const r = await engine.dataset(props.name)
     items.value = r.items
+    const facesOn = !!r.settings?.faces
+    if (facesOn !== facesSetting.value) {
+      facesSetting.value = facesOn
+      if (facesOn && !faces.value) checkFaces() // cached per picture: quick after the first time
+    }
     sets.value = [...new Set([...r.sets, ...sets.value])].sort((a, b) => (a === 'default' ? -1 : b === 'default' ? 1 : a.localeCompare(b)))
     error.value = null
   } catch (e) {
@@ -109,6 +114,23 @@ const imageFlags = ref<Record<string, string[]>>({})
 // ---- faces (faces extra): a face per picture, how much it looks like the rest -----------------
 const faces = ref<DatasetFaces | null>(null)
 const facesBusy = ref(false)
+const facesSetting = ref(false) // this dataset's "faces" setting: on = checked on open, in the stats and runs
+async function toggleFaces() {
+  const on = !facesSetting.value
+  facesSetting.value = on
+  try {
+    await engine.datasetSettings(props.name, { faces: on })
+  } catch {
+    facesSetting.value = !on
+    return
+  }
+  if (on) await checkFaces()
+  else {
+    faces.value = null
+    if (filter.value === 'faces') filter.value = 'all'
+    statsPanel.value?.load() // back to the balance score
+  }
+}
 const statsPanel = ref<InstanceType<typeof DatasetStats> | null>(null)
 async function checkFaces() {
   facesBusy.value = true
@@ -403,12 +425,13 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
       </button>
       <button
         class="chip-btn"
-        :class="{ on: !!faces?.items }"
+        :class="{ on: facesSetting }"
         :disabled="facesBusy"
-        :title="faces && !faces.available ? faces.hint : faces?.items ? `${faces.with_face} of ${faces.total} have a face (${faces.pack}); click to check again` : 'Find the face in every picture and how much each looks like the rest (faces extra, CPU)'"
-        @click="checkFaces"
+        :title="faces && !faces.available ? faces.hint : facesSetting ? `Faces on for this dataset: ${faces?.with_face ?? '…'} of ${faces?.total ?? '…'} have a face (${faces?.pack ?? 'buffalo_l'}); in the stats and runs' likeness. Click to turn off` : 'Turn faces on for this dataset: every picture\'s face checked on open, a Faces score in the stats, and likeness for its runs (faces extra, CPU)'"
+        @click="toggleFaces"
       >
-        <i :class="facesBusy ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-face-recognition'" /> {{ facesBusy ? 'Checking…' : faces?.items ? `Faces ${faces.with_face}/${faces.total}` : 'Faces' }}
+        <i :class="facesBusy ? 'mdi mdi-loading mdi-spin' : facesSetting ? 'mdi mdi-face-recognition' : 'mdi mdi-face-man-outline'" />
+        {{ facesBusy ? 'Checking faces…' : facesSetting && faces?.items ? `Faces ${faces.with_face}/${faces.total}` : facesSetting ? 'Faces on' : 'Faces off' }}
       </button>
       <button class="chip-btn" :class="{ on: capOpen }" @click="capOpen = !capOpen"><i class="mdi mdi-creation-outline" /> Auto-caption</button>
       <button class="chip-btn" :class="{ on: bulkOpen }" @click="bulkOpen = !bulkOpen"><i class="mdi mdi-text-box-edit-outline" /> Bulk</button>

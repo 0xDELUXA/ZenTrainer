@@ -107,6 +107,14 @@ def register(server) -> None:
         return await _ds(lambda: {"changed": datasets.bulk(name, b.get("op", ""), b.get("text", ""), b.get("find", ""),
                                                            set_name=str(b.get("set") or "default"))})
 
+    @routes.put("/zentrainer/api/datasets/{name}/settings")
+    async def dataset_settings(request):
+        """{"faces": bool}: this dataset's settings (faces: face report on open, in the stats, likeness)."""
+        try:
+            return web.json_response(datasets.put_settings(request.match_info["name"], await request.json()))
+        except FileNotFoundError:
+            return _bad("dataset not found", 404)
+
     @routes.get("/zentrainer/api/datasets/{name}/stats")
     async def dataset_stats(request):
         """The dataset's health now and over time: {"current": {metrics, scores}, "history"}; a

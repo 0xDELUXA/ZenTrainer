@@ -257,11 +257,10 @@ def compute(name: str) -> dict:
 
 
 def _cached_faces(name: str) -> dict | None:
-    """The faces report if one was made (the Faces button); never starts a slow first look."""
-    from . import faces
+    """The faces report when the dataset has faces on (its setting; cached per picture)."""
+    from . import datasets, faces
 
-    cache_file = faces._cache_dir() / f"{hashlib.sha1(name.encode()).hexdigest()[:16]}.json"
-    return faces.dataset_faces(name) if cache_file.is_file() else None
+    return faces.dataset_faces(name) if datasets.get_settings(name).get("faces") else None
 
 
 def _fingerprint(name: str) -> str:
