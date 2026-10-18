@@ -2,7 +2,8 @@
 // Simple mode: pick a recipe card, add photos, name it, train. Everything else (settings, captions,
 // model files) comes from the recipe; what's missing is downloaded and the photos are captioned
 // before the run starts, each as a visible step.
-import { ZenButton, ZenCompare, ZenInput } from '@nynxz/zenkit-ui'
+import { ZenButton, ZenInput } from '@nynxz/zenkit-ui'
+import TemplateCard from '@/components/TemplateCard.vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { EngineError, defaultSpec, engine, thumbUrl, type DatasetInfo, type DatasetItem } from '@/api/engine'
@@ -220,35 +221,26 @@ void leaving
         <button v-for="k in kinds" :key="k.id" :class="{ on: kind === k.id }" @click="kind = k.id">{{ k.label }}</button>
       </div>
       <div class="cards">
-        <RouterLink v-for="x in shown" :key="x.id" :to="`/simple/${x.id}`" class="rcard" :style="{ '--a': x.cover.from }">
-          <div class="thumb">
-            <ZenCompare
-              v-if="x.thumb?.after"
-              :before="asset(x.thumb.src)"
-              :after="asset(x.thumb.after)"
-              :mode="x.thumb.mode ?? 'slider'"
-              :before-label="x.thumb.before_label"
-              :after-label="x.thumb.after_label"
-            />
-            <img v-else-if="x.thumb" :src="asset(x.thumb.src)" alt="" loading="lazy" />
-            <div v-else class="thumb-none"><i :class="x.cover.icon" /></div>
-          </div>
-          <div class="rbody">
-            <div class="rtop">
-              <img v-if="x.logo" class="logo" :src="asset(x.logo)" alt="" />
-              <span v-else class="ric"><i :class="x.cover.icon" /></span>
-              <span class="chip">{{ x.model }}</span>
-              <span v-if="!x.validated" class="draft" title="Not trained and checked end to end yet: settings from similar runs">draft</span>
-              <span class="kind-tag">{{ x.kind === 'character' ? 'Character' : x.kind === 'style' ? 'Style' : 'Video' }}</span>
-            </div>
-            <b>{{ x.title.split(' · ')[1] ?? x.title }}</b>
-            <p>{{ x.blurb }}</p>
-            <div class="rfoot muted small">
-              <span><i class="mdi mdi-image-multiple-outline" /> {{ x.photos.ideal }}</span>
-              <span><i class="mdi mdi-timer-outline" /> {{ eta(stepsFor(x, 25) * x.secPerStep + 180) }}</span>
-            </div>
-          </div>
-        </RouterLink>
+        <TemplateCard
+          v-for="x in shown"
+          :key="x.id"
+          :to="`/simple/${x.id}`"
+          :title="x.title.split(' · ')[1] ?? x.title"
+          :description="x.blurb"
+          :image="x.thumb ? asset(x.thumb.src) : null"
+          :after="x.thumb?.after ? asset(x.thumb.after) : null"
+          :mode="x.thumb?.mode"
+          :before-label="x.thumb?.before_label"
+          :after-label="x.thumb?.after_label"
+          :icon="x.cover.icon"
+          :accent="x.cover.from"
+          :logo="x.logo ? asset(x.logo) : null"
+          :tags="[x.model]"
+          :badge="x.kind === 'character' ? 'Character' : x.kind === 'style' ? 'Style' : 'Video'"
+          :flag="x.validated ? undefined : 'draft'"
+          flag-title="Not trained and checked end to end yet: settings from similar runs"
+          :meta="[x.photos.ideal, eta(stepsFor(x, 25) * x.secPerStep + 180)]"
+        />
       </div>
     </template>
 
@@ -397,111 +389,6 @@ void leaving
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 16px;
-}
-.rcard {
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--zen-border);
-  border-radius: var(--r-lg, 12px);
-  overflow: hidden;
-  background: var(--zen-surface);
-  transition:
-    transform var(--zen-dur) ease,
-    border-color var(--zen-dur-fast) ease;
-}
-.rcard:hover {
-  border-color: color-mix(in srgb, var(--a) 70%, var(--zen-border));
-  transform: translateY(-2px);
-}
-.thumb {
-  position: relative;
-  aspect-ratio: 4 / 3;
-  background: var(--zen-surface-2);
-  overflow: hidden;
-}
-.thumb > img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-  transition: transform 0.4s ease;
-}
-.rcard:hover .thumb > img {
-  transform: scale(1.04);
-}
-.thumb-none {
-  height: 100%;
-  display: grid;
-  place-items: center;
-  font-size: 40px;
-  color: color-mix(in srgb, var(--a) 70%, var(--zen-muted));
-  background: radial-gradient(circle at 50% 40%, color-mix(in srgb, var(--a) 14%, transparent), transparent 70%);
-}
-.rbody {
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  flex: 1;
-}
-.rtop {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.ric {
-  width: 30px;
-  height: 30px;
-  border-radius: var(--r-md);
-  display: grid;
-  place-items: center;
-  background: color-mix(in srgb, var(--a) 18%, transparent);
-  color: var(--a);
-  font-size: 17px;
-}
-.chip {
-  font-size: 12px;
-  font-weight: 600;
-}
-.logo {
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  object-fit: cover;
-  background: #fff;
-}
-.draft {
-  font-size: 10px;
-  padding: 0 6px;
-  border-radius: 999px;
-  color: var(--zen-warn);
-  border: 1px dashed color-mix(in srgb, var(--zen-warn) 60%, transparent);
-}
-.kind-tag {
-  margin-left: auto;
-  font-size: 11px;
-  padding: 1px 8px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--zen-border) 80%, transparent);
-  color: var(--zen-muted);
-}
-.rbody b {
-  font-size: 15px;
-}
-.rbody p {
-  margin: 0;
-  font-size: 13px;
-  color: var(--zen-muted);
-  line-height: 1.5;
-}
-.rfoot {
-  display: flex;
-  gap: 14px;
-  margin-top: auto;
-  padding-top: 4px;
-}
-.rfoot i {
-  margin-right: 3px;
 }
 .titles h1 {
   display: flex;

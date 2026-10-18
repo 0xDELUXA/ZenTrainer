@@ -4,6 +4,7 @@
 import { ZenEmpty } from '@nynxz/zenkit-ui'
 import { computed, onMounted, ref } from 'vue'
 import { engine, type AppInfo } from '@/api/engine'
+import TemplateCard from '@/components/TemplateCard.vue'
 
 const apps = ref<AppInfo[]>([])
 const errors = ref<string[]>([])
@@ -18,6 +19,13 @@ onMounted(async () => {
     loaded.value = true
   }
 })
+// each card's picture: the app's own cover, else a ComfyUI template thumbnail of the same kind
+// of job (never your own outputs: those can be anything, and live in the Gallery)
+const FALLBACK: Record<string, string> = {
+  'text-to-image': '/templates/image_z_image_turbo-1.webp',
+  'test-lora': '/templates/image_krea2_turbo_int8_image_style_reference-1.webp',
+}
+const cover = (a: AppInfo) => (a.cover ? `/zentrainer/api/apps/${a.id}/cover` : (FALLBACK[a.id] ?? null))
 
 const CATEGORIES: Record<string, string> = { generate: 'Generate', train: 'Training', edit: 'Edit', caption: 'Caption' }
 const byCategory = computed(() => {
@@ -42,15 +50,16 @@ const byCategory = computed(() => {
     <section v-for="[cat, list] in byCategory" :key="cat" class="cat">
       <div class="eyebrow">{{ CATEGORIES[cat] ?? cat }}</div>
       <div class="grid">
-        <RouterLink v-for="a in list" :key="a.id" :to="`/apps/${a.id}`" class="app card">
-          <img v-if="a.cover" :src="`/zentrainer/api/apps/${a.id}/cover`" alt="" class="cover" />
-          <i v-else :class="a.icon ?? 'mdi mdi-application-outline'" class="icon" />
-          <div>
-            <div class="name">{{ a.name }} <span v-if="!a.builtin" class="chip">yours</span></div>
-            <p class="muted desc">{{ a.description }}</p>
-            <p v-if="a.families.length" class="muted small">{{ a.families.length }} models</p>
-          </div>
-        </RouterLink>
+        <TemplateCard
+          v-for="a in list"
+          :key="a.id"
+          :to="`/apps/${a.id}`"
+          :title="a.name"
+          :description="a.description"
+          :image="cover(a)"
+          :icon="a.icon ?? 'mdi mdi-application-outline'"
+          :tags="[...(a.builtin ? [] : ['yours']), ...(a.families.length ? [`${a.families.length} models`] : [])]"
+        />
       </div>
     </section>
   </div>
@@ -64,53 +73,10 @@ const byCategory = computed(() => {
 }
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 12px;
-}
-.app {
-  display: flex;
-  gap: 14px;
-  align-items: flex-start;
-  padding: 16px;
-  transition: border-color 0.15s ease;
-}
-.app:hover {
-  border-color: var(--zen-accent);
-}
-.icon {
-  font-size: 26px;
-  width: 44px;
-  height: 44px;
-  flex: none;
-  display: grid;
-  place-items: center;
-  border-radius: var(--r-lg);
-  color: var(--zen-accent);
-  background: color-mix(in srgb, var(--zen-accent) 14%, transparent);
-}
-.cover {
-  width: 64px;
-  height: 64px;
-  flex: none;
-  object-fit: cover;
-  border-radius: var(--r-lg);
-}
-.name {
-  font-weight: 650;
-  font-size: 14px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.desc {
-  margin: 4px 0 0;
-  font-size: 12px;
-  line-height: 1.45;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
 }
 .warn {
   border-color: var(--zen-warn);
-}
-.small {
-  font-size: 11px;
 }
 </style>
