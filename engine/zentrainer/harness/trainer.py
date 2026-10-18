@@ -272,15 +272,20 @@ class Trainer:
             self._status("loading", message="quantized base model: training in bypass mode")
         assist = None
         if s.network.training_adapter:
+            left_out: list = []
             assist = network_mod.load_training_adapter(
                 patcher, folder_paths.get_full_path_or_raise("loras", s.network.training_adapter), self.device,
-                torch.bfloat16)
+                torch.bfloat16, left_out)
+            self._partial(s.network.training_adapter, "the training adapter", len(assist), left_out)
             logging.info("[ZenTrainer] training adapter %s on %d layers (off for samples and the saved LoRA)",
                          s.network.training_adapter, len(assist))
         preview = None
         if s.samples.turbo_lora:
+            left_out = []
             preview = network_mod.load_training_adapter(
-                patcher, folder_paths.get_full_path_or_raise("loras", s.samples.turbo_lora), self.device, torch.bfloat16)
+                patcher, folder_paths.get_full_path_or_raise("loras", s.samples.turbo_lora), self.device, torch.bfloat16,
+                left_out)
+            self._partial(s.samples.turbo_lora, "the turbo LoRA", len(preview), left_out)
             logging.info("[ZenTrainer] samples ride on %s at %.2f", s.samples.turbo_lora, s.samples.turbo_strength)
         self.network = Network(patcher, s.network, self.device, bypass=bypass, init_weights=init, assist=assist,
                                preview=preview, preview_strength=s.samples.turbo_strength)
@@ -562,6 +567,18 @@ class Trainer:
                 mm.throw_exception_if_processing_interrupted()
             self._apply(self.control.drain())  # whatever arrived while paused (set_lr, stop, ...)
             self._status("training")
+
+    def _partial(self, name: str, what: str, kept: int, left_out: list) -> None:
+        """Say so when a frozen adapter fits only part of this model (it was made for another build
+        of it, e.g. the full H3 against a pruned one): what it does then is only partly there."""
+        if not left_out:
+            return
+        share = len(left_out) / (kept + len(left_out))
+        msg = (f"{name}: {len(left_out)} of {kept + len(left_out)} layers don't fit this model (made for another "
+               f"build of it?), so {what} is only partly applied")
+        logging.warning("[ZenTrainer] %s", msg)
+        if share >= 0.05:
+            self._status("loading", message=msg)
 
     def _apply(self, commands) -> None:
         tries: list[dict] = []

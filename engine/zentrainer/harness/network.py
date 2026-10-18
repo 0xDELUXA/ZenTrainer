@@ -154,7 +154,7 @@ class _Switch:
     on = True
 
 
-def load_training_adapter(patcher, path: str, device, dtype) -> dict:
+def load_training_adapter(patcher, path: str, device, dtype, skipped: list | None = None) -> dict:
     """A LoRA file as frozen train-form adapters keyed by model weight ("diffusion_model.X.weight"),
     read with ComfyUI's own LoRA key mapping (diffusers, PEFT lora_A/B, kohya names ...)."""
     import comfy.lora
@@ -164,12 +164,12 @@ def load_training_adapter(patcher, path: str, device, dtype) -> dict:
     sd = comfy.utils.load_torch_file(path, safe_load=True)
     patches = comfy.lora.load_lora(sd, comfy.lora.model_lora_keys_unet(patcher.model, {}), log_missing=False)
     out = {}
-    skipped = []
+    left_out = []
     for key, adapter in patches.items():
         if isinstance(adapter, LoRAAdapter):
             mat1, mat2, alpha, mid, dora, reshape = adapter.weights
             if not _fits(patcher.model, key, (mat1.shape[0], mat2[0].numel())):
-                skipped.append(key)  # same name, different layer (another build of the model): ComfyUI skips these too
+                left_out.append(key)  # same name, different layer (another build of the model): ComfyUI skips these too
                 continue
             alpha = float(alpha) if alpha is not None else float(mat2.shape[0])  # no alpha: scale 1
             module = LoraDiff((mat1, mat2, alpha, mid, dora, reshape))
@@ -178,9 +178,11 @@ def load_training_adapter(patcher, path: str, device, dtype) -> dict:
         else:
             continue
         out[key] = module.to(device=device, dtype=dtype).requires_grad_(False)
-    if skipped:
+    if left_out:
         logging.warning("[ZenTrainer] %s: %d layer(s) don't match this model's shapes and are left out (e.g. %s)",
-                        os.path.basename(path), len(skipped), skipped[0])
+                        os.path.basename(path), len(left_out), left_out[0])
+    if skipped is not None:
+        skipped += left_out
     if not out:
         raise RuntimeError(f"{path}: no layers of this model in the training adapter")
     return out
