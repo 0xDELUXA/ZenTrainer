@@ -35,7 +35,7 @@ const sideOpen = ref<boolean>(saved.side ?? true) // the side panel: health, fac
 // bottom and staying there (a negative sticky top), so it never scrolls out of sight
 const sideEl = ref<HTMLElement | null>(null)
 const sideTop = ref(58)
-const PIN = 66 // the sticky toolbar (10px down, 46px tall) + its 10px margin
+const PIN = 58 // the sticky toolbar (46px) + a gap
 function placeSide() {
   const h = sideEl.value?.offsetHeight ?? 0
   sideTop.value = Math.min(PIN, window.innerHeight - h - 12)
@@ -619,7 +619,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
         <div class="pair-media">
           <!-- one picture in, one out, same shape: drag across to compare -->
           <div v-if="isSimplePair(it)" class="pane compare" :style="{ aspectRatio: aspect(it) }">
-            <ZenCompare :before="thumb({ path: it.controls![0]! }, 768)" :after="thumb(it, 768)" before-label="Input" after-label="Result" />
+            <ZenCompare :before="thumb({ path: it.controls![0]! }, 768)" :after="thumb(it, 768)" before-label="Input" after-label="Result" track-closest=".pair" />
           </div>
           <template v-else>
             <button v-for="(c, n) in it.controls ?? []" :key="c" class="pane" :title="c" :data-peek="ctrlView(it, c)" @click="onItemClick(it, i, $event)">
@@ -1621,15 +1621,10 @@ dd {
   flex-wrap: nowrap;
   overflow: hidden;
   position: sticky;
-  top: 10px;
+  top: 0;
   z-index: 5;
-  /* opaque, so the grid doesn't show through once it's stuck; the two shadows paint the page's
-     background 10px above and below it (the gap to the grid), so it sits in an even margin and
-     scrolled pictures disappear before they reach it */
+  /* opaque, so the grid doesn't show through once it's stuck */
   background: color-mix(in srgb, var(--zen-surface) 70%, var(--zen-bg));
-  box-shadow:
-    0 -8px 0 2px var(--zen-bg),
-    0 8px 0 2px var(--zen-bg);
 }
 .ds-toolbar .zoom {
   width: 150px;
