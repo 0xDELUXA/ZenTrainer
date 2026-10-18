@@ -854,7 +854,7 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
             <header class="sec-head"><span class="sec-title">{{ g.title }}</span></header>
             <dl class="sgrid">
               <div v-for="it in g.items" :key="it.k" class="scell">
-                <dt>{{ it.k }}<ZenTip v-if="it.tip" :text="it.tip" :label="`About ${it.k}`" /></dt>
+                <dt><ZenTip v-if="it.tip" :text="it.tip">{{ it.k }}</ZenTip><template v-else>{{ it.k }}</template></dt>
                 <dd :class="{ mono: it.mono !== false }">
                   {{ it.v }}<span v-if="it.delta" class="delta" :class="it.delta.good ? 'good' : 'bad'">{{ it.delta.text }}</span>
                 </dd>
@@ -888,7 +888,7 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
 
           <section class="card">
             <header class="sec-head">
-              <span class="sec-title">Checkpoints <ZenTip text="The LoRA saved along the way. Best: the highest likeness when faces are scored (a character), else the lowest validation loss. Hover a row to test it, train more from it, or copy its name" label="About checkpoints" /></span>
+              <span class="sec-title"><ZenTip text="The LoRA saved along the way. Best: the highest likeness when faces are scored (a character), else the lowest validation loss. Hover a row to test it, train more from it, or copy its name">Checkpoints</ZenTip></span>
               <span class="sec-sub">{{ saveLine }}</span>
             </header>
             <div v-if="!ckRows.length" class="muted small">
@@ -1188,9 +1188,7 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
   align-items: center;
   gap: 3px;
 }
-.scell dt :deep(.zen-tip) {
-  opacity: 0.7;
-}
+
 .scell dd {
   margin: 2px 0 0;
   font-size: 13px;

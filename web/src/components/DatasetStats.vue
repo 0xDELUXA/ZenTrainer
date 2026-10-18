@@ -135,7 +135,7 @@ function spark(key: string) {
     <HealthPentagon v-if="stats" :scores="scores" :size="170" labels class="c-pent" />
     <div v-else class="c-empty muted small">{{ busy ? 'Measuring…' : error || 'No stats yet' }}</div>
     <div v-for="t in tiles" :key="t.key" class="c-row">
-      <span class="c-label">{{ t.label }} <ZenTip :text="`${t.sub}. ${t.tip}`" :label="`About ${t.label}`" /></span>
+      <span class="c-label"><ZenTip :text="`${t.sub}. ${t.tip}`">{{ t.label }}</ZenTip></span>
       <span class="c-value">{{ t.value }}</span>
       <span class="c-score mono">
         <template v-if="scores[t.key] != null">{{ Math.round(scores[t.key]! * 100) }}</template>
@@ -160,7 +160,7 @@ function spark(key: string) {
     <div class="tiles">
       <div v-for="t in tiles" :key="t.key" class="tile">
         <div class="t-head">
-          <span class="t-label">{{ t.label }} <ZenTip :text="t.tip" :label="`About ${t.label}`" /></span>
+          <span class="t-label"><ZenTip :text="t.tip">{{ t.label }}</ZenTip></span>
           <span v-if="scores[t.key] != null" class="t-score mono" :title="`Score ${Math.round(scores[t.key]! * 100)} of 100`">{{ Math.round(scores[t.key]! * 100) }}</span>
         </div>
         <div class="t-value">{{ t.value }}</div>
