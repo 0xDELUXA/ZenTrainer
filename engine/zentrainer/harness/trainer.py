@@ -383,8 +383,8 @@ class Trainer:
         masked = sum(sm.mask is not None for sm in self.dataset.samples)
         if masked and not s.dataset.masked_loss:
             msg = (f"{masked} picture{'s have masks' if masked != 1 else ' has a mask'}, but 'Masked training' is "
-                   "off: the masks are ignored and every part of those pictures trains (masked-out faces "
-                   "included). Turn on Masked training")
+                   "off: the masks are ignored and every part of those pictures trains, the parts they "
+                   "leave out included. To honour them, stop and turn on Masked training (Dataset)")
             logging.warning("[ZenTrainer] %s", msg)
             self._status("loading", message=msg)
         if s.memory.tread > 0 and s.memory.tread_steps >= 1.0 and self.dataset.samples and all(

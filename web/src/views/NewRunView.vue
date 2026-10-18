@@ -335,6 +335,13 @@ watch(
 
 // ---- summary & checks -----------------------------------------------------------------------
 const dataset = computed(() => datasets.value.find((d) => d.folder === spec.dataset.folder))
+// a mask says "only this part": picking a dataset that has some turns Masked training on
+watch(
+  () => spec.dataset.folder,
+  (folder, was) => {
+    if (was !== undefined && folder !== was) spec.dataset.masked_loss = (dataset.value?.masked ?? 0) > 0
+  },
+)
 const VIDEO_MODES: [TrainSpec['dataset']['video_mode'], string][] = [
   ['uniform', 'Spread'],
   ['head', 'Start'],
@@ -349,6 +356,9 @@ const modelLabel = computed(() => (spec.model.kind === 'checkpoint' ? spec.model
 const warnings = computed(() => {
   const w: string[] = []
   if (!spec.dataset.trigger) w.push('No trigger word: the likeness has nothing specific to attach to.')
+  const masked = dataset.value?.masked ?? 0
+  if (masked && !spec.dataset.masked_loss)
+    w.push(`${masked} picture${masked === 1 ? ' has a mask' : 's have masks'}, but Masked training is off: the parts the masks leave out train too.`)
   if (!spec.samples.prompts.length) w.push('No sample prompts: you will only see the loss curves.')
   else if (!spec.samples.every) w.push('Samples are off (Every 0): only Sample now renders them, so checkpoints get no samples or likeness. Set Every to the save interval.')
   else if (spec.save_every && spec.save_every % spec.samples.every) w.push(`Samples every ${spec.samples.every} don't land on the saves every ${spec.save_every}: checkpoints get no samples or likeness to compare.`)

@@ -186,6 +186,7 @@ async function train() {
       dataset: dsName.value,
       photos: count.value,
       captions: items.value.map((i) => i.caption),
+      masks: items.value.filter((i) => i.mask).length,
     })
     const run = await engine.start(spec)
     router.push(`/simple/run/${run.run_id}`)

@@ -257,7 +257,7 @@ export function buildSpec(
   r: Recipe,
   p: Plan,
   base: TrainSpec,
-  o: { name: string; trigger: string; dataset: string; photos: number; captions?: string[] },
+  o: { name: string; trigger: string; dataset: string; photos: number; captions?: string[]; masks?: number },
 ): TrainSpec {
   const spec = structuredClone(base)
   merge(spec as unknown as Record<string, unknown>, r.spec as Record<string, unknown>)
@@ -275,6 +275,8 @@ export function buildSpec(
   spec.dataset.trigger = o.trigger
   spec.dataset.trigger_prepend = true
   spec.dataset.caption_set = 'default'
+  // a mask says "only this part": someone drew it (or cut a face out), so honour it
+  spec.dataset.masked_loss = (o.masks ?? 0) > 0
   spec.optim.steps = stepsFor(r, o.photos)
   // about 8 checkpoints, each with samples, to pick the best from
   spec.save_every = Math.max(100, Math.round(spec.optim.steps / 8 / 50) * 50)
