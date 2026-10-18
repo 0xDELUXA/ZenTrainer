@@ -118,6 +118,13 @@ export async function initSettings(): Promise<void> {
   }
 }
 
+/** whether to skip motion: the Motion setting, or the OS preference when it's System (for JS
+ *  animations; CSS ones follow data-zen-motion through app.css) */
+export function reducedMotion(): boolean {
+  if (settings.motion !== 'system') return settings.motion === 'reduce'
+  return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
 // effects on the page
 function apply() {
   const root = document.documentElement
