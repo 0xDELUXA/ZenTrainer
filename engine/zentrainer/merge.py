@@ -17,6 +17,7 @@ is summed by strength.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import torch
@@ -114,7 +115,7 @@ def resize(sd: dict[str, torch.Tensor], max_rank: int, energy: float = 0.999, de
 
 
 def merge_files(members: list[tuple[Path, float]], out: Path, max_rank: int = 0, energy: float = 0.999,
-                dtype: torch.dtype = torch.bfloat16) -> dict:
+                dtype: torch.dtype = torch.bfloat16, overwrite_ok: bool = False) -> dict:
     """Merge LoRA files (path, strength) into `out`; with max_rank > 0, shrink it too."""
     from safetensors.torch import load_file, save_file
 
@@ -125,10 +126,16 @@ def merge_files(members: list[tuple[Path, float]], out: Path, max_rank: int = 0,
         merged, st = resize(merged, max_rank, energy)
         stats.update(st)
     out.parent.mkdir(parents=True, exist_ok=True)
-    tmp = out.with_suffix(".part.safetensors")
+    tmp = out.with_name(f".{out.stem}.part")  # hidden, and not a .safetensors ComfyUI would list
     meta = {"zentrainer_merge": ", ".join(f"{p.name}@{s:g}" for p, s in members),
             "zentrainer_resize": f"max_rank={max_rank} energy={energy}" if max_rank else "none"}
-    save_file({k: v.to(dtype).contiguous() for k, v in merged.items()}, str(tmp), metadata=meta)
-    tmp.replace(out)
+    try:
+        save_file({k: v.to(dtype).contiguous() for k, v in merged.items()}, str(tmp), metadata=meta)
+        os.chmod(tmp, 0o644)
+        if out.exists() and not overwrite_ok:  # another merge of the same name finished first
+            raise FileExistsError(f"{out.name} already exists")
+        tmp.replace(out)
+    finally:
+        tmp.unlink(missing_ok=True)
     stats["bytes"] = out.stat().st_size
     return stats

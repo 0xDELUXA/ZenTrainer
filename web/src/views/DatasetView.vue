@@ -381,10 +381,33 @@ async function removeMany(paths: string[]) {
 const bulkOpen = ref(false)
 const bulkText = ref('')
 const findText = ref('')
+// the captions as they were before the last bulk edit, so it can be undone
+const bulkUndo = ref<{ set: string; before: Record<string, string> } | null>(null)
 async function bulk(op: 'prefix' | 'suffix' | 'replace') {
   if (!bulkText.value && op !== 'replace') return
-  const { changed } = await engine.bulkCaptions(props.name, op, bulkText.value, findText.value, activeSet.value)
+  const set = activeSet.value
+  const before = Object.fromEntries(items.value.map((it) => [it.path, it.captions[set] ?? '']))
+  const touched = Object.values(before).filter((c) => (op === 'replace' ? c.includes(findText.value) : true)).length
+  const what = op === 'replace' ? `Replace “${findText.value}” with “${bulkText.value}”` : `${op === 'prefix' ? 'Put' : 'Append'} “${bulkText.value}” ${op === 'prefix' ? 'at the start of' : 'to'}`
+  if (!touched || !confirm(`${what} ${op === 'replace' ? 'in' : ''} ${touched} caption${touched === 1 ? '' : 's'} in “${set}”? You can undo it from here.`)) return
+  const { changed } = await engine.bulkCaptions(props.name, op, bulkText.value, findText.value, set)
+  bulkUndo.value = changed ? { set, before } : null
   flash(`${changed} caption${changed === 1 ? '' : 's'} updated`)
+  await load()
+}
+async function undoBulk() {
+  const u = bulkUndo.value
+  if (!u) return
+  let n = 0
+  for (const it of items.value) {
+    const old = u.before[it.path]
+    if (old != null && (it.captions[u.set] ?? '') !== old) {
+      await engine.setCaption(props.name, it.path, old, u.set)
+      n++
+    }
+  }
+  bulkUndo.value = null
+  flash(`${n} caption${n === 1 ? '' : 's'} put back`)
   await load()
 }
 
@@ -759,6 +782,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
             </div>
             <ZenInput v-model="findText" placeholder="find (to replace with the text)" size="sm" />
             <ZenButton size="sm" :disabled="!findText" title="Replace 'find' with the text everywhere" @click="bulk('replace')">Replace</ZenButton>
+            <ZenButton v-if="bulkUndo" size="sm" icon="mdi mdi-undo" :title="`Put the captions in “${bulkUndo.set}” back as they were before the last bulk edit`" @click="undoBulk">Undo last edit</ZenButton>
           </div>
         </section>
         <section class="side-sec">

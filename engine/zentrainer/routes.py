@@ -20,7 +20,7 @@ import aiohttp
 from aiohttp import web
 
 from . import __version__, state
-from . import datasets, jobqueue, presets, system
+from . import datasets, jobqueue, presets, safeio, system
 from .harness import control
 from .spec import SpecError, TrainSpec, locked_changes
 
@@ -1051,7 +1051,7 @@ def register(server) -> None:
             return _bad(f"merged/{out.name} already exists", 409)
         try:
             stats = await asyncio.to_thread(merge.merge_files, members, out, int(b.get("max_rank") or 0),
-                                            float(b.get("energy") or 0.999))
+                                            float(b.get("energy") or 0.999), overwrite_ok=bool(b.get("overwrite")))
         except Exception as e:
             return _bad(f"merge failed: {e}")
         return web.json_response({"lora_name": f"merged/{out.name}", **stats})
@@ -1252,7 +1252,7 @@ def _migrate_states() -> None:
     # strays not tied to a run row
     root = Path(folder_paths.get_output_directory()) / "zentrainer" / "loras"
     for stray in root.rglob("*.state.pt") if root.is_dir() else []:
-        dest = state_dir("_orphaned") / stray.name
+        dest = safeio.free_name(state_dir("_orphaned") / stray.name)
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(stray), str(dest))
 

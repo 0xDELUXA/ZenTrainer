@@ -217,6 +217,9 @@ function applyPreset(p: Preset<Partial<TrainSpec>>) {
 async function savePreset() {
   const name = prompt('Save these settings as a preset. Name:')
   if (!name) return
+  const slug = name.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase() // spec.py slugify
+  const same = runPresets.value.find((p) => p.id === slug || p.name.toLowerCase() === name.trim().toLowerCase())
+  if (same && !confirm(`Replace your preset “${same.name}” with these settings?`)) return
   const { model: _m, dataset, name: _n, ...rest } = structuredClone(toRaw(spec)) as TrainSpec
   const { folder: _f, ...ds } = dataset // presets are model- and dataset-agnostic
   const saved = await engine.savePreset('run', name, { ...rest, dataset: ds })
