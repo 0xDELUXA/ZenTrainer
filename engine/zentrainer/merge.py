@@ -120,7 +120,7 @@ def merge_files(members: list[tuple[Path, float]], out: Path, max_rank: int = 0,
 
     sds = [(load_file(str(p)), s) for p, s in members]
     merged = merge(sds)
-    stats: dict = {"rank": None}
+    stats: dict = {}
     if max_rank > 0:
         merged, st = resize(merged, max_rank, energy)
         stats.update(st)
