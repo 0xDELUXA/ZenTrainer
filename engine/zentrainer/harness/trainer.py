@@ -815,6 +815,9 @@ class Trainer:
         path = folder / f"{name}.safetensors"
         sft.save_file(self.network.state_dict(), str(path),
                                     metadata=write_metadata(self.spec.to_dict(), self.step))
+        # safetensors writes owner-only (0600); a LoRA is an output like ComfyUI's images, readable
+        # by whatever else serves or syncs the folder (Docker, a share, another user's ComfyUI)
+        os.chmod(path, 0o644)
         # resumable state (optimizer, schedule, step, RNG) goes outside the LoRA folders:
         # those are registered with ComfyUI, which would list a .pt there as a "LoRA"
         keep = self.spec.output.keep_states
