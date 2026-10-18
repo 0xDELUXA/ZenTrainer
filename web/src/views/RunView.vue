@@ -315,6 +315,7 @@ const statGroups = computed((): { title: string; items: Stat[] }[] => {
         { k: 'Speed', v: `${l?.it_s?.toFixed(2) ?? '–'} it/s` },
         { k: 'Epoch', v: String(l?.epoch ?? '–') },
         ...(l?.vram_peak ? [{ k: 'Peak VRAM', v: `${gb(l.vram_peak)} GB` }] : []),
+        ...(l?.phases ? [{ k: 'Forward / back', v: `${l.phases.forward.toFixed(1)} / ${l.phases.backward.toFixed(1)} s` }, { k: 'Data / optimizer', v: `${l.phases.data.toFixed(2)} / ${l.phases.optimizer.toFixed(2)} s` }] : []),
       ],
     },
     {

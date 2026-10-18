@@ -118,7 +118,7 @@ AUTO_OFFLOAD_HEADROOM = 8 * 1024 ** 3
 # video clips are many tokens per step (73 frames at 512 px: ~5k; a 1024 px image on H3: ~1k):
 # activations grow with them, so the headroom does too, beyond this many tokens
 HEADROOM_TOKENS = 2048
-HEADROOM_PER_TOKEN = int(1.6 * 1024 ** 2)
+HEADROOM_PER_TOKEN = int(1.0 * 1024 ** 2)  # measured: 73 frames at 512 (~5.3k tokens) peaked ~7 GB of activations
 
 
 class _Lazy:
@@ -388,6 +388,18 @@ class Trainer:
         ms = self.denoiser.model_sampling
         acc = s.optim.grad_accumulation_steps
         total_loss = 0.0
+        # where the step's time goes (synchronised, so each phase owns its GPU work): data,
+        # forward, backward, optimizer. Shown on the run page; a sync per phase costs ~nothing
+        sync = torch.cuda.synchronize if self.device.type == "cuda" else (lambda: None)
+        ph = {"data": 0.0, "forward": 0.0, "backward": 0.0, "optimizer": 0.0}
+        mark = time.perf_counter()
+
+        def lap(name):
+            nonlocal mark
+            sync()
+            now = time.perf_counter()
+            ph[name] += now - mark
+            mark = now
 
         for _ in range(acc):
             idx = next(self.batches)
@@ -397,14 +409,17 @@ class Trainer:
             noise = torch.randn(x0.shape, generator=self.generator).to(self.device)
             sigma = sigmas_for(ms, sample_percents(s.objective, len(idx), self.generator), self._shift).to(self.device)
             x_t = self.objective.noisy(ms, sigma, noise, x0)
+            lap("data")
 
             # requires_grad on the input keeps custom-Function checkpointing in the graph
             with torch.autocast(self.device.type, dtype=self.train_dtype, enabled=self.train_dtype != torch.float32):
                 x0_pred = self.denoiser(x_t.requires_grad_(True), sigma, conds)
             loss = self.objective.loss(x_t.detach(), x0, x0_pred, sigma, weight).mean()
+            lap("forward")
             scaled = loss / acc
             (self.scaler.scale(scaled) if self.scaler else scaled).backward()
             total_loss += loss.item()
+            lap("backward")
 
         if self.scaler:
             self.scaler.unscale_(self.optimizer)
@@ -422,6 +437,8 @@ class Trainer:
             self.optimizer.step()
         self.scheduler.step()
         self.optimizer.zero_grad(set_to_none=True)
+        lap("optimizer")
+        self.last_phases = {k: round(v, 4) for k, v in ph.items()}
         self.last_loss = total_loss / acc
 
     def batch(self, idx: list[int]) -> tuple[torch.Tensor, torch.Tensor | None, list | None]:

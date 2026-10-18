@@ -159,6 +159,8 @@ export interface MetricRow {
   it_s: number
   /** the step's peak VRAM (bytes, PyTorch allocations) */
   vram_peak?: number
+  /** seconds the step spent in each phase */
+  phases?: { data: number; forward: number; backward: number; optimizer: number }
 }
 
 export interface CheckpointRow {

@@ -61,6 +61,8 @@ class Metrics(Callback):
             "step_time": round(dt, 4),
             "it_s": round(self._rate, 3),
         }
+        if getattr(t, "last_phases", None):
+            row["phases"] = t.last_phases  # seconds in data / forward / backward / optimizer
         if torch.cuda.is_available():
             # the step's peak VRAM (PyTorch's allocations: weights resident, activations, LoRA,
             # optimizer): what the offloading headroom has to cover
