@@ -235,6 +235,16 @@ class Trainer:
         self.dataset = data.build(s.dataset, _Lazy(lambda: self.models.clip), self.models.vae, root, cache, encoder_id,
                                   progress=lambda i, n, msg: self._status("loading", message=f"{msg} ({i}/{n})"),
                                   audio_vae=self.models.audio_vae)
+        if s.dataset.edit:
+            from .edit import takes_references
+
+            if not takes_references(patcher.model):
+                raise ValueError(f"{type(patcher.model).__name__} doesn't take reference images, so it can't train "
+                                 "edits: pick an edit-capable model (Flux 3 Klein, Flux 2, Kontext, Qwen Image Edit)")
+            pairs = sum(sm.refs is not None for sm in self.dataset.samples)
+            if not pairs:
+                raise ValueError("edit training, but no image has a <name>_control picture beside it")
+            logging.info("[ZenTrainer] edit training: %d of %d images have an input picture", pairs, len(self.dataset.samples))
         self.batches = data.Batches(self.dataset, s.optim.batch_size, s.seed)
 
         if s.memory.training_dtype != "fp32":
@@ -507,23 +517,29 @@ class Trainer:
     def fixed_cond(self, i: int, x0: torch.Tensor, shapes: list | None = None) -> dict:
         """A sample's own caption, prepared; never dropped out (validation uses this)."""
         sample = self.dataset.samples[i]
-        key = (sample.caption, tuple(sample.latent.shape))
+        return self._prepared(i, sample.caption, x0, shapes)
+
+    def _prepared(self, i: int, cap: int, x0: torch.Tensor, shapes: list | None) -> dict:
+        """A caption's processed conds for sample i's shape; an edit pair's carry its own input
+        picture, so those are kept per sample."""
+        sample = self.dataset.samples[i]
+        key = (cap, tuple(sample.latent.shape), i if sample.refs else None)
         if key not in self._conds:
+            cond = self.dataset.conditionings[cap]
+            if sample.refs:
+                from .edit import with_refs
+
+                cond = with_refs(cond, sample.refs)
             with torch.no_grad():
-                self._conds[key] = self.denoiser.prepare(self.dataset.conditionings[sample.caption], x0[:1], self.device,
-                                                         shapes)
+                self._conds[key] = self.denoiser.prepare(cond, x0[:1], self.device, shapes)
         return self._conds[key]
 
     def _cond(self, i: int, x0: torch.Tensor, shapes: list | None = None) -> dict:
         sample = self.dataset.samples[i]
         cap = random.choice(sample.variants) if len(sample.variants) > 1 else sample.caption
         if self.spec.dataset.caption_dropout and random.random() < self.spec.dataset.caption_dropout:
-            cap = self.dataset.empty_caption
-        key = (cap, tuple(sample.latent.shape))
-        if key not in self._conds:
-            with torch.no_grad():
-                self._conds[key] = self.denoiser.prepare(self.dataset.conditionings[cap], x0[:1], self.device, shapes)
-        return self._conds[key]
+            cap = self.dataset.empty_caption  # an edit pair keeps its input picture
+        return self._prepared(i, cap, x0, shapes)
 
     def _handle_commands(self) -> None:
         import comfy.model_management as mm

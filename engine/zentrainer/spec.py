@@ -40,6 +40,10 @@ class DatasetSpec:
     # pixels, sides multiples of bucket_step. Off = center-crop squares.
     buckets: bool = True
     bucket_step: int = 64
+    # Edit training: each image's <name>_control picture is the input the model edits from
+    # (passed as reference latents), the caption is the instruction. Models that take reference
+    # images (Flux 3 Klein, Flux 2, Kontext, Qwen Image Edit...).
+    edit: bool = False
     caption_dropout: float = 0.0
     # Caption sets: <img>.txt is "default", <img>.<set>.txt the others (tags, nl, bbox, ...).
     # Train on one set, or mix several: each step picks one of the image's sets at random.
@@ -170,6 +174,8 @@ class SamplePrompt:
     height: int | None = None
     frames: int | None = None
     seed: int | None = None
+    # edit runs: the picture to edit (a path in the dataset folder, or under ComfyUI's input dir)
+    control: str | None = None
 
 
 @dataclass
@@ -355,7 +361,8 @@ def sample_prompts(s: SampleSpec) -> list[SamplePrompt]:
     for i, p in enumerate(s.prompts):
         d = p if isinstance(p, dict) else {"prompt": p}
         out.append(SamplePrompt(d["prompt"], d.get("width") or s.width, d.get("height") or s.height,
-                                d.get("frames") or s.frames, s.seed + i if d.get("seed") is None else d["seed"]))
+                                d.get("frames") or s.frames, s.seed + i if d.get("seed") is None else d["seed"],
+                                d.get("control") or None))
     return out
 
 

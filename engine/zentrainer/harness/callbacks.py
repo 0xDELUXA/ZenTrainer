@@ -143,7 +143,7 @@ class Samples(Callback):
                  getattr(m, "audio_vae_name", None), s.model_name, s.model_weight_dtype, t.spec.network.init_from,
                  self.prompts[i], s.negative, it.width, it.height, it.frames, s.fps, it.seed, s.steps, s.cfg,
                  s.sampler, s.scheduler, s.slg_mode, s.slg_layers, s.slg_double_layers, s.slg_scale, s.slg_start,
-                 s.slg_end, s.lora_strength if t.spec.network.init_from else None]
+                 s.slg_end, s.lora_strength if t.spec.network.init_from else None, it.control]
         return hashlib.sha1(json.dumps(parts, default=str).encode()).hexdigest()[:20]
 
     def _baseline_dir(self) -> Path:
@@ -371,6 +371,11 @@ class Samples(Callback):
                     progress(i, 0, s.steps)
                     channels = model.model.latent_format.latent_channels
                     it = self.items[i]
+                    if it.control:  # an edit sample: the picture to edit as the reference, at its own shape
+                        ref, it = _control(t, it, comp)
+                        from .edit import with_refs
+
+                        pos, neg = with_refs(pos, [ref]), with_refs(neg, [ref])
                     t_lat = _latent_frames(vae, it.frames)
                     latent = torch.zeros([1, channels] + ([t_lat] if t_lat else []) + [it.height // comp, it.width // comp])
                     latent = comfy.sample.fix_empty_latent_channels(model, latent)
@@ -501,6 +506,31 @@ def _prompt_cache(t, prompts: list[str], negative: str):
         return None
     key = hashlib.sha256(json.dumps([enc, prompts, negative]).encode()).hexdigest()[:20]
     return root / "prompts" / f"{key}.pt"
+
+
+def _control(t, it, comp: int):
+    """An edit sample's input picture as a raw latent, and the sample resized to its aspect (the
+    same area as the sample's size): edits come out the shape of what they edit."""
+    import dataclasses
+
+    import folder_paths
+    from PIL import Image
+
+    from .data import load_image
+
+    inp = Path(folder_paths.get_input_directory())
+    path = next((p for p in (inp / t.spec.dataset.folder / it.control, inp / it.control, Path(it.control)) if p.is_file()), None)
+    if path is None:
+        raise FileNotFoundError(f"sample control picture {it.control!r} not found (in the dataset folder or ComfyUI's input)")
+    with Image.open(path) as im:
+        w0, h0 = im.size
+    step = comp * 2
+    area = it.width * it.height
+    w = max(step, round((area * w0 / h0) ** 0.5 / step) * step)
+    h = max(step, round((area * h0 / w0) ** 0.5 / step) * step)
+    with torch.no_grad():
+        ref = t.models.vae.encode(load_image(path, (w, h)).unsqueeze(0))[:1].detach()
+    return ref, dataclasses.replace(it, width=w, height=h)
 
 
 def _previewer(t):

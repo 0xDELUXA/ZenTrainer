@@ -32,6 +32,9 @@ MEDIA_EXTS = IMAGE_EXTS | VIDEO_EXTS
 
 
 MASK_SUFFIXES = ("-masklabel", ".mask")
+# edit pairs: <stem>_control.<ext> is the input picture for <stem> (the target), the caption is
+# the instruction; _control2, _control3... add more references
+CONTROL = re.compile(r"_control\d*$")
 SET_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,23}$")
 
 
@@ -42,6 +45,7 @@ class Item:
     repeats: int = 1
     mask: Path | None = None
     captions: dict[str, str] = field(default_factory=dict)  # set name -> text, "default" included
+    controls: list[Path] = field(default_factory=list)  # edit pairs: the input picture(s)
 
 
 @dataclass
@@ -51,6 +55,7 @@ class Sample:
     mask: torch.Tensor | None = None  # (h, w) in [0, 1] at latent resolution
     variants: list[int] = field(default_factory=list)  # caption choices when mixing sets
     audio: torch.Tensor | None = None  # (C, 2, Ta): a clip's soundtrack latent (joint audio-video models)
+    refs: list[torch.Tensor] | None = None  # edit pairs: the control pictures' raw latents, as reference_latents
 
 
 @dataclass
@@ -88,6 +93,21 @@ def is_mask_file(p: Path) -> bool:
     return p.stem.endswith(MASK_SUFFIXES)
 
 
+def is_control_file(p: Path) -> bool:
+    return bool(CONTROL.search(p.stem))
+
+
+def find_controls(img: Path) -> list[Path]:
+    """An edit pair's input picture(s): <stem>_control, then _control2, _control3..."""
+    out = []
+    for n in ["", *map(str, range(2, 10))]:
+        hit = next((c for e in sorted(IMAGE_EXTS) if (c := img.with_name(f"{img.stem}_control{n}{e}")).is_file()), None)
+        if hit is None:
+            break
+        out.append(hit)
+    return out
+
+
 def find_mask(img: Path) -> Path | None:
     if is_video(img):
         return None  # masks are per image
@@ -113,12 +133,13 @@ def scan(root: Path, caption_ext: str = ".txt", warn: bool = True) -> list[Item]
             repeats = max(1, int(head))
         for f in sorted(files):
             p = d / f
-            if p.suffix.lower() not in MEDIA_EXTS or is_mask_file(p):
+            if p.suffix.lower() not in MEDIA_EXTS or is_mask_file(p) or is_control_file(p):
                 continue
             caps = caption_sets(p, caption_ext)
             if "default" not in caps and warn:
                 logging.warning("[ZenTrainer] no caption for %s; training it with an empty caption", p.name)
-            items.append(Item(p, caps.get("default", ""), repeats, find_mask(p), caps))
+            items.append(Item(p, caps.get("default", ""), repeats, find_mask(p), caps,
+                              [] if is_video(p) else find_controls(p)))
     return items
 
 
@@ -184,6 +205,10 @@ def cache_key(items: list[Item], spec: DatasetSpec, encoder_id: str) -> str:
         if it.mask:
             ms = it.mask.stat()
             h.update(f"|mask:{it.mask}|{ms.st_mtime_ns}|{ms.st_size}".encode())
+        if spec.edit:
+            for c in it.controls:
+                cs = c.stat()
+                h.update(f"|control:{c}|{cs.st_mtime_ns}|{cs.st_size}".encode())
     return h.hexdigest()[:20]
 
 
@@ -264,7 +289,10 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
         if it.mask:
             m = load_image(it.mask, size, mode="L")[None, None]  # (1, 1, H, W)
             mask = torch.nn.functional.interpolate(m, size=tuple(latent.shape[-2:]), mode="area")[0, 0]
-        samples.append(Sample(latent, idx[0], mask, idx))
+        refs = None
+        if spec.edit and it.controls:  # the input picture(s) at the target's size, as the model's references
+            refs = [_encode(vae, load_image(c, size).unsqueeze(0), c) for c in it.controls]
+        samples.append(Sample(latent, idx[0], mask, idx, refs=refs))
         owners.append(n)
         if progress:
             progress(n + 1, len(items) + len(captions), f"encoding {it.path.name}")
@@ -331,6 +359,7 @@ def _to_plain(ds: Dataset) -> dict:
         "empty_caption": ds.empty_caption,
         "owners": ds.owners,
         "audio": [s.audio for s in ds.samples],
+        "refs": [s.refs for s in ds.samples],
     }
 
 
@@ -338,7 +367,9 @@ def _from_plain(d: dict) -> Dataset:
     masks = d.get("masks") or [None] * len(d["latents"])
     variants = d.get("variants") or [[c] for c in d["caption_idx"]]
     audio = d.get("audio") or [None] * len(d["latents"])
-    samples = [Sample(lat, c, m, v, a) for lat, c, m, v, a in zip(d["latents"], d["caption_idx"], masks, variants, audio)]
+    refs = d.get("refs") or [None] * len(d["latents"])
+    samples = [Sample(lat, c, m, v, a, r)
+               for lat, c, m, v, a, r in zip(d["latents"], d["caption_idx"], masks, variants, audio, refs)]
     owners = d.get("owners") or list(range(len(samples)))  # before videos: one sample per item
     return Dataset(samples, d["conditionings"], d["captions"], d["empty_caption"], owners=owners)
 

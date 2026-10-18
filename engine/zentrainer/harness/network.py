@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 import re
 
 import torch
@@ -163,9 +164,13 @@ def load_training_adapter(patcher, path: str, device, dtype) -> dict:
     sd = comfy.utils.load_torch_file(path, safe_load=True)
     patches = comfy.lora.load_lora(sd, comfy.lora.model_lora_keys_unet(patcher.model, {}), log_missing=False)
     out = {}
+    skipped = []
     for key, adapter in patches.items():
         if isinstance(adapter, LoRAAdapter):
             mat1, mat2, alpha, mid, dora, reshape = adapter.weights
+            if not _fits(patcher.model, key, (mat1.shape[0], mat2[0].numel())):
+                skipped.append(key)  # same name, different layer (another build of the model): ComfyUI skips these too
+                continue
             alpha = float(alpha) if alpha is not None else float(mat2.shape[0])  # no alpha: scale 1
             module = LoraDiff((mat1, mat2, alpha, mid, dora, reshape))
         elif hasattr(adapter, "to_train"):
@@ -173,9 +178,24 @@ def load_training_adapter(patcher, path: str, device, dtype) -> dict:
         else:
             continue
         out[key] = module.to(device=device, dtype=dtype).requires_grad_(False)
+    if skipped:
+        logging.warning("[ZenTrainer] %s: %d layer(s) don't match this model's shapes and are left out (e.g. %s)",
+                        os.path.basename(path), len(skipped), skipped[0])
     if not out:
         raise RuntimeError(f"{path}: no layers of this model in the training adapter")
     return out
+
+
+def _fits(model, key: str, out_in: tuple[int, int]) -> bool:
+    """Whether a LoRA's (out, in) matches the model weight it names."""
+    w = model
+    try:
+        for part in key.split("."):
+            w = getattr(w, part)
+    except AttributeError:
+        return False
+    shape = tuple(w.shape)
+    return len(shape) >= 2 and shape[0] == out_in[0] and int(torch.tensor(shape[1:]).prod()) == out_in[1]
 
 
 class Network:

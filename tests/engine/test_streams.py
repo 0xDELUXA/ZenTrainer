@@ -347,3 +347,37 @@ def test_automagic3_trains_and_keeps_its_own_lr():
         sched.step()
     assert loss.item() < first
     assert optim.current_lr(opt) != 1e-3  # it steered the LR itself
+
+
+def test_adapter_shape_check_skips_other_builds_layers():
+    from zentrainer.harness.network import _fits
+
+    m = torch.nn.Module()
+    m.diffusion_model = torch.nn.Module()
+    m.diffusion_model.proj = torch.nn.Linear(8, 96)  # a pruned build: 8 inputs, where the LoRA expects 2688
+    m.diffusion_model.conv = torch.nn.Conv2d(4, 6, 3)
+    assert _fits(m, "diffusion_model.proj.weight", (96, 8))
+    assert not _fits(m, "diffusion_model.proj.weight", (96, 2688))
+    assert _fits(m, "diffusion_model.conv.weight", (6, 4 * 9))
+    assert not _fits(m, "diffusion_model.missing.weight", (6, 4))
+
+
+def test_edit_pairs_scan_and_reference_conditioning(tmp_path):
+    from PIL import Image
+
+    from zentrainer.harness.data import scan
+    from zentrainer.harness.edit import with_refs
+
+    for name in ("a.png", "a_control.png", "a_control2.jpg", "b.png"):
+        Image.new("RGB", (8, 8)).save(tmp_path / name)
+    (tmp_path / "a.txt").write_text("make it red")
+    items = {it.path.name: it for it in scan(tmp_path, warn=False)}
+    assert set(items) == {"a.png", "b.png"}  # the inputs aren't trained as images of their own
+    assert [c.name for c in items["a.png"].controls] == ["a_control.png", "a_control2.jpg"]
+    assert items["b.png"].controls == []
+
+    cond = [[torch.zeros(1, 4, 8), {"pooled_output": None}]]
+    ref = torch.ones(16, 2, 2)
+    out = with_refs(cond, [ref])
+    assert out[0][1]["reference_latents"][0].shape == (1, 16, 2, 2)
+    assert "reference_latents" not in cond[0][1]  # the cached caption conditioning is left alone

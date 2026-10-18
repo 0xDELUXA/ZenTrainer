@@ -54,6 +54,7 @@ def summary() -> list[dict]:
             "folder": d.name,
             "images": len(items),
             "masked": sum(1 for i in items if getattr(i, "mask", None)),
+            "pairs": sum(1 for i in items if getattr(i, "controls", None)),
             "bytes": sum(st.st_size for st in stats),
             "modified": max((st.st_mtime for st in stats), default=0),
             "videos": sum(1 for i in items if video.is_video(i.path)),
@@ -123,6 +124,7 @@ def items(name: str, caption_ext: str = ".txt") -> dict:
             "bytes": it.path.stat().st_size,
             "mask": str(it.mask.relative_to(d)) if it.mask else None,
             "captions": it.captions,
+            "controls": [str(c.relative_to(d)) for c in it.controls],  # edit pairs: the input picture(s)
         })
         if video.is_video(it.path):
             rows[-1].update(kind="video", fps=round(clip.fps, 3) if clip else None,
