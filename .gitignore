@@ -1,0 +1,8 @@
+references/
+__pycache__/
+.pytest_cache/
+node_modules/
+web/dist/
+# managed ComfyUI (scripts/zt): pinned by comfy.lock, never committed
+comfyui/
+.zentrainer/

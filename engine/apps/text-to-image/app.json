@@ -1,0 +1,209 @@
+{
+  "id": "text-to-image",
+  "name": "Text to Image",
+  "icon": "mdi mdi-image-plus-outline",
+  "category": "generate",
+  "layout": "generate",
+  "description": "Pick a model and write a prompt. Each model runs a workflow of its own, tuned from ComfyUI's template for it; your LoRAs ride along.",
+  "workflows": [
+    {
+      "file": "workflows/z-image-turbo.json",
+      "when": {
+        "family": "z-image-turbo"
+      },
+      "source": "image_z_image_turbo"
+    },
+    {
+      "file": "workflows/krea-2.json",
+      "when": {
+        "family": "krea-2"
+      },
+      "source": "own/krea-2"
+    },
+    {
+      "file": "workflows/flux-3-image.json",
+      "when": {
+        "family": "flux-3-image"
+      },
+      "source": "image_flux3_klein_distilled_t2i"
+    },
+    {
+      "file": "workflows/flux-2-klein.json",
+      "when": {
+        "family": "flux-2-klein"
+      },
+      "source": "image_flux2_text_to_image_9b"
+    },
+    {
+      "file": "workflows/anima.json",
+      "when": {
+        "family": "anima"
+      },
+      "source": "image_anima_base_v1"
+    },
+    {
+      "file": "workflows/sdxl.json",
+      "when": {
+        "family": "sdxl"
+      },
+      "source": "sdxlturbo_example"
+    },
+    {
+      "file": "workflows/qwen-image.json",
+      "when": {
+        "family": "qwen-image"
+      },
+      "source": "image_qwen_image"
+    },
+    {
+      "file": "workflows/z-image.json",
+      "when": {
+        "family": "z-image"
+      },
+      "source": "image_z_image"
+    },
+    {
+      "file": "workflows/omnigen.json",
+      "when": {
+        "family": "omnigen"
+      },
+      "source": "image_netayume_lumina_t2i"
+    },
+    {
+      "file": "workflows/sd3-5.json",
+      "when": {
+        "family": "sd3-5"
+      },
+      "source": "sd3.5_simple_example"
+    },
+    {
+      "file": "workflows/chroma.json",
+      "when": {
+        "family": "chroma"
+      },
+      "source": "image_chroma_text_to_image"
+    },
+    {
+      "file": "workflows/flux-1.json",
+      "when": {
+        "family": "flux-1"
+      },
+      "source": "flux_schnell"
+    },
+    {
+      "file": "workflows/lens.json",
+      "when": {
+        "family": "lens"
+      },
+      "source": "image_lens_turbo_t2i"
+    },
+    {
+      "file": "workflows/boogu.json",
+      "when": {
+        "family": "boogu"
+      },
+      "source": "image_boogu_image_0_1_turbo_t2i"
+    },
+    {
+      "file": "workflows/longcat.json",
+      "when": {
+        "family": "longcat"
+      },
+      "source": "image_longcat_text_to_image"
+    },
+    {
+      "file": "workflows/ovis-image.json",
+      "when": {
+        "family": "ovis-image"
+      },
+      "source": "image_ovis_text_to_image"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "model",
+      "component": "family",
+      "label": "Model"
+    },
+    {
+      "id": "model_file",
+      "component": "model-file",
+      "label": "Model file",
+      "bind": "Load Diffusion Model.unet_name | Load Checkpoint.ckpt_name",
+      "tip": "Auto runs the build this model's workflow uses. Pick a fine-tune or another build of the same model to swap it in; everything else stays."
+    },
+    {
+      "id": "prompt",
+      "component": "prompt",
+      "label": "Prompt",
+      "bind": "Prompt.text",
+      "default": "",
+      "sweep": true,
+      "placeholder": "a portrait photo, soft window light"
+    },
+    {
+      "id": "negative",
+      "component": "text",
+      "label": "Negative prompt",
+      "bind": "Negative.text",
+      "optional": true,
+      "tip": "What to steer away from. Turbo and CFG-1 models don't use one."
+    },
+    {
+      "id": "size",
+      "component": "size",
+      "label": "Size",
+      "bind": [
+        "Size.width",
+        "Size.height"
+      ]
+    },
+    {
+      "id": "loras",
+      "component": "loras",
+      "label": "LoRAs",
+      "bind": "LoRAs",
+      "default": []
+    },
+    {
+      "id": "seed",
+      "component": "seed",
+      "label": "Seed",
+      "bind": "Sampler.seed | Sampler.noise_seed | Noise.noise_seed",
+      "default": -1,
+      "sweep": true,
+      "section": "advanced"
+    },
+    {
+      "id": "steps",
+      "component": "number",
+      "label": "Steps",
+      "bind": "Sampler.steps | Scheduler.steps",
+      "optional": true,
+      "min": 1,
+      "max": 150,
+      "step": 1,
+      "section": "advanced",
+      "tip": "Starts at what this model's workflow uses: few for turbo builds, many for base ones."
+    },
+    {
+      "id": "cfg",
+      "component": "number",
+      "label": "CFG",
+      "bind": "Sampler.cfg | Guider.cfg",
+      "optional": true,
+      "min": 0,
+      "max": 30,
+      "step": 0.5,
+      "section": "advanced",
+      "tip": "How hard the prompt is followed. Turbo builds want 1."
+    }
+  ],
+  "outputs": [
+    {
+      "id": "image",
+      "from": "Save",
+      "display": "gallery"
+    }
+  ]
+}

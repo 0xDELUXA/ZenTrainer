@@ -1,0 +1,156 @@
+{
+ "1": {
+  "inputs": {
+   "vae_name": "qwen_image_vae.safetensors"
+  },
+  "class_type": "VAELoader",
+  "_meta": {
+   "title": "Load VAE"
+  }
+ },
+ "2": {
+  "inputs": {
+   "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+   "type": "qwen_image",
+   "device": "default"
+  },
+  "class_type": "CLIPLoader",
+  "_meta": {
+   "title": "Load Text Encoder"
+  }
+ },
+ "3": {
+  "inputs": {
+   "width": 1328,
+   "height": 1328,
+   "batch_size": 1
+  },
+  "class_type": "EmptySD3LatentImage",
+  "_meta": {
+   "title": "Size"
+  }
+ },
+ "4": {
+  "inputs": {
+   "shift": 3.1000000000000005,
+   "sampling": "flow",
+   "model": [
+    "11",
+    0
+   ]
+  },
+  "class_type": "ModelSamplingAuraFlow",
+  "_meta": {
+   "title": "ModelSamplingAuraFlow"
+  }
+ },
+ "5": {
+  "inputs": {
+   "unet_name": "qwen_image_fp8_e4m3fn.safetensors",
+   "weight_dtype": "default"
+  },
+  "class_type": "UNETLoader",
+  "_meta": {
+   "title": "Load Diffusion Model"
+  }
+ },
+ "6": {
+  "inputs": {
+   "text": "",
+   "clip": [
+    "2",
+    0
+   ]
+  },
+  "class_type": "CLIPTextEncode",
+  "_meta": {
+   "title": "Prompt"
+  }
+ },
+ "7": {
+  "inputs": {
+   "text": "",
+   "clip": [
+    "2",
+    0
+   ]
+  },
+  "class_type": "CLIPTextEncode",
+  "_meta": {
+   "title": "Negative"
+  }
+ },
+ "8": {
+  "inputs": {
+   "samples": [
+    "9",
+    0
+   ],
+   "vae": [
+    "1",
+    0
+   ]
+  },
+  "class_type": "VAEDecode",
+  "_meta": {
+   "title": "VAE Decode"
+  }
+ },
+ "9": {
+  "inputs": {
+   "seed": 50347169638278,
+   "steps": 20,
+   "cfg": 4,
+   "sampler_name": "euler",
+   "scheduler": "simple",
+   "denoise": 1,
+   "model": [
+    "4",
+    0
+   ],
+   "positive": [
+    "6",
+    0
+   ],
+   "negative": [
+    "7",
+    0
+   ],
+   "latent_image": [
+    "3",
+    0
+   ]
+  },
+  "class_type": "KSampler",
+  "_meta": {
+   "title": "Sampler"
+  }
+ },
+ "10": {
+  "inputs": {
+   "filename_prefix": "zentrainer/apps/text-to-image",
+   "images": [
+    "8",
+    0
+   ]
+  },
+  "class_type": "SaveImage",
+  "_meta": {
+   "title": "Save"
+  }
+ },
+ "11": {
+  "class_type": "LoraLoaderModelOnly",
+  "_meta": {
+   "title": "LoRAs"
+  },
+  "inputs": {
+   "model": [
+    "5",
+    0
+   ],
+   "lora_name": "",
+   "strength_model": 1.0
+  }
+ }
+}

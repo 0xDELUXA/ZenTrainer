@@ -1,0 +1,17 @@
+{
+  "name": "split-quick",
+  "model": {
+    "kind": "split",
+    "unet_name": "YOUR_DIFFUSION_MODEL.safetensors",
+    "unet_weight_dtype": "default",
+    "clip_name": "YOUR_TEXT_ENCODER.safetensors",
+    "clip_type": "flux",
+    "vae_name": "YOUR_VAE.safetensors"
+  },
+  "dataset": { "folder": "YOUR_DATASET_FOLDER", "resolution": 1024 },
+  "network": { "rank": 16, "targets": "attn_mlp" },
+  "optim": { "steps": 500, "learning_rate": 0.0001, "scheduler": "cosine", "warmup_steps": 25 },
+  "objective": { "timesteps": "logit_normal" },
+  "memory": { "training_dtype": "bf16", "gradient_checkpointing": true, "offloading": false },
+  "samples": { "every": 100, "prompts": ["YOUR_TRIGGER, a portrait"], "cfg": 1.0 }
+}

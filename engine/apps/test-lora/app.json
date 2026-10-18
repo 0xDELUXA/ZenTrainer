@@ -1,0 +1,138 @@
+{
+  "id": "test-lora",
+  "name": "Test LoRA",
+  "icon": "mdi mdi-grid",
+  "category": "train",
+  "description": "A grid of checkpoints \u00d7 strengths \u00d7 prompts with a fixed seed: find the step and strength that land.",
+  "workflows": [
+    {
+      "file": "../_common/txt2img_checkpoint.json",
+      "when": {
+        "layout": "checkpoint"
+      }
+    },
+    {
+      "file": "../_common/txt2img_split.json",
+      "when": {
+        "layout": "split"
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "model",
+      "type": "model",
+      "label": "Base model"
+    },
+    {
+      "id": "lora",
+      "type": "lora",
+      "label": "LoRA / checkpoints",
+      "bind": "LoRAs",
+      "sweep": true,
+      "default": [],
+      "hint": "Pick several checkpoints of a run to compare them"
+    },
+    {
+      "id": "strength",
+      "type": "number",
+      "label": "Strength",
+      "bind": "LoRAs.strength",
+      "default": [
+        0.8,
+        1.0,
+        1.2
+      ],
+      "min": -2,
+      "max": 3,
+      "step": 0.05,
+      "sweep": true
+    },
+    {
+      "id": "prompt",
+      "type": "prompt",
+      "label": "Prompts",
+      "bind": "Positive.text",
+      "sweep": true,
+      "default": [],
+      "placeholder": "one per line; use your trigger word"
+    },
+    {
+      "id": "seed",
+      "type": "seed",
+      "label": "Seed",
+      "bind": "Sampler.seed",
+      "default": 42,
+      "hint": "Fixed so cells compare fairly"
+    },
+    {
+      "id": "resolution",
+      "type": "resolution",
+      "label": "Size",
+      "bind": [
+        "Latent.width",
+        "Latent.height"
+      ],
+      "default": [
+        1024,
+        1024
+      ],
+      "group": "image"
+    },
+    {
+      "id": "steps",
+      "type": "number",
+      "label": "Steps",
+      "bind": "Sampler.steps",
+      "default": 20,
+      "min": 1,
+      "max": 150,
+      "step": 1,
+      "group": "sampler"
+    },
+    {
+      "id": "cfg",
+      "type": "number",
+      "label": "CFG",
+      "bind": "Sampler.cfg",
+      "default": 5.0,
+      "min": 0,
+      "max": 30,
+      "step": 0.5,
+      "group": "sampler"
+    },
+    {
+      "id": "sampler",
+      "type": "choice",
+      "label": "Sampler",
+      "bind": "Sampler.sampler_name",
+      "default": "euler",
+      "options_from": "KSampler.sampler_name",
+      "group": "sampler"
+    },
+    {
+      "id": "scheduler",
+      "type": "choice",
+      "label": "Scheduler",
+      "bind": "Sampler.scheduler",
+      "default": "normal",
+      "options_from": "KSampler.scheduler",
+      "group": "sampler"
+    },
+    {
+      "id": "negative",
+      "type": "text",
+      "label": "Negative prompt",
+      "bind": "Negative.text",
+      "default": "",
+      "group": "advanced"
+    }
+  ],
+  "outputs": [
+    {
+      "id": "images",
+      "from": "Save",
+      "view": "grid"
+    }
+  ]
+}

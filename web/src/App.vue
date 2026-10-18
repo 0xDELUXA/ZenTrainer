@@ -1,0 +1,151 @@
+<script setup lang="ts">
+import { ZenLotus } from '@nynxz/zenkit-ui'
+import { nextTick, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import AppSidebar from './components/AppSidebar.vue'
+import LogDrawer from './components/LogDrawer.vue'
+import ScrollArea from './components/ScrollArea.vue'
+import { drawerHeight, drawerOpen, startLogSync } from './logs'
+import { startRunSync } from './runs'
+
+const KEY = 'zentrainer.sidebar.collapsed'
+const read = () => {
+  try {
+    return localStorage.getItem(KEY) === '1'
+  } catch {
+    return false
+  }
+}
+const collapsed = ref(read())
+const mobileOpen = ref(false)
+watch(collapsed, (v) => {
+  try {
+    localStorage.setItem(KEY, v ? '1' : '0')
+  } catch {
+    // storage blocked
+  }
+})
+
+onMounted(() => {
+  startRunSync()
+  startLogSync()
+})
+
+// the log drawer docks over the page's bottom. Scrolled to the end, the page rides up with it
+// (its end stays in view above the drawer) and back down when it closes; anywhere else
+// nothing moves. The .log-room spacer is the scroll room that makes this possible.
+const motionMs = () => {
+  const v = getComputedStyle(document.documentElement).getPropertyValue('--zen-dur').trim()
+  return v ? parseFloat(v) * (v.endsWith('ms') ? 1 : 1000) : 200
+}
+const roomPx = ref(0)
+watch(drawerOpen, async (open) => {
+  const el = scroller.value?.viewport
+  // scrolled down to the end: a page that fits (or sits at the top) is left alone
+  const atEnd = !!el && el.scrollTop > 0 && el.scrollHeight - el.scrollTop - el.clientHeight < 4
+  if (open) {
+    roomPx.value = drawerHeight.value
+    await nextTick()
+    if (el && atEnd) scroller.value?.glideTo(() => el.scrollHeight - el.clientHeight, motionMs())
+  } else if (el && el.scrollHeight - el.scrollTop - el.clientHeight < roomPx.value) {
+    // looking at the room: glide back down to the content's end, then drop the room
+    const ms = motionMs()
+    scroller.value?.glideTo(Math.max(0, el.scrollHeight - roomPx.value - el.clientHeight), ms)
+    setTimeout(() => !drawerOpen.value && (roomPx.value = 0), ms + 30)
+  } else {
+    roomPx.value = 0
+  }
+})
+watch(drawerHeight, (h) => drawerOpen.value && (roomPx.value = h))
+
+// new page: back to the top, and re-observe the new content for the scrollbar
+const route = useRoute()
+const scroller = ref<InstanceType<typeof ScrollArea> | null>(null)
+watch(
+  () => route.path,
+  async () => {
+    await nextTick()
+    if (scroller.value?.viewport) scroller.value.viewport.scrollTop = 0
+    scroller.value?.refresh()
+  },
+)
+</script>
+
+<template>
+  <div class="shell">
+    <AppSidebar
+      :collapsed="collapsed"
+      :mobile-open="mobileOpen"
+      @toggle="collapsed = !collapsed"
+      @navigate="mobileOpen = false"
+    />
+    <div v-if="mobileOpen" class="scrim" @click="mobileOpen = false" />
+    <div class="main">
+      <header class="mobile-bar">
+        <button class="menu" aria-label="Open menu" @click="mobileOpen = true"><i class="mdi mdi-menu" /></button>
+        <ZenLotus class="lotus" /> <b>ZenTrainer</b>
+      </header>
+      <ScrollArea ref="scroller" class="content">
+        <main><RouterView /></main>
+        <!-- room to scroll the page's end up above the open log; below the content, so nothing visible moves -->
+        <div class="log-room" :style="{ height: `${roomPx}px` }" aria-hidden="true" />
+      </ScrollArea>
+      <LogDrawer />
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.shell {
+  display: flex;
+  height: 100%;
+}
+.main {
+  position: relative; /* the log drawer docks over its bottom */
+  overflow: clip; /* its slide-in starts below the edge: without this the page grows a native scrollbar */
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.content {
+  flex: 1;
+}
+.mobile-bar {
+  display: none;
+}
+.scrim {
+  display: none;
+}
+@media (max-width: 720px) {
+  .mobile-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 48px;
+    padding: 0 10px;
+    border-bottom: 1px solid var(--zen-border);
+    background: var(--zen-surface);
+  }
+  .menu {
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: none;
+    color: var(--zen-text);
+    font-size: 20px;
+    cursor: pointer;
+  }
+  .lotus {
+    width: 20px;
+    height: 20px;
+  }
+  .scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background: rgb(0 0 0 / 0.4);
+  }
+}
+</style>

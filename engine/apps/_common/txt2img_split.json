@@ -1,0 +1,141 @@
+{
+ "1": {
+  "class_type": "UNETLoader",
+  "_meta": {
+   "title": "Load Diffusion Model"
+  },
+  "inputs": {
+   "unet_name": "",
+   "weight_dtype": "default"
+  }
+ },
+ "2": {
+  "class_type": "CLIPLoader",
+  "_meta": {
+   "title": "Load Text Encoder"
+  },
+  "inputs": {
+   "clip_name": "",
+   "type": "stable_diffusion"
+  }
+ },
+ "3": {
+  "class_type": "VAELoader",
+  "_meta": {
+   "title": "Load VAE"
+  },
+  "inputs": {
+   "vae_name": ""
+  }
+ },
+ "4": {
+  "class_type": "LoraLoaderModelOnly",
+  "_meta": {
+   "title": "LoRAs"
+  },
+  "inputs": {
+   "model": [
+    "1",
+    0
+   ],
+   "lora_name": "",
+   "strength_model": 1.0
+  }
+ },
+ "5": {
+  "class_type": "CLIPTextEncode",
+  "_meta": {
+   "title": "Positive"
+  },
+  "inputs": {
+   "clip": [
+    "2",
+    0
+   ],
+   "text": ""
+  }
+ },
+ "6": {
+  "class_type": "CLIPTextEncode",
+  "_meta": {
+   "title": "Negative"
+  },
+  "inputs": {
+   "clip": [
+    "2",
+    0
+   ],
+   "text": ""
+  }
+ },
+ "7": {
+  "class_type": "EmptyLatentImage",
+  "_meta": {
+   "title": "Latent"
+  },
+  "inputs": {
+   "width": 1024,
+   "height": 1024,
+   "batch_size": 1
+  }
+ },
+ "8": {
+  "class_type": "KSampler",
+  "_meta": {
+   "title": "Sampler"
+  },
+  "inputs": {
+   "model": [
+    "4",
+    0
+   ],
+   "seed": 0,
+   "steps": 20,
+   "cfg": 5.0,
+   "sampler_name": "euler",
+   "scheduler": "normal",
+   "positive": [
+    "5",
+    0
+   ],
+   "negative": [
+    "6",
+    0
+   ],
+   "latent_image": [
+    "7",
+    0
+   ],
+   "denoise": 1.0
+  }
+ },
+ "9": {
+  "class_type": "VAEDecode",
+  "_meta": {
+   "title": "Decode"
+  },
+  "inputs": {
+   "samples": [
+    "8",
+    0
+   ],
+   "vae": [
+    "3",
+    0
+   ]
+  }
+ },
+ "10": {
+  "class_type": "SaveImage",
+  "_meta": {
+   "title": "Save"
+  },
+  "inputs": {
+   "images": [
+    "9",
+    0
+   ],
+   "filename_prefix": "zentrainer/apps"
+  }
+ }
+}

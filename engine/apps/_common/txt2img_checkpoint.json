@@ -1,0 +1,121 @@
+{
+ "1": {
+  "class_type": "CheckpointLoaderSimple",
+  "_meta": {
+   "title": "Load Checkpoint"
+  },
+  "inputs": {
+   "ckpt_name": ""
+  }
+ },
+ "4": {
+  "class_type": "LoraLoaderModelOnly",
+  "_meta": {
+   "title": "LoRAs"
+  },
+  "inputs": {
+   "model": [
+    "1",
+    0
+   ],
+   "lora_name": "",
+   "strength_model": 1.0
+  }
+ },
+ "5": {
+  "class_type": "CLIPTextEncode",
+  "_meta": {
+   "title": "Positive"
+  },
+  "inputs": {
+   "clip": [
+    "1",
+    1
+   ],
+   "text": ""
+  }
+ },
+ "6": {
+  "class_type": "CLIPTextEncode",
+  "_meta": {
+   "title": "Negative"
+  },
+  "inputs": {
+   "clip": [
+    "1",
+    1
+   ],
+   "text": ""
+  }
+ },
+ "7": {
+  "class_type": "EmptyLatentImage",
+  "_meta": {
+   "title": "Latent"
+  },
+  "inputs": {
+   "width": 1024,
+   "height": 1024,
+   "batch_size": 1
+  }
+ },
+ "8": {
+  "class_type": "KSampler",
+  "_meta": {
+   "title": "Sampler"
+  },
+  "inputs": {
+   "model": [
+    "4",
+    0
+   ],
+   "seed": 0,
+   "steps": 20,
+   "cfg": 5.0,
+   "sampler_name": "euler",
+   "scheduler": "normal",
+   "positive": [
+    "5",
+    0
+   ],
+   "negative": [
+    "6",
+    0
+   ],
+   "latent_image": [
+    "7",
+    0
+   ],
+   "denoise": 1.0
+  }
+ },
+ "9": {
+  "class_type": "VAEDecode",
+  "_meta": {
+   "title": "Decode"
+  },
+  "inputs": {
+   "samples": [
+    "8",
+    0
+   ],
+   "vae": [
+    "1",
+    2
+   ]
+  }
+ },
+ "10": {
+  "class_type": "SaveImage",
+  "_meta": {
+   "title": "Save"
+  },
+  "inputs": {
+   "images": [
+    "9",
+    0
+   ],
+   "filename_prefix": "zentrainer/apps"
+  }
+ }
+}

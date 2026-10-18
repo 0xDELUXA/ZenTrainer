@@ -1,0 +1,15 @@
+{
+  "name": "sdxl-quick",
+  "seed": 0,
+  "save_every": 250,
+  "model": { "kind": "checkpoint", "ckpt_name": "YOUR_SDXL_CHECKPOINT.safetensors" },
+  "dataset": { "folder": "YOUR_DATASET_FOLDER", "resolution": 1024 },
+  "network": { "algorithm": "LoRA", "rank": 16, "targets": "attn_mlp" },
+  "optim": { "steps": 500, "learning_rate": 0.0001, "scheduler": "cosine", "warmup_steps": 25 },
+  "memory": { "training_dtype": "bf16", "gradient_checkpointing": true },
+  "samples": {
+    "every": 100,
+    "prompts": ["YOUR_TRIGGER, a portrait", "YOUR_TRIGGER, a landscape"],
+    "width": 1024, "height": 1024, "steps": 20, "cfg": 5.0
+  }
+}

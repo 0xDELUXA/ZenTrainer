@@ -1,0 +1,31 @@
+{
+  "families": ["moss-image"],
+  "status": "recipe",
+  "summary": "Sampling as the MOSS-Image authors recommend: Euler, 50 steps, CFG 3, layer 22 skipped in the negative pass.",
+  "sources": [
+    {"label": "MOSS-Image user guide", "url": "https://github.com/OpenMOSS/MOSS-Image/blob/main/USERGUIDE.md"},
+    {"label": "MOSS-Image-Base model card", "url": "https://huggingface.co/OpenMOSS-Team/MOSS-Image-Base"}
+  ],
+  "train": {
+    "dataset": {"resolution": 1024}
+  },
+  "samples": {
+    "steps": 50,
+    "cfg": 3.0,
+    "sampler": "euler",
+    "scheduler": "simple",
+    "negative": "",
+    "slg_mode": "uncond",
+    "slg_layers": [22],
+    "slg_start": 0.0,
+    "slg_end": 1.0
+  },
+  "notes": [
+    "Train on the Base build; SFT is a fine-tune of it.",
+    "The text encoder stays frozen, as the authors ask (ZenTrainer never trains it).",
+    "Around 1 megapixel or more: 1024² is the floor they recommend. Sides are multiples of 16.",
+    "CFG 3 suits long prompts; raise it toward 6 for short ones.",
+    "Skipping layer 24 or 26 instead of 22 also works. Turning skip-layer guidance off looks more realistic but can collapse details.",
+    "Shift 5 is ComfyUI's default for MOSS already."
+  ]
+}

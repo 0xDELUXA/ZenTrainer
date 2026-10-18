@@ -1,0 +1,159 @@
+{
+ "1": {
+  "inputs": {
+   "text": "",
+   "clip": [
+    "4",
+    0
+   ]
+  },
+  "class_type": "CLIPTextEncode",
+  "_meta": {
+   "title": "Prompt"
+  }
+ },
+ "2": {
+  "inputs": {
+   "width": 1024,
+   "height": 1024,
+   "batch_size": 1
+  },
+  "class_type": "EmptySD3LatentImage",
+  "_meta": {
+   "title": "Size"
+  }
+ },
+ "3": {
+  "inputs": {
+   "vae_name": "ae.safetensors"
+  },
+  "class_type": "VAELoader",
+  "_meta": {
+   "title": "Load VAE"
+  }
+ },
+ "4": {
+  "inputs": {
+   "clip_name": "qwen_3_4b.safetensors",
+   "type": "lumina2",
+   "device": "default"
+  },
+  "class_type": "CLIPLoader",
+  "_meta": {
+   "title": "Load Text Encoder"
+  }
+ },
+ "5": {
+  "inputs": {
+   "samples": [
+    "9",
+    0
+   ],
+   "vae": [
+    "3",
+    0
+   ]
+  },
+  "class_type": "VAEDecode",
+  "_meta": {
+   "title": "VAE Decode"
+  }
+ },
+ "6": {
+  "inputs": {
+   "shift": 3,
+   "sampling": "flow",
+   "model": [
+    "11",
+    0
+   ]
+  },
+  "class_type": "ModelSamplingAuraFlow",
+  "_meta": {
+   "title": "ModelSamplingAuraFlow"
+  }
+ },
+ "7": {
+  "inputs": {
+   "unet_name": "z_image_bf16.safetensors",
+   "weight_dtype": "default"
+  },
+  "class_type": "UNETLoader",
+  "_meta": {
+   "title": "Load Diffusion Model"
+  }
+ },
+ "8": {
+  "inputs": {
+   "text": "",
+   "clip": [
+    "4",
+    0
+   ]
+  },
+  "class_type": "CLIPTextEncode",
+  "_meta": {
+   "title": "Negative"
+  }
+ },
+ "9": {
+  "inputs": {
+   "seed": 677498465340151,
+   "steps": 25,
+   "cfg": 4,
+   "sampler_name": "res_multistep",
+   "scheduler": "simple",
+   "denoise": 1,
+   "model": [
+    "6",
+    0
+   ],
+   "positive": [
+    "1",
+    0
+   ],
+   "negative": [
+    "8",
+    0
+   ],
+   "latent_image": [
+    "2",
+    0
+   ]
+  },
+  "class_type": "KSampler",
+  "_meta": {
+   "title": "Sampler"
+  }
+ },
+ "10": {
+  "inputs": {
+   "filename_prefix": "zentrainer/apps/text-to-image",
+   "format": "png",
+   "format.bit_depth": "8-bit",
+   "format.input_color_space": "sRGB",
+   "images": [
+    "5",
+    0
+   ]
+  },
+  "class_type": "SaveImageAdvanced",
+  "_meta": {
+   "title": "Save"
+  }
+ },
+ "11": {
+  "class_type": "LoraLoaderModelOnly",
+  "_meta": {
+   "title": "LoRAs"
+  },
+  "inputs": {
+   "model": [
+    "7",
+    0
+   ],
+   "lora_name": "",
+   "strength_model": 1.0
+  }
+ }
+}

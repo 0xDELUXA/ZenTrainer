@@ -1,0 +1,135 @@
+{
+ "1": {
+  "inputs": {
+   "filename_prefix": "zentrainer/apps/text-to-image",
+   "images": [
+    "7",
+    0
+   ]
+  },
+  "class_type": "SaveImage",
+  "_meta": {
+   "title": "Save"
+  }
+ },
+ "2": {
+  "inputs": {
+   "width": 1024,
+   "height": 1024,
+   "batch_size": 1
+  },
+  "class_type": "EmptySD3LatentImage",
+  "_meta": {
+   "title": "Size"
+  }
+ },
+ "3": {
+  "inputs": {
+   "shift": 4,
+   "sampling": "flow",
+   "model": [
+    "9",
+    0
+   ]
+  },
+  "class_type": "ModelSamplingAuraFlow",
+  "_meta": {
+   "title": "ModelSamplingAuraFlow"
+  }
+ },
+ "4": {
+  "inputs": {
+   "seed": 0,
+   "steps": 30,
+   "cfg": 4,
+   "sampler_name": "res_multistep",
+   "scheduler": "simple",
+   "denoise": 1,
+   "model": [
+    "3",
+    0
+   ],
+   "positive": [
+    "8",
+    0
+   ],
+   "negative": [
+    "6",
+    0
+   ],
+   "latent_image": [
+    "2",
+    0
+   ]
+  },
+  "class_type": "KSampler",
+  "_meta": {
+   "title": "Sampler"
+  }
+ },
+ "5": {
+  "inputs": {
+   "ckpt_name": "NetaYumev35_pretrained_all_in_one.safetensors"
+  },
+  "class_type": "CheckpointLoaderSimple",
+  "_meta": {
+   "title": "Load Checkpoint"
+  }
+ },
+ "6": {
+  "inputs": {
+   "text": "",
+   "clip": [
+    "5",
+    1
+   ]
+  },
+  "class_type": "CLIPTextEncode",
+  "_meta": {
+   "title": "Negative"
+  }
+ },
+ "7": {
+  "inputs": {
+   "samples": [
+    "4",
+    0
+   ],
+   "vae": [
+    "5",
+    2
+   ]
+  },
+  "class_type": "VAEDecode",
+  "_meta": {
+   "title": "VAE Decode"
+  }
+ },
+ "8": {
+  "inputs": {
+   "text": "",
+   "clip": [
+    "5",
+    1
+   ]
+  },
+  "class_type": "CLIPTextEncode",
+  "_meta": {
+   "title": "Prompt"
+  }
+ },
+ "9": {
+  "class_type": "LoraLoaderModelOnly",
+  "_meta": {
+   "title": "LoRAs"
+  },
+  "inputs": {
+   "model": [
+    "5",
+    0
+   ],
+   "lora_name": "",
+   "strength_model": 1.0
+  }
+ }
+}

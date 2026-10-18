@@ -1,0 +1,157 @@
+<!doctype html>
+<!-- README banner source. The panels are real crops of the app (maroon-volt, dark).
+     Rebuild: python docs/banner/render.py  →  docs/images/banner.webp -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<style>
+  :root {
+    --bg: #211927;
+    --deep: #1a1320;
+    --text: #f4eef7;
+    --muted: #bcaecb;
+    --accent: #f0ff41;
+    --border: #473655;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: transparent; }
+  .banner {
+    position: relative;
+    width: 1600px;
+    height: 560px;
+    overflow: hidden;
+    border-radius: 28px;
+    background:
+      radial-gradient(900px 520px at 78% 30%, #3a2747 0%, transparent 70%),
+      radial-gradient(700px 400px at 100% 100%, #2d1f38 0%, transparent 70%),
+      linear-gradient(120deg, var(--deep) 0%, var(--bg) 45%, #2a1d33 100%);
+    font-family: 'Inter', system-ui, sans-serif;
+    color: var(--text);
+  }
+  .copy {
+    position: absolute;
+    left: 84px;
+    top: 112px;
+    z-index: 5;
+  }
+  .eyebrow {
+    font-size: 25px;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    color: var(--accent);
+  }
+  h1 {
+    margin: 6px 0 0;
+    font-family: 'Inter Display', 'Inter', sans-serif;
+    font-size: 104px;
+    font-weight: 700;
+    letter-spacing: -0.035em;
+    line-height: 1;
+  }
+  .rule {
+    width: 96px;
+    height: 6px;
+    margin: 30px 0 26px;
+    border-radius: 3px;
+    background: var(--accent);
+  }
+  .tagline {
+    margin: 0;
+    font-size: 29px;
+    line-height: 1.3;
+    color: var(--muted);
+    font-weight: 400;
+  }
+  .pills { display: flex; gap: 10px; margin-top: 28px; }
+  .pill {
+    padding: 8px 16px;
+    border: 1.5px solid var(--accent);
+    border-radius: 999px;
+    font-size: 18px;
+    font-weight: 500;
+    color: var(--accent);
+  }
+  .pill.dim { border-color: var(--border); color: var(--muted); }
+
+  /* the app, in perspective */
+  .stage {
+    position: absolute;
+    left: 690px;
+    top: 0;
+    width: 1000px;
+    height: 560px;
+    perspective: 1800px;
+  }
+  .label {
+    position: absolute;
+    font-size: 19px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: var(--accent);
+  }
+  .panel {
+    position: absolute;
+    border-radius: 14px;
+    box-shadow: 0 30px 70px -20px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.04);
+    display: block;
+  }
+  .front {
+    position: absolute;
+    left: 0;
+    top: 70px;
+    transform: rotateY(-14deg) rotateX(3deg);
+    transform-origin: left center;
+  }
+  .front .label { left: 2px; top: -34px; }
+  .samples { position: relative; width: 500px; }
+  .loss { position: relative; width: 500px; margin-top: 10px; }
+  .back {
+    position: absolute;
+    left: 470px;
+    top: 52px;
+    transform: rotateY(-22deg) rotateX(4deg) scale(0.92);
+    transform-origin: left center;
+    opacity: 0.55;
+    filter: saturate(0.85);
+  }
+  .back .label { left: 4px; top: -34px; color: var(--muted); }
+  .testlora { position: relative; width: 470px; }
+  .fade {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    pointer-events: none;
+    background:
+      linear-gradient(180deg, transparent 84%, var(--bg) 100%),
+      linear-gradient(90deg, transparent 88%, rgba(33, 25, 39, 0.8) 100%);
+  }
+</style>
+</head>
+<body>
+  <div class="banner">
+    <div class="copy">
+      <div class="eyebrow">NYNXZ</div>
+      <h1>ZenTrainer</h1>
+      <div class="rule"></div>
+      <p class="tagline">LoRA training and workflow apps,<br />with ComfyUI as the engine</p>
+      <div class="pills">
+        <span class="pill">Train · Test · Generate</span>
+        <span class="pill dim">Your ComfyUI models</span>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="back">
+        <span class="label">TEST LORA</span>
+        <img class="panel testlora" src="el-testlora.png" alt="" />
+      </div>
+      <div class="front">
+        <span class="label">TRAINING</span>
+        <img class="panel samples" src="el-samples.png" alt="" />
+        <img class="panel loss" src="el-loss.png" alt="" />
+      </div>
+    </div>
+    <div class="fade"></div>
+  </div>
+</body>
+</html>

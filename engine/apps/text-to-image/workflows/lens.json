@@ -1,0 +1,268 @@
+{
+ "1": {
+  "inputs": {
+   "vae_name": "flux2-vae.safetensors"
+  },
+  "class_type": "VAELoader",
+  "_meta": {
+   "title": "Load VAE"
+  }
+ },
+ "2": {
+  "inputs": {
+   "clip_name": "gpt_oss_20b_nvfp4.safetensors",
+   "type": "lens",
+   "device": "default"
+  },
+  "class_type": "CLIPLoader",
+  "_meta": {
+   "title": "Load Text Encoder"
+  }
+ },
+ "3": {
+  "inputs": {
+   "text": "",
+   "clip": [
+    "2",
+    0
+   ]
+  },
+  "class_type": "CLIPTextEncode",
+  "_meta": {
+   "title": "Prompt"
+  }
+ },
+ "4": {
+  "inputs": {
+   "text": "",
+   "clip": [
+    "2",
+    0
+   ]
+  },
+  "class_type": "CLIPTextEncode",
+  "_meta": {
+   "title": "Negative"
+  }
+ },
+ "5": {
+  "inputs": {
+   "width": 1024,
+   "height": 1024,
+   "batch_size": 1
+  },
+  "class_type": "EmptyLatentImage",
+  "_meta": {
+   "title": "Size"
+  }
+ },
+ "6": {
+  "inputs": {
+   "scheduler": "simple",
+   "steps": 4,
+   "denoise": 1,
+   "model": [
+    "12",
+    0
+   ]
+  },
+  "class_type": "BasicScheduler",
+  "_meta": {
+   "title": "Scheduler"
+  }
+ },
+ "7": {
+  "inputs": {
+   "sampler_name": "euler"
+  },
+  "class_type": "KSamplerSelect",
+  "_meta": {
+   "title": "KSamplerSelect"
+  }
+ },
+ "8": {
+  "inputs": {
+   "strength": 1,
+   "pre_cfg": false,
+   "model": [
+    "12",
+    0
+   ]
+  },
+  "class_type": "CFGNorm",
+  "_meta": {
+   "title": "CFGNorm"
+  }
+ },
+ "9": {
+  "inputs": {
+   "unet_name": "lens_turbo_bf16.safetensors",
+   "weight_dtype": "default"
+  },
+  "class_type": "UNETLoader",
+  "_meta": {
+   "title": "Load Diffusion Model"
+  }
+ },
+ "10": {
+  "inputs": {
+   "add_noise": true,
+   "noise_seed": 455122126103069,
+   "cfg": 1,
+   "model": [
+    "8",
+    0
+   ],
+   "positive": [
+    "3",
+    0
+   ],
+   "negative": [
+    "4",
+    0
+   ],
+   "sampler": [
+    "7",
+    0
+   ],
+   "sigmas": [
+    "6",
+    0
+   ],
+   "latent_image": [
+    "5",
+    0
+   ]
+  },
+  "class_type": "SamplerCustom",
+  "_meta": {
+   "title": "Sampler"
+  }
+ },
+ "11": {
+  "inputs": {
+   "samples": [
+    "10",
+    0
+   ],
+   "vae": [
+    "1",
+    0
+   ]
+  },
+  "class_type": "VAEDecode",
+  "_meta": {
+   "title": "VAE Decode"
+  }
+ },
+ "12": {
+  "inputs": {
+   "max_shift": 1.15,
+   "base_shift": 0.5,
+   "width": [
+    "13",
+    1
+   ],
+   "height": [
+    "14",
+    1
+   ],
+   "model": [
+    "19",
+    0
+   ]
+  },
+  "class_type": "ModelSamplingFlux",
+  "_meta": {
+   "title": "ModelSamplingFlux"
+  }
+ },
+ "13": {
+  "inputs": {
+   "expression": "a & -8",
+   "values.a": [
+    "16",
+    0
+   ]
+  },
+  "class_type": "ComfyMathExpression",
+  "_meta": {
+   "title": "Math Expression"
+  }
+ },
+ "14": {
+  "inputs": {
+   "expression": "a & -8",
+   "values.a": [
+    "15",
+    0
+   ]
+  },
+  "class_type": "ComfyMathExpression",
+  "_meta": {
+   "title": "Math Expression"
+  }
+ },
+ "15": {
+  "inputs": {
+   "value": [
+    "17",
+    1
+   ]
+  },
+  "class_type": "PrimitiveInt",
+  "_meta": {
+   "title": "Int (Height)"
+  }
+ },
+ "16": {
+  "inputs": {
+   "value": [
+    "17",
+    0
+   ]
+  },
+  "class_type": "PrimitiveInt",
+  "_meta": {
+   "title": "Int (Width)"
+  }
+ },
+ "17": {
+  "inputs": {
+   "aspect_ratio": "1:1 (Square)",
+   "megapixels": 2,
+   "multiple": 8
+  },
+  "class_type": "ResolutionSelector",
+  "_meta": {
+   "title": "Resolution Selector"
+  }
+ },
+ "18": {
+  "inputs": {
+   "filename_prefix": "zentrainer/apps/text-to-image",
+   "images": [
+    "11",
+    0
+   ]
+  },
+  "class_type": "SaveImage",
+  "_meta": {
+   "title": "Save"
+  }
+ },
+ "19": {
+  "class_type": "LoraLoaderModelOnly",
+  "_meta": {
+   "title": "LoRAs"
+  },
+  "inputs": {
+   "model": [
+    "9",
+    0
+   ],
+   "lora_name": "",
+   "strength_model": 1.0
+  }
+ }
+}

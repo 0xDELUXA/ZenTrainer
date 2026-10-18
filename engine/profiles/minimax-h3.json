@@ -1,0 +1,54 @@
+{
+  "families": [
+    "minimax-h3"
+  ],
+  "status": "recipe",
+  "summary": "MiniMax H3 on images as one-frame clips: the picture stream only (the model's silent audio stream is left out of the loss), on top of a de-distillation training adapter.",
+  "sources": [
+    {
+      "label": "MiniMax H3 in ComfyUI",
+      "url": "https://huggingface.co/Comfy-Org/MiniMax-H3"
+    },
+    {
+      "label": "MiniMax H3 image training adapter (circlestone-labs)",
+      "url": "https://huggingface.co/circlestone-labs/MiniMax-H3-Image-Training-Adapter"
+    },
+    {
+      "label": "Ostris's MiniMax H3 training adapters",
+      "url": "https://huggingface.co/ostris/minimax_h3_training_adapter"
+    }
+  ],
+  "train": {
+    "dataset": {
+      "resolution": 1024
+    },
+    "optim": {
+      "batch_size": 1
+    },
+    "objective": {
+      "timesteps": "logit_normal",
+      "shift": 3.0
+    },
+    "memory": {
+      "offloading": true,
+      "gradient_checkpointing": true
+    }
+  },
+  "samples": {
+    "steps": 30,
+    "cfg": 1.0,
+    "sampler": "res_multistep",
+    "scheduler": "simple",
+    "negative": ""
+  },
+  "notes": [
+    "H3 is guidance-distilled: sample at CFG 1, as its released sampler does (CFG doubles the time and overcooks).",
+    "Training straight on a distilled model spends the LoRA undoing the distillation (validation loss starts ~3x higher, worst at high noise). Put a de-distillation adapter under it: Network \u2192 Training adapter. circlestone-labs' image adapter suits image datasets; it's applied while training only, never in samples or the saved LoRA.",
+    "Video and stereo audio are denoised together; an image trains as a one-frame clip with silence beside it, and only the picture counts toward the loss.",
+    "One image per step: the model takes batch size 1. Use gradient accumulation for a bigger batch.",
+    "The int8 build (~21 GB) mostly stays in VRAM and trains about twice as fast as the bf16 one (~40 GB, streamed): ~1.3 s/step at 1024\u00b2 on a 5090.",
+    "Training shift 3 (sampling uses 12) spends more steps on detail: likeness and faces.",
+    "Sides are multiples of 32 (16x VAE, 2x2 patches); 64-step buckets satisfy that.",
+    "The text encoder is a 32B vision-language model: captions and sample prompts are encoded once, cached, and it's never loaded again for that dataset."
+  ]
+}

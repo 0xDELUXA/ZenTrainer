@@ -1,0 +1,3 @@
+# pnpm requires build scripts to be opted into explicitly (same as ZenKit).
+allowBuilds:
+  esbuild: true

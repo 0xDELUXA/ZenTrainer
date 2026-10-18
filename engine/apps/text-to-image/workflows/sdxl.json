@@ -1,0 +1,149 @@
+{
+ "1": {
+  "inputs": {
+   "text": "text, watermark",
+   "clip": [
+    "2",
+    1
+   ]
+  },
+  "class_type": "CLIPTextEncode",
+  "_meta": {
+   "title": "Negative"
+  }
+ },
+ "2": {
+  "inputs": {
+   "ckpt_name": "sd_xl_turbo_1.0_fp16.safetensors"
+  },
+  "class_type": "CheckpointLoaderSimple",
+  "_meta": {
+   "title": "Load Checkpoint"
+  }
+ },
+ "3": {
+  "inputs": {
+   "sampler_name": "euler_ancestral"
+  },
+  "class_type": "KSamplerSelect",
+  "_meta": {
+   "title": "KSamplerSelect"
+  }
+ },
+ "4": {
+  "inputs": {
+   "width": 512,
+   "height": 512,
+   "batch_size": 1
+  },
+  "class_type": "EmptyLatentImage",
+  "_meta": {
+   "title": "Size"
+  }
+ },
+ "5": {
+  "inputs": {
+   "steps": 1,
+   "denoise": 1,
+   "model": [
+    "10",
+    0
+   ]
+  },
+  "class_type": "SDTurboScheduler",
+  "_meta": {
+   "title": "Scheduler"
+  }
+ },
+ "6": {
+  "inputs": {
+   "text": "",
+   "clip": [
+    "2",
+    1
+   ]
+  },
+  "class_type": "CLIPTextEncode",
+  "_meta": {
+   "title": "Prompt"
+  }
+ },
+ "7": {
+  "inputs": {
+   "add_noise": true,
+   "noise_seed": 0,
+   "cfg": 1,
+   "model": [
+    "10",
+    0
+   ],
+   "positive": [
+    "6",
+    0
+   ],
+   "negative": [
+    "1",
+    0
+   ],
+   "sampler": [
+    "3",
+    0
+   ],
+   "sigmas": [
+    "5",
+    0
+   ],
+   "latent_image": [
+    "4",
+    0
+   ]
+  },
+  "class_type": "SamplerCustom",
+  "_meta": {
+   "title": "Sampler"
+  }
+ },
+ "8": {
+  "inputs": {
+   "samples": [
+    "7",
+    0
+   ],
+   "vae": [
+    "2",
+    2
+   ]
+  },
+  "class_type": "VAEDecode",
+  "_meta": {
+   "title": "VAE Decode"
+  }
+ },
+ "9": {
+  "inputs": {
+   "filename_prefix": "zentrainer/apps/text-to-image",
+   "images": [
+    "8",
+    0
+   ]
+  },
+  "class_type": "SaveImage",
+  "_meta": {
+   "title": "Save"
+  }
+ },
+ "10": {
+  "class_type": "LoraLoaderModelOnly",
+  "_meta": {
+   "title": "LoRAs"
+  },
+  "inputs": {
+   "model": [
+    "2",
+    0
+   ],
+   "lora_name": "",
+   "strength_model": 1.0
+  }
+ }
+}

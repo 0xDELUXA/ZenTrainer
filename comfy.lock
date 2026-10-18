@@ -1,0 +1,25 @@
+{
+  "comfyui": {
+    "repo": "https://github.com/comfyanonymous/ComfyUI.git",
+    "ref": "5cc4b870094c89090db54bd8d12649dcaf89f2ba",
+    "describe": "v0.41.0-11-g5cc4b870"
+  },
+  "python": "3.12",
+  "torch": {
+    "version": "2.13.0",
+    "variants": {
+      "cu130": {
+        "min_driver_cuda": "13.0"
+      },
+      "cu128": {
+        "min_driver_cuda": "12.8"
+      },
+      "cu126": {
+        "min_driver_cuda": "12.6"
+      },
+      "rocm6.4": {},
+      "cpu": {}
+    }
+  },
+  "port": 8189
+}
