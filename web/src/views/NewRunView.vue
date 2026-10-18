@@ -310,6 +310,7 @@ const firstThumb = (d: DatasetInfo) => {
 // ---- optimizer defaults: picking one sets its usual LR (and schedule), unless you'd changed it
 const OPT_DEFAULTS: Record<string, { lr: number; scheduler?: TrainSpec['optim']['scheduler'] }> = {
   Automagic: { lr: 1e-6, scheduler: 'constant' }, // a start: it tunes each weight's LR itself
+  Automagic3: { lr: 1e-6, scheduler: 'constant' }, // likewise, one LR per group (it ignores the schedule)
   Prodigy: { lr: 1 },
   Lion: { lr: 3e-5 },
   Lion8bit: { lr: 3e-5 },
@@ -350,8 +351,9 @@ const warnings = computed(() => {
     w.push("Sample prompts don't use [trigger].")
   if (opt.value?.id === 'Prodigy' && spec.optim.learning_rate < 0.5) w.push('Prodigy sets its own step size: use LR 1.0.')
   if (opt.value && opt.value.id !== 'Prodigy' && spec.optim.learning_rate >= 0.01) w.push('That LR is very high for this optimizer.')
-  if (opt.value?.id === 'Automagic' && spec.optim.learning_rate > 1e-4) w.push("Automagic's LR is only where each weight starts: use 1e-6 and let it climb.")
-  if (spec.network.lora_dtype === 'bf16' && opt.value?.id !== 'Automagic') w.push('bf16 LoRA weights lose most small steps with this optimizer: use fp32.')
+  const automagic = opt.value?.id === 'Automagic' || opt.value?.id === 'Automagic3'
+  if (automagic && spec.optim.learning_rate > 1e-4) w.push("Automagic's LR is only where it starts: use 1e-6 and let it climb.")
+  if (spec.network.lora_dtype === 'bf16' && !automagic) w.push('bf16 LoRA weights lose most small steps with this optimizer: use fp32.')
   if (opt.value && !opt.value.available) w.push(`${opt.value.label} isn't installed (scripts/zt extras optimizers).`)
   if (epochs.value != null && epochs.value < 3) w.push(`Only ${epochs.value.toFixed(1)} epochs: probably too few steps.`)
   return w
