@@ -18,6 +18,7 @@ import time
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
+from . import safeio
 from . import events
 
 STYLES = {
@@ -382,7 +383,7 @@ def run(job: CaptionJob) -> None:
                     target = caption_path(it.path, job.set_name)
                     if target.is_file() and rel not in job.previous:
                         job.previous[rel] = target.read_text(encoding="utf-8")
-                    target.write_text(text + "\n", encoding="utf-8")
+                    safeio.write_text(target, text + "\n")
                     job.written[rel] = text
                 log(job, f"{rel}: {text}")
                 update(job, done=job.done + 1, file=it.path.name, text=text, message="")  # loaded: the first one's in
@@ -586,7 +587,7 @@ def undo(job: CaptionJob) -> int:
             kept += 1
             continue
         if rel in job.previous:
-            target.write_text(job.previous[rel], encoding="utf-8")
+            safeio.write_text(target, job.previous[rel])
         else:
             target.unlink(missing_ok=True)
         restored += 1

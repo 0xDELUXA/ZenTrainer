@@ -25,6 +25,8 @@ import time
 from collections import Counter
 from pathlib import Path
 
+from . import safeio
+
 TARGET_SIDE = 768  # a picture's short side at or above this is training-ready at the usual sizes
 NEAR_DUP = 6  # bits of 64 a difference hash may differ by and still count as the same picture
 SIMILAR = 14  # closer than this: the same shot or a close variation (unrelated pictures sit near 32)
@@ -112,7 +114,7 @@ def _looks(name: str, items: list) -> dict[str, dict | None]:
             hit = [stamp, _look(it.path)]
         keep[str(it.path)] = hit
         out[str(it.path)] = hit[1]
-    cache_file.write_text(json.dumps(keep))
+    safeio.write_json(cache_file, keep, indent=None)
     return out
 
 
@@ -306,9 +308,16 @@ def _history_file(name: str, set_name: str) -> Path:
 
 def history(name: str, set_name: str = "default") -> list[dict]:
     try:
-        return [json.loads(line) for line in _history_file(name, set_name).read_text().splitlines() if line]
+        lines = _history_file(name, set_name).read_text().splitlines()
     except OSError:
         return []
+    out = []
+    for line in lines:
+        try:
+            out.append(json.loads(line))
+        except ValueError:  # cut short: skip it, keep the rest
+            continue
+    return out
 
 
 def snapshot(name: str, set_name: str = "default") -> dict:
@@ -324,7 +333,7 @@ def snapshot(name: str, set_name: str = "default") -> dict:
         past[-1] = row
     else:
         past.append(row)
-    _history_file(name, set_name).write_text("".join(json.dumps(r) + "\n" for r in past))
+    safeio.write_text(_history_file(name, set_name), "".join(json.dumps(r) + "\n" for r in past))
     return {"current": now, "history": past[-60:]}
 
 

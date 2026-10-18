@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from . import safeio
 from .spec import slugify
 
 KINDS = ("run", "prompts")
@@ -61,7 +62,7 @@ def save(kind: str, name: str, data: dict, user_root: Path, description: str = "
     pid = slugify(name)
     d = user_root / kind
     d.mkdir(parents=True, exist_ok=True)
-    (d / f"{pid}.json").write_text(json.dumps({"name": name.strip(), "description": description, "data": data}, indent=2))
+    safeio.write_json(d / f"{pid}.json", {"name": name.strip(), "description": description, "data": data})
     return {"id": pid, "name": name.strip(), "description": description, "data": data, "builtin": False}
 
 

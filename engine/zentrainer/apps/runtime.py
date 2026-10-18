@@ -9,6 +9,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .. import safeio
+
 
 class BatchStore:
     def __init__(self, root: Path):
@@ -24,7 +26,7 @@ class BatchStore:
         return self.root / f"{batch_id}.json"
 
     def save(self, batch: dict) -> None:
-        self._path(batch["batch_id"]).write_text(json.dumps(batch, indent=1))
+        safeio.write_json(self._path(batch["batch_id"]), batch, indent=1)
 
     def get(self, batch_id: str) -> dict:
         return json.loads(self._path(batch_id).read_text())

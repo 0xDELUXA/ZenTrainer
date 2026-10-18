@@ -5,7 +5,6 @@ Every path from a request is resolved and checked to stay inside its dataset fol
 
 from __future__ import annotations
 
-import json
 
 import re
 from pathlib import Path

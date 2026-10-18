@@ -14,12 +14,12 @@ entries download: the user adds a link once (validated against the repo's file l
 
 from __future__ import annotations
 
-import json
 import re
 import threading
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from . import safeio
 from . import families
 
 SUBDIR = "training_adapters"
@@ -94,15 +94,16 @@ def _custom() -> list[Adapter]:
     if not p.is_file():
         return []
     try:
-        return [Adapter(**{**row, "source": "custom"}) for row in json.loads(p.read_text(encoding="utf-8"))]
-    except (ValueError, TypeError):
+        return [Adapter(**{**row, "source": "custom"}) for row in safeio.read_json(p, [])]
+    except TypeError:  # rows from another version: keep the file for the user, start a fresh list
+        safeio.set_aside(p)
         return []
 
 
 def _save_custom(rows: list[Adapter]) -> None:
     p = _store()
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps([asdict(a) for a in rows], indent=2), encoding="utf-8")
+    safeio.write_json(p, [asdict(a) for a in rows])
 
 
 def catalog() -> list[Adapter]:
