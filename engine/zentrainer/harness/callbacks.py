@@ -241,7 +241,8 @@ class Samples(Callback):
         return conds
 
     def render_manual(self, t, prompt: str, width: int | None = None, height: int | None = None,
-                      frames: int | None = None, seed: int | None = None, base: bool = False) -> list[dict]:
+                      frames: int | None = None, seed: int | None = None, base: bool = False,
+                      index: int | None = None) -> list[dict]:
         """One sample of any prompt at the current step ("Try a prompt"): rendered like the
         run's samples but kept apart from them (manual rows, their own files)."""
         from ..spec import SamplePrompt
@@ -255,7 +256,8 @@ class Samples(Callback):
             conds = self._encode_texts(t, [text], apply_trigger(s.negative, trig, False))
         if hasattr(t, "_drop_text_encoder"):
             t._drop_text_encoder()  # don't keep a big encoder beside training for one prompt
-        n = len({f.name.split("_")[1] for f in Path(_out_dir(t)).glob("manual_*")})
+        # a new try gets the next number; "again at this step" reuses its try's (same card)
+        n = index if index is not None else len({f.name.split("_")[1] for f in Path(_out_dir(t)).glob("manual_*")})
         item = SamplePrompt(prompt, width or s.width, height or s.height, frames or s.frames,
                             int(time.time()) % 100000 if seed is None else seed)
         saved = (self.items, self.prompts, self._conds)
@@ -308,6 +310,8 @@ class Samples(Callback):
         def progress(i, s_step, s_total, x0=None):
             row = {"run_id": t.run_id, "step": t.step, "phase": "sampling", "index": i, "count": count,
                    "prompt": self.prompts[i], "s_step": s_step, "s_total": s_total}
+            if manual is not None:  # a "Try a prompt" render: the UI previews it in its own tab
+                row.update(manual=True, manual_index=manual, base=base)
             if x0 is not None and previewer is not None:
                 row["preview"] = _preview_url(previewer, x0)
             t.emit(events.SAMPLE_PROGRESS, row)
@@ -371,7 +375,7 @@ class Samples(Callback):
                     }
                     if manual is not None:
                         row.update(manual=True, index=manual, width=self.items[i].width, height=self.items[i].height,
-                                   seed=self.items[i].seed, base=base)
+                                   seed=self.items[i].seed, frames=self.items[i].frames, base=base)
                     # recorded as each one lands, so the UI swaps that tile now, not after the pass
                     rows.append(row)
                     t.emit(events.SAMPLE, row)

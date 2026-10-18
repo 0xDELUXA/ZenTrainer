@@ -1137,7 +1137,10 @@ def _loopback(server) -> str:
 def _capabilities() -> dict:
     from .harness import optim
 
-    caps: dict = {"optimizers": optim.catalog()}
+    # what this engine build can do: the web app may be newer than a server not yet restarted,
+    # and greys out what the running engine doesn't know rather than calling it wrongly
+    caps: dict = {"optimizers": optim.catalog(),
+                  "features": ["manual_samples", "segment", "merge_loras", "split_videos", "baseline_reuse"]}
     try:
         from comfy.ldm.modules.attention import REGISTERED_ATTENTION_FUNCTIONS
 

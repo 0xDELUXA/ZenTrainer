@@ -185,6 +185,9 @@ export interface SampleRow {
   /** a manual render without the LoRA, to compare with the one at the same index */
   base?: boolean
   seed?: number
+  width?: number
+  height?: number
+  frames?: number
 }
 
 export interface RunDetail {
@@ -472,6 +475,8 @@ export interface ValidationRow {
 export interface Health {
   version: string
   capabilities: {
+    /** what the running engine build supports (manual_samples, segment, merge_loras, ...) */
+    features?: string[]
     optimizers?: OptimizerInfo[]
     train_attention?: string[]
     infer_attention?: string[]
@@ -751,6 +756,10 @@ export interface SampleProgress {
   s_step?: number
   s_total?: number
   preview?: string
+  /** a "Try a prompt" render (previewed in the Manual tab), its try number, and whether it's the no-LoRA one */
+  manual?: boolean
+  manual_index?: number
+  base?: boolean
 }
 
 /** Cached server-side thumbnail of a dataset image or mask. */

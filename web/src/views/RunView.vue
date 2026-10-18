@@ -179,11 +179,30 @@ const valFirst = computed(() => detail.value?.validation[0])
 // ---- samples: prompt × step grid ---------------------------------------------------------------
 // the run's own samples (its prompts at its steps) vs one-off "Try a prompt" renders
 const runSamples = computed(() => (detail.value?.samples ?? []).filter((x) => !x.manual))
-const manualSamples = computed(() => (detail.value?.samples ?? []).filter((x) => x.manual && !x.base).sort((a, b) => b.index - a.index))
-// each try: its render with the LoRA and, when asked for, the same prompt and seed without it
-const manualPairs = computed(() =>
-  manualSamples.value.map((x) => ({ lora: x, base: (detail.value?.samples ?? []).find((b) => b.manual && b.base && b.index === x.index) ?? null })),
-)
+// each try is a card: its no-LoRA render (if asked for) and every step it was rendered at
+const manualGroups = computed(() => {
+  const by = new Map<number, { index: number; base: SampleRow | null; steps: SampleRow[] }>()
+  for (const x of detail.value?.samples ?? []) {
+    if (!x.manual) continue
+    const g = by.get(x.index) ?? { index: x.index, base: null, steps: [] }
+    if (x.base) g.base = x
+    else g.steps.push(x)
+    by.set(x.index, g)
+  }
+  for (const g of by.values()) g.steps.sort((a, b) => a.step - b.step)
+  return [...by.values()].filter((g) => g.steps.length || g.base).sort((a, b) => b.index - a.index)
+})
+const manualCount = computed(() => manualGroups.value.length)
+const pickedStep = ref<Record<number, number>>({}) // try -> which step the slider compares
+const shownStep = (g: { index: number; steps: SampleRow[] }) =>
+  g.steps.find((x) => x.step === pickedStep.value[g.index]) ?? g.steps.at(-1) ?? null
+async function again(g: { index: number; base: SampleRow | null; steps: SampleRow[] }) {
+  const x = g.steps.at(-1) ?? g.base
+  if (!x) return
+  sampleView.value = 'manual'
+  delete pickedStep.value[g.index]
+  await send('sample', { prompt: x.prompt, width: x.width, height: x.height, frames: x.frames, seed: x.seed, base: false, index: g.index })
+}
 const steps = computed(() => [...new Set(runSamples.value.map((x) => x.step))].sort((a, b) => a - b))
 const prompts = computed(() => {
   const by = new Map<number, string>()
@@ -215,10 +234,18 @@ const tryPrompt = ref('')
 const trySize = ref('')
 const tryFrames = ref<number | null>(null)
 const tryBase = ref(true)
+// the server may predate manual samples (not restarted since): its "sample" would render the
+// run's own prompts instead, so Render waits for an engine that knows
+const canManual = ref(true)
+onMounted(async () => {
+  const h = await engine.health().catch(() => null)
+  canManual.value = !!h?.capabilities.features?.includes('manual_samples')
+})
 async function renderTry() {
   if (!tryPrompt.value.trim()) return
   const [w, h] = trySize.value ? trySize.value.split('x').map(Number) : [undefined, undefined]
   await send('sample', { prompt: tryPrompt.value.trim(), width: w, height: h, frames: tryFrames.value ?? undefined, base: tryBase.value })
+  if (sampling.value) sampling.value = { ...sampling.value, manual: true }
 }
 const trySizes = computed(() => {
   const sp = detail.value?.spec.samples
@@ -312,7 +339,8 @@ const samplesLine = computed(() => {
   const next = nextSample.value
   return running.value && next ? `${at} · next ${next.step} · ${next.in}` : at
 })
-const liveIndex = computed(() => (sampling.value?.phase === 'sampling' ? (sampling.value.index ?? -1) : -1))
+const liveIndex = computed(() => (sampling.value?.phase === 'sampling' && !sampling.value.manual ? (sampling.value.index ?? -1) : -1))
+const liveManual = computed(() => (sampling.value?.manual ? sampling.value : null))
 // Latest: one column per prompt (2-4), filling the card
 const latestCols = computed(() => Math.min(4, Math.max(2, promptCount.value)))
 // Progression: thumbnails sized so every step fits the card, until the slider picks a size
@@ -366,9 +394,10 @@ const sampleAspect = computed(() => {
   return sp?.width && sp?.height ? `${sp.width} / ${sp.height}` : '1'
 })
 function openManual(i: number) {
-  // the viewer pages through every try; a pair shows as two, base first
-  const flat = manualPairs.value.flatMap((p) => (p.base ? [p.base, p.lora] : [p.lora]))
-  const at = manualPairs.value.slice(0, i).reduce((n, p) => n + (p.base ? 2 : 1), 0)
+  // the viewer pages through every try: its no-LoRA render first, then each step
+  const rows = (g: (typeof manualGroups.value)[number]) => [...(g.base ? [g.base] : []), ...g.steps]
+  const flat = manualGroups.value.flatMap(rows)
+  const at = manualGroups.value.slice(0, i).reduce((n, g) => n + rows(g).length, 0)
   lb.value = { items: flat.map((x) => ({ ...sampleItem(x), label: x.base ? 'Without the LoRA' : `Step ${x.step}` })), index: at }
 }
 const isVideo = (x: SampleRow) => /\.(mp4|webm)$/i.test(x.filename)
@@ -523,7 +552,7 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
               <div class="seg" role="tablist">
                 <button :class="{ on: sampleView === 'latest' }" @click="sampleView = 'latest'">Latest</button>
                 <button :class="{ on: sampleView === 'grid' }" :disabled="!steps.length" title="Each prompt across training: in the viewer ←→ steps, ↑↓ prompts (or WASD)" @click="sampleView = 'grid'">Progression</button>
-                <button :class="{ on: sampleView === 'manual' }" title="Try any prompt at the current step, apart from the run's samples" @click="sampleView = 'manual'">Manual<span v-if="manualSamples.length" class="muted"> {{ manualSamples.length }}</span></button>
+                <button :class="{ on: sampleView === 'manual' }" title="Try any prompt at the current step, apart from the run's samples" @click="sampleView = 'manual'">Manual<span v-if="manualCount" class="muted"> {{ manualCount }}</span><i v-if="liveManual" class="mdi mdi-circle live-dot" /></button>
               </div>
               <button
                 v-if="running"
@@ -542,24 +571,51 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
                   <ZenCombo v-model="trySize" :items="trySizes" :sorted="false" :searchable="false" size="sm" />
                   <ZenNumber v-if="(detail.spec.samples.frames ?? 1) > 1" :model-value="tryFrames ?? detail.spec.samples.frames ?? 1" :min="1" :max="361" :step="17" :precision="0" size="sm" title="Frames" @update:model-value="tryFrames = $event" />
                   <label class="base-sw small" title="Also render the same prompt and seed without the LoRA, to compare"><ZenSwitch v-model="tryBase" size="sm" /> Compare with base</label>
-                  <ZenButton size="sm" variant="primary" icon="mdi mdi-creation-outline" :disabled="!!busy || status !== 'training' || !tryPrompt.trim() || !!sampling" :title="status !== 'training' ? 'Only while it trains' : 'Ctrl+Enter'" @click="renderTry">Render</ZenButton>
+                  <ZenButton size="sm" variant="primary" icon="mdi mdi-creation-outline" :disabled="!canManual || !!busy || status !== 'training' || !tryPrompt.trim() || !!sampling" :title="!canManual ? 'The engine needs a restart for this (it would render the run’s own prompts)' : status !== 'training' ? 'Only while it trains' : 'Ctrl+Enter'" @click="renderTry">Render</ZenButton>
                 </div>
               </div>
-              <div v-if="!manualSamples.length" class="muted small empty-manual">Prompts you try here render with the LoRA as it is now, at the step it's on. They don't join the run's samples.</div>
+              <div v-if="liveManual" class="mlive">
+                <div class="mmedia live">
+                  <img v-if="liveManual.preview" :src="liveManual.preview" alt="" />
+                  <i v-else class="mdi mdi-loading mdi-spin" />
+                </div>
+                <div class="small">
+                  <b>{{ liveManual.base ? 'Without the LoRA' : `At step ${liveManual.step ?? step}` }}</b>
+                  <span class="muted"> · {{ liveManual.s_total ? ((liveManual.s_step ?? 0) >= liveManual.s_total ? 'decoding' : `${liveManual.s_step ?? 0}/${liveManual.s_total}`) : 'starting' }}</span>
+                  <div class="muted mcap">{{ liveManual.prompt }}</div>
+                </div>
+              </div>
+              <div v-if="!canManual" class="small warn-line"><i class="mdi mdi-restart" /> The running engine is older than this page: Render works after ComfyUI restarts (when nothing is training).</div>
+              <div v-if="!manualGroups.length && !liveManual" class="muted small empty-manual">Prompts you try here render with the LoRA as it is now, at the step it's on. They don't join the run's samples.</div>
               <div class="mtiles">
-                <div v-for="(pr, i) in manualPairs" :key="pr.lora.filename" class="mtile" :class="{ pair: pr.base }">
+                <div v-for="(g, gi) in manualGroups" :key="g.index" class="mtile" :class="{ pair: g.base && shownStep(g) }">
                   <!-- with a base render: images as a before/after slider, videos side by side -->
-                  <div v-if="pr.base && !isVideo(pr.lora)" class="mmedia" @click="openManual(i)">
-                    <ZenCompare :before="viewUrl(pr.base)" :after="viewUrl(pr.lora)" before-label="No LoRA" :after-label="`Step ${pr.lora.step}`" />
+                  <div v-if="g.base && shownStep(g) && !isVideo(g.base)" class="mmedia" @click="openManual(gi)">
+                    <ZenCompare :before="viewUrl(g.base)" :after="viewUrl(shownStep(g)!)" before-label="No LoRA" :after-label="`Step ${shownStep(g)!.step}`" />
                   </div>
-                  <div v-else-if="pr.base" class="mmedia two">
-                    <video v-for="x in [pr.base, pr.lora]" :key="x.filename" :src="viewUrl(x)" muted loop playsinline preload="metadata" @mouseenter="($event.target as HTMLVideoElement).play()" @mouseleave="($event.target as HTMLVideoElement).pause()" @click="openManual(i)" />
+                  <div v-else-if="g.base && shownStep(g)" class="mmedia two">
+                    <video v-for="x in [g.base, shownStep(g)!]" :key="x.filename" :src="viewUrl(x)" muted loop playsinline preload="metadata" @mouseenter="($event.target as HTMLVideoElement).play()" @mouseleave="($event.target as HTMLVideoElement).pause()" @click="openManual(gi)" />
                   </div>
-                  <div v-else class="mmedia" @click="openManual(i)">
-                    <video v-if="isVideo(pr.lora)" :src="viewUrl(pr.lora)" muted loop playsinline preload="metadata" @mouseenter="($event.target as HTMLVideoElement).play()" @mouseleave="($event.target as HTMLVideoElement).pause()" />
-                    <img v-else :src="viewUrl(pr.lora)" loading="lazy" alt="" />
+                  <div v-else class="mmedia" @click="openManual(gi)">
+                    <video v-if="isVideo((shownStep(g) ?? g.base)!)" :src="viewUrl((shownStep(g) ?? g.base)!)" muted loop playsinline preload="metadata" @mouseenter="($event.target as HTMLVideoElement).play()" @mouseleave="($event.target as HTMLVideoElement).pause()" />
+                    <img v-else :src="viewUrl((shownStep(g) ?? g.base)!)" loading="lazy" alt="" />
                   </div>
-                  <span class="mcap"><b class="mono">{{ pr.base ? `no LoRA / step ${pr.lora.step}` : `step ${pr.lora.step}` }}</b> {{ pr.lora.prompt }}</span>
+                  <div class="mfoot">
+                    <span v-if="g.steps.length > 1" class="msteps">
+                      <button v-for="x in g.steps" :key="x.step" :class="{ on: shownStep(g) === x }" @click="pickedStep[g.index] = x.step">{{ x.step }}</button>
+                    </span>
+                    <span v-else class="mono small muted">{{ g.base ? 'no LoRA / ' : '' }}step {{ shownStep(g)?.step ?? '–' }}</span>
+                    <span class="spacer" />
+                    <button
+                      class="again"
+                      :disabled="!canManual || !!busy || status !== 'training' || !!sampling || g.steps.some((x) => x.step === step)"
+                      :title="g.steps.some((x) => x.step === step) ? 'Already rendered at this step' : 'The same prompt and seed with the LoRA as it is now'"
+                      @click="again(g)"
+                    >
+                      <i class="mdi mdi-refresh" /> Again at {{ step }}
+                    </button>
+                  </div>
+                  <span class="mcap">{{ (g.steps[0] ?? g.base)!.prompt }}</span>
                 </div>
               </div>
             </div>
@@ -1070,6 +1126,62 @@ dd {
 }
 .mmedia :deep(.zen-compare img) {
   object-fit: contain;
+}
+.warn-line {
+  color: var(--zen-warn);
+}
+.mlive {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 12px;
+  align-items: center;
+  padding: 8px;
+  border-radius: var(--r-md);
+  border: 1px solid color-mix(in srgb, var(--zen-accent) 50%, transparent);
+}
+.mmedia.live {
+  display: grid;
+  place-items: center;
+  color: var(--zen-muted);
+}
+.mfoot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.msteps {
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+.msteps button,
+.again {
+  border: 1px solid color-mix(in srgb, var(--zen-border) 70%, transparent);
+  background: none;
+  color: var(--zen-muted);
+  font: inherit;
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.msteps button.on {
+  color: var(--zen-text);
+  border-color: var(--zen-accent);
+}
+.again:hover:not(:disabled) {
+  color: var(--zen-text);
+  border-color: var(--zen-accent);
+}
+.again:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.live-dot {
+  color: var(--zen-accent);
+  font-size: 8px;
+  margin-left: 4px;
+  vertical-align: middle;
 }
 .base-sw {
   display: inline-flex;
