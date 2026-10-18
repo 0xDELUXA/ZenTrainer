@@ -433,3 +433,29 @@ def test_compiled_blocks_are_undone():
     with compiled_blocks(net, True) as n:
         assert n == 3 and all("forward" in b.__dict__ for b in net.blocks)
     assert not any("forward" in b.__dict__ for b in net.blocks)  # the cached model is left as it was
+
+
+def test_failed_run_frames_let_go_of_their_tensors():
+    import gc
+    import weakref
+
+    from zentrainer.harness.trainer import _release_frames
+
+    ref = None
+
+    def step():
+        nonlocal ref
+        activations = torch.zeros(1000)
+        ref = weakref.ref(activations)
+        raise torch.OutOfMemoryError("CUDA out of memory")
+
+    try:
+        try:
+            step()
+        except torch.OutOfMemoryError as inner:
+            raise RuntimeError("Out of VRAM at step 1") from inner
+    except RuntimeError as e:
+        kept = e  # ComfyUI keeps the job's exception
+        _release_frames(kept)
+    gc.collect()
+    assert ref() is None and "step 1" in str(kept)
