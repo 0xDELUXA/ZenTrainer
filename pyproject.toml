@@ -13,5 +13,7 @@ Repository = "https://github.com/Nynxz/ZenTrainer"
 [tool.comfy]
 PublisherId = "nynxz"
 DisplayName = "ZenTrainer"
+Banner = "https://raw.githubusercontent.com/Nynxz/ZenTrainer/main/docs/images/banner.webp"
+Icon = "https://raw.githubusercontent.com/Nynxz/ZenTrainer/main/docs/images/icon.png"
 # the prebuilt app (web/dist is built, not committed) and the engine's frontend extension
 includes = ["web/dist", "engine/js"]

@@ -1,8 +1,8 @@
 ![ZenTrainer](docs/images/banner.webp)
 
-Train LoRAs and run your workflows in one app, with ComfyUI doing the work underneath. Nothing new
-to download: it uses the models and the GPU your ComfyUI already has, and it trains on ComfyUI's
-own model code, so whatever ComfyUI can load, you can train.
+Train LoRAs inside ComfyUI, with an app built for it. Nothing new to download: it uses the models
+and the GPU your ComfyUI already has, and it trains on ComfyUI's own model code, so whatever ComfyUI
+can load, you can train.
 
 ## Training you can watch
 
@@ -13,18 +13,29 @@ the bar mark each checkpoint and sample, so you know what's coming and when.
 - **Pause, sample now, save now, change the learning rate**, all mid-run
 - **Resume** a stopped or crashed run from any checkpoint, optimizer state and all
 - **Validation loss** on a fixed set, so the curve only moves when the LoRA does
+- **Likeness** for character LoRAs: how much each checkpoint's samples look like your dataset's face
+- **Try a prompt** at the current step, or on any finished run's checkpoint
+- **Progression**: every prompt across every step; in the viewer ←/→ moves through training, ↑/↓ switches prompt
 - **Training time apart from total time**, so loading models and sampling don't make a run look slow
-- **A queue on the Runs page**: line runs up, reorder them, and they train one after another
+- **A queue on the Jobs page**: line runs up, reorder them, and they train one after another
 
 ![A run](docs/images/run.webp)
 
-## Samples as a grid
+## Datasets
 
-Every prompt across every step. In the viewer ←/→ (or A/D) moves through training, ↑/↓ (or W/S)
-switches prompt, so you can watch one prompt learn and then check the others at the same step.
-Wheel to zoom, drag to pan.
+Any folder in ComfyUI's `input/` is a dataset. Browse it as a grid or a table and edit captions in
+place. Click an image to open it big, with its caption beside it and its training mask overlaid.
 
-![The samples viewer](docs/images/samples-grid.webp)
+- **Caption sets**: keep long and short captions side by side and train on either, or a mix
+- **Auto-caption** with a vision model through ComfyUI's own text generation (Qwen-VL, Gemma)
+- **Bulk edits**: prefix, suffix or find and replace across a set
+- **Masks**: drop `name-masklabel.png` beside an image, or paint one, and it learns only where the mask is white
+- **Your files are safe**: uploads never replace a file, edits are written whole (a crash can't
+  leave half a caption), and nothing outside ZenTrainer's own folders is ever deleted
+
+![A dataset](docs/images/dataset.webp)
+
+![The dataset viewer](docs/images/dataset-viewer.webp)
 
 ## Set up a run
 
@@ -45,30 +56,21 @@ learning rate the optimizer won't like, too few epochs.
 
 ![New run](docs/images/new-run.webp)
 
-## Datasets
+## Simple mode
 
-Any folder in ComfyUI's `input/` is a dataset. Browse it as a grid or a table and edit captions in
-place. Click an image to open it big, with its caption beside it and its training mask overlaid.
+Pick what you want to teach (a character, a style), drop in your photos, name it, and train. The
+recipe picks the model files (downloading what's missing), captions the photos, and sets every
+knob. While it trains you see each preview land, when the next one is due, and you can try a
+prompt of your own at the current step. Switch to Advanced in Settings for every setting.
 
-- **Caption sets**: keep long and short captions side by side and train on either, or a mix
-- **Auto-caption** with a vision model through ComfyUI's own text generation (Qwen-VL, Gemma)
-- **Bulk edits**: prefix, suffix or find and replace across a set
-- **Masks**: drop `name-masklabel.png` beside an image and it learns only where the mask is white
+![Simple mode](docs/images/simple.webp)
 
-![A dataset](docs/images/dataset.webp)
+## Apps (experimental)
 
-![The dataset viewer](docs/images/dataset-viewer.webp)
-
-## Apps
-
-ComfyUI workflows with an interface built for the job. **Test LoRA** renders checkpoints ×
-strengths × prompts on a fixed seed, so you can see which step and which strength actually land.
-**Generate** is a clean txt2img on any model, with your LoRAs.
-
-An app is a small manifest plus a workflow, bound by node titles. Apps can extend each other, so an
-inpainting app is Generate with a mask input added. → [Writing apps](docs/APPS.md)
-
-![Test LoRA](docs/images/test-lora.webp)
+ComfyUI workflows with an interface built for the job: **Test LoRA** renders checkpoints ×
+strengths × prompts on a fixed seed, **Generate** is a clean txt2img on any model with your LoRAs.
+They're still being finished, so they sit behind Settings → Experimental pages (a run's Try
+buttons open them either way). → [Writing apps](docs/APPS.md)
 
 ## Your ComfyUI, kept safe
 
@@ -110,7 +112,9 @@ can be combined. Or skip the flags and drop (or symlink) an `extra_model_paths.y
 into `comfyui/`: ComfyUI loads that file on its own.
 
 Datasets go in `comfyui/input/<name>/`; trained LoRAs land in
-`comfyui/output/zentrainer/loras/`. Theme packs are bundled; `--zenkit` is optional.
+`comfyui/output/zentrainer/loras/`, and run history in `comfyui/user/zentrainer/`. That's your
+work: to reinstall, use `scripts/zt update` rather than deleting `comfyui/`, or move those three
+folders out first. Theme packs are bundled; `--zenkit` is optional.
 
 Prefer one ComfyUI? `scripts/zt attach /path/to/ComfyUI` links the engine into it
 instead. It works as long as that ComfyUI is close to the pin in `comfy.lock`.
@@ -146,6 +150,8 @@ uv run --with pytest --with torch --with pillow --with numpy --no-project python
 # a spec straight through the harness, using ComfyUI as a library (see examples/)
 comfyui/.venv/bin/python scripts/devrun.py examples/sdxl-quick.json --comfy comfyui
 
-# README banner (docs/banner/banner.html → docs/images/banner.webp)
+# README screenshots, from an install holding only demo content (maroon-volt, dark)
+uv run --with playwright --with pillow --no-project python docs/banner/shots.py --url http://127.0.0.1:8188 --run <id> --dataset <folder>
+# banner and Registry icon (docs/banner/banner.html → docs/images/banner.webp, icon.png)
 uv run --with playwright --with pillow --no-project python docs/banner/render.py
 ```

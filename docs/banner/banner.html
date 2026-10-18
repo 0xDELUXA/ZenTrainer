@@ -1,6 +1,7 @@
 <!doctype html>
-<!-- README banner source. The panels are real crops of the app (maroon-volt, dark).
-     Rebuild: python docs/banner/render.py  →  docs/images/banner.webp -->
+<!-- README and Registry banner. The panels are real crops of the app (maroon-volt, dark) on demo
+     content: python docs/banner/shots.py retakes them, python docs/banner/render.py renders this
+     to docs/images/banner.webp (and the Registry icon, docs/images/icon.png). -->
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -18,138 +19,128 @@
   .banner {
     position: relative;
     width: 1600px;
-    height: 560px;
+    height: 800px;
     overflow: hidden;
-    border-radius: 28px;
+    border-radius: 32px;
     background:
-      radial-gradient(900px 520px at 78% 30%, #3a2747 0%, transparent 70%),
-      radial-gradient(700px 400px at 100% 100%, #2d1f38 0%, transparent 70%),
+      radial-gradient(1000px 700px at 80% 25%, #3a2747 0%, transparent 70%),
+      radial-gradient(800px 500px at 100% 100%, #2d1f38 0%, transparent 70%),
       linear-gradient(120deg, var(--deep) 0%, var(--bg) 45%, #2a1d33 100%);
     font-family: 'Inter', system-ui, sans-serif;
     color: var(--text);
   }
   .copy {
     position: absolute;
-    left: 84px;
-    top: 112px;
+    left: 88px;
+    top: 0;
+    bottom: 0;
+    width: 560px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
     z-index: 5;
   }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand svg { width: 52px; height: 37px; }
   .eyebrow {
-    font-size: 25px;
+    font-size: 26px;
     font-weight: 800;
     letter-spacing: 0.02em;
     color: var(--accent);
   }
   h1 {
-    margin: 6px 0 0;
+    margin: 10px 0 0;
     font-family: 'Inter Display', 'Inter', sans-serif;
-    font-size: 104px;
+    font-size: 116px;
     font-weight: 700;
     letter-spacing: -0.035em;
     line-height: 1;
   }
   .rule {
-    width: 96px;
+    width: 104px;
     height: 6px;
-    margin: 30px 0 26px;
+    margin: 34px 0 30px;
     border-radius: 3px;
     background: var(--accent);
   }
   .tagline {
     margin: 0;
-    font-size: 29px;
+    font-size: 32px;
     line-height: 1.3;
     color: var(--muted);
     font-weight: 400;
   }
-  .pills { display: flex; gap: 10px; margin-top: 28px; }
+  .pills { display: flex; gap: 12px; margin-top: 34px; }
   .pill {
-    padding: 8px 16px;
+    padding: 9px 18px;
     border: 1.5px solid var(--accent);
     border-radius: 999px;
-    font-size: 18px;
+    font-size: 20px;
     font-weight: 500;
     color: var(--accent);
   }
   .pill.dim { border-color: var(--border); color: var(--muted); }
 
-  /* the app, in perspective */
-  .stage {
+  /* the app: the dataset page behind, the run in front of its lower-left corner */
+  .stage { position: absolute; inset: 0; perspective: 2400px; }
+  .panel {
     position: absolute;
-    left: 690px;
-    top: 0;
-    width: 1000px;
-    height: 560px;
-    perspective: 1800px;
+    display: block;
+    border-radius: 16px;
+    box-shadow: 0 40px 90px -24px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.05);
   }
   .label {
     position: absolute;
-    font-size: 19px;
+    padding: 4px 10px;
+    margin-left: -10px;
+    border-radius: 8px;
+    background: rgba(26, 19, 32, 0.88);
+    font-size: 18px;
     font-weight: 700;
-    letter-spacing: 0.06em;
-    color: var(--accent);
+    letter-spacing: 0.08em;
   }
-  .panel {
-    position: absolute;
-    border-radius: 14px;
-    box-shadow: 0 30px 70px -20px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.04);
-    display: block;
-  }
-  .front {
-    position: absolute;
-    left: 0;
-    top: 70px;
-    transform: rotateY(-14deg) rotateX(3deg);
-    transform-origin: left center;
-  }
-  .front .label { left: 2px; top: -34px; }
-  .samples { position: relative; width: 500px; }
-  .loss { position: relative; width: 500px; margin-top: 10px; }
-  .back {
-    position: absolute;
-    left: 470px;
-    top: 52px;
-    transform: rotateY(-22deg) rotateX(4deg) scale(0.92);
-    transform-origin: left center;
-    opacity: 0.55;
-    filter: saturate(0.85);
-  }
-  .back .label { left: 4px; top: -34px; color: var(--muted); }
-  .testlora { position: relative; width: 470px; }
+  .dataset { left: 760px; top: 110px; width: 800px; transform: rotateY(-9deg); transform-origin: right center; }
+  .dataset-label { left: 772px; top: 70px; color: var(--muted); }
+  .run { left: 680px; top: 400px; width: 560px; transform: rotateY(-9deg); transform-origin: left center; }
+  .run-label { left: 690px; top: 360px; color: var(--accent); z-index: 3; }
+  .chart { left: 1130px; top: 610px; width: 430px; transform: rotateY(-9deg); transform-origin: left center; }
   .fade {
     position: absolute;
     inset: 0;
     z-index: 4;
     pointer-events: none;
-    background:
-      linear-gradient(180deg, transparent 84%, var(--bg) 100%),
-      linear-gradient(90deg, transparent 88%, rgba(33, 25, 39, 0.8) 100%);
+    background: linear-gradient(180deg, transparent 88%, rgba(33, 25, 39, 0.9) 100%);
   }
 </style>
 </head>
 <body>
   <div class="banner">
     <div class="copy">
-      <div class="eyebrow">NYNXZ</div>
+      <div class="brand">
+        <svg viewBox="-12 4 88 62" aria-hidden="true"><g transform="translate(32 58) scale(0.66)" fill="#f0ff41">
+          <path d="M0,0 C24,-16.2 16.8,-42.12 0,-54 C-16.8,-42.12 -24,-16.2 0,0Z" transform="rotate(-70)" opacity="0.4"/>
+          <path d="M0,0 C24,-16.2 16.8,-42.12 0,-54 C-16.8,-42.12 -24,-16.2 0,0Z" transform="rotate(70)" opacity="0.4"/>
+          <path d="M0,0 C26,-19.8 18.2,-51.48 0,-66 C-18.2,-51.48 -26,-19.8 0,0Z" transform="rotate(-36)" opacity="0.7"/>
+          <path d="M0,0 C26,-19.8 18.2,-51.48 0,-66 C-18.2,-51.48 -26,-19.8 0,0Z" transform="rotate(36)" opacity="0.7"/>
+          <path d="M0,0 C28,-23.4 19.6,-60.84 0,-78 C-19.6,-60.84 -28,-23.4 0,0Z"/>
+        </g></svg>
+        <div class="eyebrow">NYNXZ</div>
+      </div>
       <h1>ZenTrainer</h1>
       <div class="rule"></div>
-      <p class="tagline">LoRA training and workflow apps,<br />with ComfyUI as the engine</p>
+      <p class="tagline">Train LoRAs inside ComfyUI,<br />and watch them learn</p>
       <div class="pills">
-        <span class="pill">Train · Test · Generate</span>
+        <span class="pill">Characters · Styles · Video</span>
         <span class="pill dim">Your ComfyUI models</span>
       </div>
     </div>
 
     <div class="stage">
-      <div class="back">
-        <span class="label">TEST LORA</span>
-        <img class="panel testlora" src="el-testlora.png" alt="" />
-      </div>
-      <div class="front">
-        <span class="label">TRAINING</span>
-        <img class="panel samples" src="el-samples.png" alt="" />
-        <img class="panel loss" src="el-loss.png" alt="" />
-      </div>
+      <span class="label dataset-label">DATASETS</span>
+      <img class="panel dataset" src="el-dataset.png" alt="" />
+      <span class="label run-label">TRAINING</span>
+      <img class="panel run" src="el-samples.png" alt="" />
+      <img class="panel chart" src="el-loss.png" alt="" />
     </div>
     <div class="fade"></div>
   </div>
