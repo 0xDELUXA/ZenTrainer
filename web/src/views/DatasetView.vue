@@ -2,7 +2,7 @@
 // One dataset. Grid (uniform cards, zoomable) or table (sortable, inline captions);
 // click any image for the lightbox with a caption editor beside it. Drop files anywhere
 // to upload: images, same-name .txt captions, and masks (<name>-masklabel.png).
-import { ZenButton, ZenCombo, ZenCompare, ZenContextMenu, ZenEmpty, ZenInput, ZenLightbox, ZenSlider, ZenSwitch } from '@nynxz/zenkit-ui'
+import { ZenButton, ZenCombo, ZenCompare, ZenContextMenu, ZenEmpty, ZenInput, ZenLightbox, ZenSlider, ZenSwitch, ZenTip } from '@nynxz/zenkit-ui'
 import type { ContextMenuItem, LightboxItem } from '@nynxz/zenkit-ui'
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -485,6 +485,16 @@ const lbItems = computed<LightboxItem[]>(() =>
 const thumb = (it: Pick<DatasetItem, 'path'>, size = 384) => `${thumbUrl(props.name, it.path, size)}&v=${bust.value}`
 const secs = (d?: number | null) => (d == null ? '' : d < 60 ? `${d.toFixed(1)}s` : `${Math.floor(d / 60)}:${String(Math.round(d % 60)).padStart(2, '0')}`)
 const pct = (v?: number) => (v == null ? '' : `${Math.round(v * 100)}%`)
+// a card's file details, behind its ⓘ instead of a line under every caption
+const fileInfo = (it: DatasetItem) =>
+  [
+    it.path,
+    it.width ? `${it.width}×${it.height}` : '',
+    it.bytes ? kb(it.bytes) : '',
+    it.kind === 'video' ? `${it.frames ?? '?'} frames at ${it.fps ?? '?'} fps` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
 const kb = (b: number) => (b > 1024 ** 2 ? `${(b / 1024 ** 2).toFixed(1)} MB` : `${Math.round(b / 1024)} KB`)
 const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
 </script>
@@ -512,7 +522,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
       <div class="seg" role="tablist" aria-label="View">
         <button :class="{ on: layout === 'grid' }" title="Grid" @click="view = 'grid'"><i class="mdi mdi-view-grid-outline" /></button>
         <button :class="{ on: layout === 'list' }" title="Table" @click="view = 'list'"><i class="mdi mdi-view-list-outline" /></button>
-        <button :class="{ on: layout === 'pairs' }" :disabled="!counts.pairs" :title="counts.pairs ? 'Edit pairs: inputs → result, with the instruction' : 'Edit pairs: none in this dataset (a <name>_control picture beside an image makes one)'" @click="view = 'pairs'"><i class="mdi mdi-swap-horizontal" /></button>
+        <button v-if="counts.pairs" :class="{ on: layout === 'pairs' }" title="Edit pairs: inputs → result, with the instruction" @click="view = 'pairs'"><i class="mdi mdi-swap-horizontal" /></button>
       </div>
       <label class="zoom" title="Card size" :class="{ off: layout === 'list' }">
         <i class="mdi mdi-image-size-select-small" />
@@ -582,6 +592,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
             <span v-if="!cap(it)" class="badge warn" title="No caption"><i class="mdi mdi-text-box-remove-outline" /></span>
           </span>
         </button>
+        <span class="info-btn" @click.stop><ZenTip :text="fileInfo(it)" label="File details" /></span>
         <button
           class="mute-btn"
           :class="{ on: isMuted(it) }"
@@ -595,7 +606,6 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
         </label>
         <button class="card-body" :title="cap(it) || 'No caption'" @click="onItemClick(it, i, $event)">
           <span class="cap-text" :class="{ empty: !cap(it) }">{{ cap(it) || 'No caption' }}</span>
-          <span class="card-meta mono">{{ it.path.split('/').at(-1) }}<span v-if="it.width"> · {{ it.width }}×{{ it.height }}</span></span>
         </button>
       </article>
     </div>
@@ -1218,6 +1228,28 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
   opacity: 0.35;
   filter: grayscale(0.6);
 }
+.info-btn {
+  position: absolute;
+  top: 8px;
+  right: 40px;
+  z-index: 2;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-sm);
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  opacity: 0;
+  transition: opacity var(--zen-dur-fast);
+}
+.info-btn :deep(*) {
+  color: inherit;
+}
+.card-item:hover .info-btn,
+.info-btn:focus-within {
+  opacity: 1;
+}
 .mute-btn {
   position: absolute;
   top: 8px;
@@ -1310,7 +1342,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
   display: flex;
   flex-direction: column;
   gap: 6px;
-  height: 74px;
+  height: 52px;
   flex: none;
   padding: 9px 10px 8px;
   border: none;
