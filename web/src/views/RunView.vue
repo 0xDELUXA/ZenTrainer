@@ -1668,7 +1668,7 @@ dd {
   gap: 1px;
 }
 /* one line per checkpoint; its actions take the numbers' place on hover */
-.ckpt {
+.ckpts .ckpt {
   position: relative;
   display: flex;
   align-items: center;
@@ -1679,37 +1679,37 @@ dd {
   border-radius: var(--r-md);
   font-size: 12px;
 }
-.ckpt:hover,
-.ckpt:focus-within {
+.ckpts .ckpt:hover,
+.ckpts .ckpt:focus-within {
   background: color-mix(in srgb, var(--zen-surface-2) 60%, transparent);
 }
-.ckpt.best {
+.ckpts .ckpt.best {
   background: color-mix(in srgb, var(--zen-ok) 8%, transparent);
 }
-.ck-step {
+.ckpts .ck-step {
   font-weight: 650;
   font-size: 13px;
   min-width: 4ch;
 }
-.ck-step.gone {
+.ckpts .ck-step.gone {
   color: var(--zen-warn);
   text-decoration: line-through;
 }
-.ckpt .chip {
+.ckpts .ckpt .chip {
   font-size: 10px;
   padding: 0 6px;
   line-height: 16px;
 }
-.ckpt .chip.muted {
+.ckpts .ckpt .chip.muted {
   color: var(--zen-muted);
 }
-.ck-val {
+.ckpts .ck-val {
   font-size: 11px;
   color: var(--zen-muted);
   white-space: nowrap;
   transition: opacity 0.12s ease;
 }
-.ck-acts {
+.ckpts .ck-acts {
   position: absolute;
   right: 4px;
   top: 50%;
@@ -1720,13 +1720,13 @@ dd {
   pointer-events: none;
   transition: opacity 0.12s ease;
 }
-.ckpt:hover .ck-acts,
-.ckpt:focus-within .ck-acts {
+.ckpts .ckpt:hover .ck-acts,
+.ckpts .ckpt:focus-within .ck-acts {
   opacity: 1;
   pointer-events: auto;
 }
-.ckpt:hover .ck-val,
-.ckpt:focus-within .ck-val {
+.ckpts .ckpt:hover .ck-val,
+.ckpts .ckpt:focus-within .ck-val {
   opacity: 0;
 }
 .best-chip {
