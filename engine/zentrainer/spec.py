@@ -115,6 +115,9 @@ class ObjectiveSpec:
     timesteps: str = "uniform"  # uniform | logit_normal
     logit_mean: float = 0.0
     logit_std: float = 1.0
+    # share of steps drawn uniformly instead (logit-normal only): keeps a little training at
+    # the extremes it rarely visits (malcolmrey: 0.01)
+    uniform_mix: float = 0.0
     # Training timestep shift for flow-matching models (0 = the model's own sampling shift).
     # The sampling shift favours heavy noise (MOSS's 5 puts ~70% of steps above σ≈0.7):
     # composition and colour. A lower one (1-3) spends more steps on detail, e.g. faces.
@@ -286,6 +289,8 @@ class TrainSpec:
                     raise SpecError("sample width/height must be multiples of 16")
             elif not isinstance(p, str):
                 raise SpecError("samples.prompts holds prompts (text) or {prompt, width, height, frames, seed}")
+        if not 0.0 <= self.objective.uniform_mix <= 1.0:
+            raise SpecError("objective.uniform_mix is a share between 0 and 1")
         if self.optim.lora_plus < 0:
             raise SpecError("optim.lora_plus must be >= 0 (0 = off)")
         if self.samples.frames < 1 or self.samples.fps <= 0:

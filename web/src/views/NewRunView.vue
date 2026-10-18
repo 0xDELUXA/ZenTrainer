@@ -644,6 +644,15 @@ async function start(position: 'next' | 'end' = 'next') {
                 <ZenField label="Timesteps" stack tip="Logit-normal favours mid noise (flow models)">
                   <ZenCombo v-model="spec.objective.timesteps" :items="items(['uniform', 'logit_normal'], { logit_normal: 'Logit-normal' })" :searchable="false" :sorted="false" />
                 </ZenField>
+                <ZenField v-if="spec.objective.timesteps === 'logit_normal'" label="Centre / spread" stack tip="Logit-normal's mean and standard deviation. Mean 0 centres on mid noise; positive leans to heavy noise (composition), negative to light noise (detail). MOSS pretrained at 1.09 / 0.95">
+                  <div class="inline">
+                    <ZenNumber v-model="spec.objective.logit_mean" :min="-3" :max="3" :step="0.1" :precision="2" />
+                    <ZenNumber v-model="spec.objective.logit_std" :min="0.1" :max="3" :step="0.1" :precision="2" />
+                  </div>
+                </ZenField>
+                <ZenField v-if="spec.objective.timesteps === 'logit_normal'" label="Uniform mix (%)" stack tip="Share of steps drawn uniformly instead: a little training at the extremes logit-normal rarely visits. 1% is plenty">
+                  <ZenNumber :model-value="Math.round((spec.objective.uniform_mix ?? 0) * 100)" :min="0" :max="50" :step="1" :precision="0" @update:model-value="spec.objective.uniform_mix = $event / 100" />
+                </ZenField>
                 <ZenField label="Timestep shift" stack tip="Flow models. 0 = the model's own (MOSS 5: composition, colour). 1–3 trains more on fine detail like faces">
                   <ZenNumber v-model="spec.objective.shift" :min="0" :max="10" :step="0.5" :precision="1" />
                 </ZenField>

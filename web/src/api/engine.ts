@@ -66,6 +66,8 @@ export interface TrainSpec {
     timesteps: 'uniform' | 'logit_normal'
     logit_mean: number
     logit_std: number
+    /** logit-normal: share of steps drawn uniformly instead */
+    uniform_mix?: number
     /** flow models: training timestep shift (0 = the model's own sampling shift) */
     shift: number
   }

@@ -35,6 +35,9 @@ def sample_percents(spec: ObjectiveSpec, n: int, generator: torch.Generator | No
     if spec.timesteps == "logit_normal":
         z = torch.randn(n, generator=generator) * spec.logit_std + spec.logit_mean
         t = torch.sigmoid(z)  # t = noise fraction
+        if spec.uniform_mix > 0:
+            pick = torch.rand(n, generator=generator) < spec.uniform_mix
+            t = torch.where(pick, torch.rand(n, generator=generator), t)
     else:
         t = torch.rand(n, generator=generator)
     # keep away from exact endpoints: σ=0 has no residual, σ=max can be inf for eps models
