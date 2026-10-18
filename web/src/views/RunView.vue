@@ -209,6 +209,27 @@ async function again(g: { index: number; base: SampleRow | null; steps: SampleRo
 // manual tries waiting their turn: the engine runs sample commands one after another at step
 // boundaries, so any number can be queued; each leaves this list when its render lands
 const queuedTries = ref<{ id: number; prompt: string; again?: number }[]>([])
+// the cards for tries not landed yet: the first one is live while a manual render runs (even
+// one this page didn't queue, e.g. after a reload)
+const waitingCards = computed(() => {
+  const live = liveManual.value
+  const phase = live
+    ? `${live.base ? 'Without the LoRA' : `At step ${live.step ?? step.value}`} · ${
+        live.s_total ? ((live.s_step ?? 0) >= live.s_total ? 'decoding' : `${live.s_step ?? 0}/${live.s_total}`) : 'starting'
+      }`
+    : ''
+  const frac = live?.s_total ? Math.min(1, (live.s_step ?? 0) / live.s_total) : 0
+  const cards = queuedTries.value.map((q, i) => ({
+    key: `q${q.id}`,
+    prompt: q.prompt,
+    again: q.again != null,
+    live: i === 0 && !!live,
+    frac: i === 0 ? frac : 0,
+    state: i === 0 && live ? phase : i === (live ? 1 : 0) ? 'Next' : `Queued · ${i - (live ? 1 : 0)} ahead`,
+  }))
+  if (live && !cards.length) cards.push({ key: 'live', prompt: live.prompt ?? '', again: false, live: true, frac, state: phase })
+  return cards
+})
 let tryIds = 0
 async function queueTry(args: Record<string, unknown>, prompt: string, again?: number) {
   const id = ++tryIds
@@ -593,25 +614,19 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
                   <ZenButton size="sm" variant="primary" icon="mdi mdi-creation-outline" :disabled="status !== 'training' || !tryPrompt.trim()" :title="status !== 'training' ? 'Only while it trains' : 'Queues it (Ctrl+Enter). One prompt per line queues several'" @click="renderTry">Render</ZenButton>
                 </div>
               </div>
-              <div v-if="liveManual" class="mlive">
-                <div class="mmedia live">
-                  <img v-if="liveManual.preview" :src="liveManual.preview" alt="" />
-                  <i v-else class="mdi mdi-loading mdi-spin" />
-                </div>
-                <div class="small">
-                  <b>{{ liveManual.base ? 'Without the LoRA' : `At step ${liveManual.step ?? step}` }}</b>
-                  <span class="muted"> · {{ liveManual.s_total ? ((liveManual.s_step ?? 0) >= liveManual.s_total ? 'decoding' : `${liveManual.s_step ?? 0}/${liveManual.s_total}`) : 'starting' }}</span>
-                  <div class="muted mcap">{{ liveManual.prompt }}</div>
-                </div>
-              </div>
               <div v-if="!manualGroups.length && !liveManual" class="muted small empty-manual">Prompts you try here render with the LoRA as it is now, at the step it's on. They don't join the run's samples.</div>
               <div class="mtiles">
-                <div v-for="(q, qi) in queuedTries" :key="q.id" class="mtile">
-                  <div class="mmedia queued">
-                    <i :class="qi === 0 && liveManual ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-clock-outline'" />
-                    <span class="small muted">{{ qi === 0 && liveManual ? 'Rendering' : qi === 0 ? 'Next' : `Queued · ${qi} ahead` }}</span>
+                <!-- the try rendering now (live preview where it'll land), then the ones waiting -->
+                <div v-for="t in waitingCards" :key="t.key" class="mtile">
+                  <div class="mmedia queued" :class="{ live: t.live }">
+                    <img v-if="t.live && liveManual?.preview" :src="liveManual.preview" alt="" />
+                    <template v-else>
+                      <i :class="t.live ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-clock-outline'" />
+                    </template>
+                    <span class="qstate small">{{ t.state }}</span>
+                    <div v-if="t.live" class="qbar"><span :style="{ width: `${t.frac * 100}%` }" /></div>
                   </div>
-                  <span class="mcap">{{ q.again != null ? 'Again: ' : '' }}{{ q.prompt }}</span>
+                  <span class="mcap">{{ t.again ? 'Again: ' : '' }}{{ t.prompt }}</span>
                 </div>
                 <div v-for="(g, gi) in manualGroups" :key="g.index" class="mtile" :class="{ pair: g.base && shownStep(g) }">
                   <!-- with a base render: images as a before/after slider, videos side by side -->
@@ -1150,16 +1165,8 @@ dd {
 .mmedia :deep(.zen-compare img) {
   object-fit: contain;
 }
-.mlive {
-  display: grid;
-  grid-template-columns: 160px 1fr;
-  gap: 12px;
-  align-items: center;
-  padding: 8px;
-  border-radius: var(--r-md);
-  border: 1px solid color-mix(in srgb, var(--zen-accent) 50%, transparent);
-}
 .mmedia.queued {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1170,6 +1177,43 @@ dd {
   color: var(--zen-muted);
   font-size: 20px;
   cursor: default;
+}
+.mmedia.queued.live {
+  border: 1px solid color-mix(in srgb, var(--zen-accent) 60%, transparent);
+}
+.mmedia.queued img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.qstate {
+  position: relative;
+  z-index: 1;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--zen-surface) 80%, transparent);
+  color: var(--zen-text);
+}
+.live .qstate {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+}
+.qbar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: color-mix(in srgb, var(--zen-text) 10%, transparent);
+}
+.qbar span {
+  display: block;
+  height: 100%;
+  background: var(--zen-accent);
+  transition: width var(--zen-dur) ease;
 }
 .mmedia.live {
   display: grid;
