@@ -54,7 +54,7 @@ async function run() {
   <div class="page merge">
     <div class="page-head">
       <div class="titles">
-        <h1><RouterLink to="/models" class="crumb">Models</RouterLink> Merge LoRAs</h1>
+        <h1><RouterLink to="/tools" class="crumb">Tools</RouterLink> Merge LoRAs</h1>
         <p class="lede">Bake several LoRAs into one, at the strengths you choose.</p>
       </div>
     </div>

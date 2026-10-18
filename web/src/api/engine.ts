@@ -607,6 +607,8 @@ export const engine = {
     call<ModelDownload>('/downloads', { method: 'POST', body: JSON.stringify({ family, folder, name }) }),
   cancelDownload: (id: string) => call<{ cancelled: boolean }>(`/downloads/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   clearDownloads: () => call<{ ok: true }>('/downloads/clear', { method: 'POST' }),
+  splitVideos: (name: string, body: { seconds: number; count: number; longer_than: number }) =>
+    call<{ clips: number; moved: string[] }>(`${dsPath(name)}/split`, { method: 'POST', body: JSON.stringify(body) }),
   mergeLoras: (body: { members: { name: string; strength: number }[]; out_name: string; max_rank?: number; energy?: number }) =>
     call<{ lora_name: string; mean_rank?: number; kept_energy?: number; bytes: number }>('/loras/merge', { method: 'POST', body: JSON.stringify(body) }),
   adapters: (family?: string | null) =>

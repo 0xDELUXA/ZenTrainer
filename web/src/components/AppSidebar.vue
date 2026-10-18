@@ -30,13 +30,14 @@ interface NavItem {
   label: string
   count?: () => number
 }
-// five places: no group headings needed
+// six places: no group headings needed
 const items: NavItem[] = [
   // everything that runs: training (and its queue) and caption jobs
   { to: '/jobs', icon: 'mdi mdi-chart-timeline-variant', label: 'Jobs', count: () => activeRuns.value.length + activeCaptions.value.length },
   { to: '/datasets', icon: 'mdi mdi-image-multiple-outline', label: 'Datasets' },
   { to: '/models', icon: 'mdi mdi-cube-outline', label: 'Models' },
   { to: '/apps', icon: 'mdi mdi-view-grid-outline', label: 'Apps' },
+  { to: '/tools', icon: 'mdi mdi-toolbox-outline', label: 'Tools' },
   { to: '/gallery', icon: 'mdi mdi-image-album', label: 'Gallery' },
 ]
 const isActive = (to: string) =>
