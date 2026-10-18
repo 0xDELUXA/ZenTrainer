@@ -2,8 +2,8 @@
 // One dataset. Grid (uniform cards, zoomable) or table (sortable, inline captions);
 // click any image for the lightbox with a caption editor beside it. Drop files anywhere
 // to upload: images, same-name .txt captions, and masks (<name>-masklabel.png).
-import { ZenButton, ZenCompare, ZenEmpty, ZenInput, ZenLightbox, ZenSlider } from '@nynxz/zenkit-ui'
-import type { LightboxItem } from '@nynxz/zenkit-ui'
+import { ZenButton, ZenCompare, ZenContextMenu, ZenEmpty, ZenInput, ZenLightbox, ZenSlider } from '@nynxz/zenkit-ui'
+import type { ContextMenuItem, LightboxItem } from '@nynxz/zenkit-ui'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { engine, thumbUrl, viewUrl, type CaptionJob, type DatasetFaces, type DatasetItem } from '@/api/engine'
@@ -217,6 +217,45 @@ function toggleSelect(it: DatasetItem, i: number, e?: MouseEvent) {
   } else if (selected.has(it.path)) selected.delete(it.path)
   else selected.add(it.path)
   lastClicked = i
+}
+// a plain click opens the picture; Ctrl/Cmd+click toggles it in the selection, Shift+click a range
+function onItemClick(it: DatasetItem, i: number, e: MouseEvent) {
+  if (e.ctrlKey || e.metaKey || e.shiftKey) toggleSelect(it, i, e)
+  else lightbox.value = i
+}
+// right-click: acts on the selection when the picture is in it, else on that picture alone
+const menu = ref<InstanceType<typeof ZenContextMenu> | null>(null)
+const menuItems = ref<ContextMenuItem[]>([])
+function onItemMenu(it: DatasetItem, i: number, e: MouseEvent) {
+  const many = selected.has(it.path) && selected.size > 1
+  const paths = many ? [...selected] : [it.path]
+  const targets = items.value.filter((x) => paths.includes(x.path))
+  const anyMuted = targets.some(isMuted)
+  const allMuted = targets.every(isMuted)
+  const name = it.path.split('/').at(-1)!
+  menuItems.value = [
+    { heading: many ? `${paths.length} pictures` : name },
+    ...(many ? [] : [{ label: 'Open', icon: 'mdi-open-in-app', run: () => (lightbox.value = i) }]),
+    selected.has(it.path) && !many
+      ? { label: 'Deselect', icon: 'mdi-checkbox-blank-outline', hint: 'Ctrl+click', run: () => selected.delete(it.path) }
+      : many
+        ? { label: 'Clear selection', icon: 'mdi-close', hint: 'Esc', run: () => selected.clear() }
+        : { label: 'Select', icon: 'mdi-checkbox-marked-outline', hint: 'Ctrl+click', run: () => toggleSelect(it, i) },
+    '-',
+    ...(!allMuted ? [{ label: `Mute in “${activeSet.value}”`, icon: 'mdi-eye-off-outline', run: () => setMuted(paths, true) }] : []),
+    ...(anyMuted ? [{ label: `Unmute in “${activeSet.value}”`, icon: 'mdi-eye-outline', run: () => setMuted(paths, false) }] : []),
+    ...(many
+      ? []
+      : [
+          { label: 'Copy caption', icon: 'mdi-content-copy', disabled: !cap(it), run: () => navigator.clipboard?.writeText(cap(it)) },
+          ...(it.kind !== 'video'
+            ? [{ label: 'Edit mask', icon: 'mdi-draw', run: () => router.push({ path: `/datasets/${encodeURIComponent(props.name)}/mask`, query: { path: it.path } }) }]
+            : []),
+        ]),
+    '-',
+    { label: many ? `Delete ${paths.length}…` : 'Delete…', icon: 'mdi-trash-can-outline', danger: true, run: () => removeMany(paths) },
+  ]
+  menu.value?.show(e)
 }
 const allShownSelected = computed(() => shown.value.length > 0 && shown.value.every((r) => selected.has(r.path)))
 function onEsc(e: KeyboardEvent) {
@@ -518,8 +557,9 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
         :key="it.path"
         class="card-item"
         :class="{ sel: selected.has(it.path), muted: isMuted(it) }"
+        @contextmenu="onItemMenu(it, i, $event)"
       >
-        <button class="thumb" :title="it.path" :data-peek="full(it)" @click="lightbox = i">
+        <button class="thumb" :title="it.path" :data-peek="full(it)" @click="onItemClick(it, i, $event)">
           <img :src="thumb(it, thumbSize)" loading="lazy" :alt="cap(it)" :style="{ objectFit: fit }" />
           <img v-if="showMasks && it.mask" :src="thumb({ path: it.mask }, thumbSize)" loading="lazy" alt="" class="mask-ov" :style="{ objectFit: fit }" />
           <!-- an edit pair: its input picture in the corner (the big one is the target) -->
@@ -549,7 +589,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
         <label class="check" :class="{ on: selected.has(it.path) }" @click.prevent="toggleSelect(it, i, $event)">
           <i :class="selected.has(it.path) ? 'mdi mdi-checkbox-marked' : 'mdi mdi-checkbox-blank-outline'" />
         </label>
-        <button class="card-body" :title="cap(it) || 'No caption'" @click="lightbox = i">
+        <button class="card-body" :title="cap(it) || 'No caption'" @click="onItemClick(it, i, $event)">
           <span class="cap-text" :class="{ empty: !cap(it) }">{{ cap(it) || 'No caption' }}</span>
           <span class="card-meta mono">{{ it.path.split('/').at(-1) }}<span v-if="it.width"> · {{ it.width }}×{{ it.height }}</span></span>
         </button>
@@ -558,7 +598,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
 
     <!-- edit pairs: every input, then the result, the instruction beside them -->
     <div v-else-if="layout === 'pairs'" class="pairs" :style="{ '--ph': `${zoom}px` }">
-      <article v-for="(it, i) in shown" :key="it.path" class="pair card" :class="{ sel: selected.has(it.path), dirty: drafts[k(it)] != null }">
+      <article v-for="(it, i) in shown" :key="it.path" class="pair card" :class="{ sel: selected.has(it.path), dirty: drafts[k(it)] != null }" @contextmenu="onItemMenu(it, i, $event)">
         <label class="check" :class="{ on: selected.has(it.path) }" @click.prevent="toggleSelect(it, i, $event)">
           <i :class="selected.has(it.path) ? 'mdi mdi-checkbox-marked' : 'mdi mdi-checkbox-blank-outline'" />
         </label>
@@ -568,13 +608,13 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
             <ZenCompare :before="thumb({ path: it.controls![0]! }, 768)" :after="thumb(it, 768)" before-label="Input" after-label="Result" />
           </div>
           <template v-else>
-            <button v-for="(c, n) in it.controls ?? []" :key="c" class="pane" :title="c" :data-peek="ctrlView(it, c)" @click="lightbox = i">
+            <button v-for="(c, n) in it.controls ?? []" :key="c" class="pane" :title="c" :data-peek="ctrlView(it, c)" @click="onItemClick(it, i, $event)">
               <video v-if="isVideoPath(c)" :src="ctrlView(it, c)" muted loop playsinline preload="metadata" @mouseenter="($event.target as HTMLVideoElement).play()" @mouseleave="($event.target as HTMLVideoElement).pause()" />
               <img v-else :src="thumb({ path: c }, 512)" loading="lazy" alt="" />
               <span class="pane-tag">{{ (it.controls?.length ?? 0) > 1 ? `Input ${n + 1}` : 'Input' }}</span>
             </button>
             <i v-if="it.controls?.length" class="mdi mdi-arrow-right pair-arrow" />
-            <button class="pane result" :title="it.path" :data-peek="full(it)" @click="lightbox = i">
+            <button class="pane result" :title="it.path" :data-peek="full(it)" @click="onItemClick(it, i, $event)">
               <video v-if="it.kind === 'video'" :src="ctrlView(it, it.path)" muted loop playsinline preload="metadata" @mouseenter="($event.target as HTMLVideoElement).play()" @mouseleave="($event.target as HTMLVideoElement).pause()" />
               <img v-else :src="thumb(it, 512)" loading="lazy" alt="" />
               <span class="pane-tag">{{ it.controls?.length ? 'Result' : 'No input' }}</span>
@@ -615,9 +655,9 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
         <button class="c-cap sortable" @click="sortBy('caption')">Caption <i v-if="sortKey === 'caption'" :class="sortDir > 0 ? 'mdi mdi-arrow-up' : 'mdi mdi-arrow-down'" /></button>
         <span class="c-act" />
       </div>
-      <div v-for="(it, i) in shown" :key="it.path" class="tr" :class="{ sel: selected.has(it.path), dirty: drafts[k(it)] != null }">
+      <div v-for="(it, i) in shown" :key="it.path" class="tr" :class="{ sel: selected.has(it.path), dirty: drafts[k(it)] != null, muted: isMuted(it) }" @contextmenu="onItemMenu(it, i, $event)">
         <label class="c-check" @click.prevent="toggleSelect(it, i, $event)"><i :class="selected.has(it.path) ? 'mdi mdi-checkbox-marked' : 'mdi mdi-checkbox-blank-outline'" /></label>
-        <button class="c-thumb" :data-peek="full(it)" @click="lightbox = i"><img :src="thumb(it, 128)" loading="lazy" alt="" /></button>
+        <button class="c-thumb" :data-peek="full(it)" @click="onItemClick(it, i, $event)"><img :src="thumb(it, 128)" loading="lazy" alt="" /></button>
         <span class="c-name mono ellipsis" :title="it.path">{{ it.path }}</span>
         <span class="c-res mono muted">{{ it.width ? `${it.width}×${it.height}` : '–' }}</span>
         <span class="c-bytes mono muted">{{ kb(it.bytes) }}</span>
@@ -648,6 +688,8 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
         </span>
       </div>
     </div>
+
+    <ZenContextMenu ref="menu" :items="menuItems" />
 
     <ZenLightbox v-if="lightbox != null && lbItems.length" v-model:index="lightbox" :items="lbItems" :searchable="false" @close="lightbox = null">
       <template #side="{ index }">
@@ -1072,6 +1114,9 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
   width: 100%;
   border-radius: var(--r-sm);
   display: block;
+}
+.tr.muted .c-thumb img {
+  opacity: 0.35;
 }
 .card-item.muted .thumb img:not(.control-inset):not(.mask-ov) {
   opacity: 0.35;

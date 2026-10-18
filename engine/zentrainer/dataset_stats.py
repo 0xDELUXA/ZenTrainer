@@ -303,7 +303,7 @@ def snapshot(name: str, set_name: str = "default") -> dict:
     now = compute(name, set_name)
     fp = _fingerprint(name, set_name)
     past = history(name, set_name)
-    row = {"at": time.time(), "fingerprint": fp, "metrics": now["metrics"], "scores": now["scores"]}
+    row = {"at": time.time(), "set": set_name, "fingerprint": fp, "metrics": now["metrics"], "scores": now["scores"]}
     if past and past[-1].get("fingerprint", "").split("|")[0] == fp:
         row["at"] = past[-1]["at"]
         past[-1] = row
@@ -314,6 +314,14 @@ def snapshot(name: str, set_name: str = "default") -> dict:
 
 
 def latest_scores(name: str) -> dict | None:
-    """The default set's last snapshot's scores, cheap (for the datasets list); None before a first look."""
-    past = history(name)
-    return past[-1]["scores"] if past else None
+    """The scores of the caption set looked at most recently (its history was written last), cheap,
+    for the datasets list: {"scores", "set"}; None before a first look."""
+    files = [f for f in _store_dir().glob(f"{_key(name)}*.jsonl")]
+    if not files:
+        return None
+    newest = max(files, key=lambda f: f.stat().st_mtime)
+    try:
+        last = json.loads(newest.read_text().splitlines()[-1])
+    except (OSError, ValueError, IndexError):
+        return None
+    return {"scores": last["scores"], "set": last.get("set", "default")}

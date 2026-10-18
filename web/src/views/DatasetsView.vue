@@ -138,7 +138,7 @@ const ago = (t?: number) => {
             </div>
           </template>
           <div class="capline" :title="`${d.captioned} of ${d.images} have a default caption`">
-            <HealthPentagon v-if="d.health" :scores="d.health" :size="30" class="card-pent" />
+            <HealthPentagon v-if="d.health" :scores="d.health.scores" :size="30" class="card-pent" :title="`Health of the “${d.health.set}” caption set`" />
             <div class="meter"><span :class="{ part: d.captioned < d.images }" :style="{ width: `${d.images ? (d.captioned / d.images) * 100 : 0}%` }" /></div>
             <span class="small" :class="d.captioned < d.images ? 'warn' : 'muted'">{{ d.captioned }}/{{ d.images }} captioned</span>
           </div>

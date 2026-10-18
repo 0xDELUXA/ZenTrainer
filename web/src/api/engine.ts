@@ -264,7 +264,7 @@ export interface DatasetInfo {
   videos?: number
   masked?: number
   /** the last stats snapshot's 0-1 scores (captions, consistency, resolution, uniqueness, faces|balance) */
-  health?: Record<string, number> | null
+  health?: { scores: Record<string, number>; set: string } | null
   /** images with a <name>_control input picture (edit pairs) */
   pairs?: number
   /** total size of the media files */
