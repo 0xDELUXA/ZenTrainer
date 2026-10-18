@@ -146,3 +146,83 @@ def _patch() -> None:
     func.backward = staticmethod(backward)
     _patched = True
     logging.info("[ZenTrainer] int8 ConvRot backward: %s", _mode)
+
+
+# ---- weight-only int8 layers (ComfyUI's int8_tensorwise: quantize_input False) --------------
+# ComfyUI never routes these through QuantLinearFunc: a layer whose input needs a gradient runs
+# F.linear on the QuantizedTensor under autograd, which decomposes to matmul, so the weight is
+# dequantized and both the forward and the input-gradient matmul run in bf16 (profiled on H3 int8:
+# every trained layer). Only grad-free layers hit the int8 kernel. While training, these layers
+# get their own autograd Function instead: the int8 kernel forward, and the input gradient from
+# the W8A8 kernels (mode "w8a8") or a dequantized matmul.
+
+
+class _Int8Linear(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, weight, bias):
+        with torch.no_grad():
+            flat = x.detach().reshape(-1, x.shape[-1])
+            out = torch.nn.functional.linear(flat, weight, bias)  # the QuantizedTensor's int8 kernel
+        ctx.weight = weight
+        ctx.in_shape = x.shape
+        return out.reshape(*x.shape[:-1], out.shape[-1])
+
+    @staticmethod
+    @torch.autograd.function.once_differentiable
+    def backward(ctx, grad_out):
+        w = ctx.weight
+        g = grad_out.reshape(-1, grad_out.shape[-1])
+        params = w._params
+        group = int(getattr(params, "convrot_groupsize", 0) or 0) if getattr(params, "convrot", False) else 0
+        gi = None
+        if _mode == "w8a8" and g.is_cuda:
+            try:
+                gi = w8a8_input_grad(g, w._qdata, params.scale, group)
+                stats["int8 layer: w8a8"] += gi is not None
+            except Exception:
+                gi = None
+        if gi is None:
+            stats["int8 layer: dequantized"] += 1
+            gi = torch.mm(g.to(torch.bfloat16), w.dequantize().to(torch.bfloat16))
+        ctx.weight = None
+        return gi.to(grad_out.dtype).reshape(ctx.in_shape), None, None
+
+
+_installed: list = []
+
+
+def _int8_layer(m) -> bool:
+    w = getattr(m, "weight", None)
+    return (getattr(m, "quant_format", None) == "int8_tensorwise" and getattr(m, "layout_type", None) is not None
+            and type(w).__name__ == "QuantizedTensor" and hasattr(m, "forward_comfy_cast_weights"))
+
+
+def install(model) -> int:
+    """Give the model's weight-only int8 layers the training path above (undone by uninstall)."""
+    import comfy.model_management as mm
+    from comfy.ops import CastBiasWeightContext
+
+    n = 0
+    for m in model.modules():
+        if not _int8_layer(m) or "forward" in m.__dict__:
+            continue
+        original = m.forward
+
+        def forward(x, *args, _m=m, _orig=original, **kwargs):
+            if not (mm.in_training and torch.is_grad_enabled() and x.requires_grad) or args or kwargs \
+                    or len(_m.weight_function) or len(_m.bias_function):
+                return _orig(x, *args, **kwargs)
+            with CastBiasWeightContext(_m, x, offloadable=True, compute_dtype=x.dtype, want_requant=False) as (w, b):
+                if type(w).__name__ != "QuantizedTensor":
+                    return torch.nn.functional.linear(x, w, b)
+                return _Int8Linear.apply(x, w, b)
+
+        m.forward = forward
+        _installed.append(m)
+        n += 1
+    return n
+
+
+def uninstall() -> None:
+    while _installed:
+        _installed.pop().__dict__.pop("forward", None)
