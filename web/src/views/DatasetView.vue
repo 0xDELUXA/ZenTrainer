@@ -73,7 +73,7 @@ async function load() {
 onMounted(load)
 
 // ---- filter / sort / select -------------------------------------------------------------------
-type Filter = 'all' | 'uncaptioned' | 'masked' | 'unmasked'
+type Filter = 'all' | 'uncaptioned' | 'masked' | 'unmasked' | 'pairs'
 const filter = ref<Filter>('all')
 const query = ref('')
 const sortKey = ref<'name' | 'size' | 'res' | 'caption'>('name')
@@ -97,6 +97,7 @@ const counts = computed(() => ({
   masked: items.value.filter((i) => i.mask).length,
   mismatched: items.value.filter((i) => i.mask_mismatch).length,
   videos: items.value.filter((i) => i.kind === 'video').length,
+  pairs: items.value.filter((i) => i.controls?.length).length,
 }))
 const shown = computed(() => {
   const q = query.value.trim().toLowerCase()
@@ -108,7 +109,8 @@ const shown = computed(() => {
       (f === 'all' ||
         (f === 'uncaptioned' && !cap(it)) ||
         (f === 'masked' && it.mask) ||
-        (f === 'unmasked' && !it.mask)) &&
+        (f === 'unmasked' && !it.mask) ||
+        (f === 'pairs' && it.controls?.length)) &&
       (!q || cap(it).toLowerCase().includes(q) || it.path.toLowerCase().includes(q)),
   )
   const key = (it: DatasetItem): string | number =>
@@ -338,6 +340,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
         <button :class="{ on: filter === 'uncaptioned' }" @click="filter = 'uncaptioned'">Uncaptioned {{ counts.uncaptioned }}</button>
         <button :class="{ on: filter === 'masked' }" @click="filter = 'masked'">Masked {{ counts.masked }}</button>
         <button :class="{ on: filter === 'unmasked' }" @click="filter = 'unmasked'">Unmasked</button>
+        <button v-if="counts.pairs" :class="{ on: filter === 'pairs' }" title="Edit pairs: images with a <name>_control input picture" @click="filter = 'pairs'">Pairs {{ counts.pairs }}</button>
       </div>
       <div class="search"><ZenInput v-model="query" placeholder="Search captions or names" size="sm" /></div>
       <span class="spacer" />
@@ -390,6 +393,8 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
         <button class="thumb" :title="it.path" @click="lightbox = i">
           <img :src="thumb(it, thumbSize)" loading="lazy" :alt="cap(it)" :style="{ objectFit: fit }" />
           <img v-if="showMasks && it.mask" :src="thumb({ path: it.mask }, thumbSize)" loading="lazy" alt="" class="mask-ov" :style="{ objectFit: fit }" />
+          <!-- an edit pair: its input picture in the corner (the big one is the target) -->
+          <img v-if="it.controls?.length" :src="thumb({ path: it.controls[0]! }, 256)" loading="lazy" alt="" class="control-inset" :title="`Input: ${it.controls.join(', ')}`" />
           <span class="badges">
             <span v-if="it.mask" class="badge" :class="{ warn: it.mask_mismatch }" :title="it.mask_mismatch ? 'This mask is a different shape from its image: it won\'t line up' : `Masked: ${pct(it.mask_coverage)} trains at full weight`">
               <i :class="it.mask_mismatch ? 'mdi mdi-alert-outline' : 'mdi mdi-layers-outline'" /> {{ pct(it.mask_coverage) }}
@@ -758,6 +763,17 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
   width: 100%;
   height: 100%;
   display: block;
+}
+.control-inset {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  width: 34%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: var(--r-sm);
+  border: 2px solid var(--zen-surface);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 .badges {
   position: absolute;

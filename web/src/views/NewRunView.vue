@@ -19,6 +19,7 @@ import {
   promptText,
   thumbUrl,
   type DatasetInfo,
+  type DatasetItem,
   type OptimizerInfo,
   type ModelProfile,
   type Preset,
@@ -110,6 +111,33 @@ const optimizers = ref<OptimizerInfo[]>([])
 const trainAttention = ref<string[]>(['pytorch'])
 const runPresets = ref<Preset<Partial<TrainSpec>>[]>([])
 const promptSets = ref<Preset<Partial<TrainSpec['samples']>>[]>([])
+
+// ---- edit pairs: the chosen dataset's <name>_control pictures ---------------------------------
+const pairCount = computed(() => datasets.value.find((d) => d.folder === spec.dataset.folder)?.pairs ?? 0)
+const pairItems = ref<DatasetItem[]>([])
+watch(
+  () => [spec.dataset.folder, spec.dataset.edit] as const,
+  async ([folder, edit]) => {
+    pairItems.value = []
+    if (!folder || !edit) return
+    try {
+      pairItems.value = (await engine.dataset(folder)).items.filter((it) => it.controls?.length)
+    } catch {
+      // the dataset moved: nothing to pick from
+    }
+  },
+  { immediate: true },
+)
+// a dataset of pairs is an edit run unless turned off
+watch(pairCount, (n, before) => {
+  if (n && !before && !resuming.value) spec.dataset.edit = true
+})
+const controlOptions = computed(() =>
+  pairItems.value.flatMap((it) => (it.controls ?? []).map((c) => ({ value: c, thumb: thumbUrl(spec.dataset.folder, c, 128) }))),
+)
+function samplesFromPairs() {
+  spec.samples.prompts = pairItems.value.slice(0, 2).map((it) => ({ prompt: it.caption, control: it.controls![0] }))
+}
 
 const items = (vals: string[] | undefined, labels?: Record<string, string>) =>
   (vals ?? []).map((v) => ({ value: v, label: labels?.[v] ?? v, keywords: v }))
@@ -510,6 +538,9 @@ async function start(position: 'next' | 'end' = 'next') {
             <ZenField label="Caption dropout" stack tip="Share of steps with an empty caption">
               <ZenNumber v-model="spec.dataset.caption_dropout" :min="0" :max="1" :step="0.05" :precision="2" />
             </ZenField>
+            <ZenField label="Edit training" stack :tip="`Each image's <name>_control picture is the input the model edits from; the caption is the instruction. For models that take reference images (Flux 3 Klein, Flux 2, Kontext, Qwen Image Edit)${pairCount ? `. This dataset has ${pairCount} pairs` : ''}`">
+              <div class="sw-row"><ZenSwitch :model-value="!!spec.dataset.edit" @update:model-value="spec.dataset.edit = $event" /><span class="sw-state">{{ spec.dataset.edit ? `On · ${pairCount} pairs` : 'Off' }}</span></div>
+            </ZenField>
             <ZenField label="Masked training" stack tip="Masked images learn only where it's white"><div class="sw-row"><ZenSwitch v-model="spec.dataset.masked_loss" /><span class="sw-state">{{ spec.dataset.masked_loss ? 'On' : 'Off' }}</span></div></ZenField>
             <ZenField v-if="spec.dataset.masked_loss" label="Unmasked weight" stack tip="0 ignores the rest; 0.1 learns it lightly">
               <ZenNumber v-model="spec.dataset.unmasked_weight" :min="0" :max="1" :step="0.05" :precision="2" />
@@ -724,6 +755,7 @@ async function start(position: 'next' | 'end' = 'next') {
             </template>
             <ZenButton v-else-if="!currentSet" size="sm" icon="mdi mdi-content-save-outline" :disabled="!spec.samples.prompts.length" @click="startNaming">Save as set</ZenButton>
             <span class="spacer" />
+            <ZenButton v-if="spec.dataset.edit && pairItems.length" size="sm" icon="mdi mdi-swap-horizontal" title="Sample two of the dataset's pairs: their instruction on their input picture" @click="samplesFromPairs">From pairs</ZenButton>
             <ZenButton size="sm" icon="mdi mdi-tag-plus-outline" @click="insertTrigger">Insert [trigger]</ZenButton>
           </div>
           <SamplePromptList
@@ -733,6 +765,7 @@ async function start(position: 'next' | 'end' = 'next') {
             :frames="spec.samples.frames ?? 1"
             :video="isVideoModel"
             :trigger="spec.dataset.trigger"
+            :controls="spec.dataset.edit ? controlOptions : undefined"
           />
           <div v-if="sampleSuggestion && !usingSuggestion" class="suggest">
             <i class="mdi mdi-lightning-bolt-outline" />

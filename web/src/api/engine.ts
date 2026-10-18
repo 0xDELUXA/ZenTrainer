@@ -26,6 +26,7 @@ export interface TrainSpec {
     bucket_step: number
     caption_dropout: number
     masked_loss: boolean
+    edit?: boolean
     unmasked_weight: number
     /** videos: longest clip (snapped to the VAE), fps (0 = source), which windows, how many, size */
     video_frames: number
@@ -219,6 +220,8 @@ export interface DatasetInfo {
   /** how many of `images` are videos */
   videos?: number
   masked?: number
+  /** images with a <name>_control input picture (edit pairs) */
+  pairs?: number
   /** total size of the media files */
   bytes?: number
   /** newest media file's mtime (s) */
@@ -244,6 +247,8 @@ export interface DatasetItem {
   /** the mask's shape differs from the image's: stretched over it, it won't line up */
   mask_mismatch?: boolean
   captions: Record<string, string>
+  /** edit pairs: the input picture(s), dataset-relative */
+  controls?: string[]
   kind?: 'video'
   fps?: number | null
   frames?: number | null
@@ -593,6 +598,8 @@ export interface SamplePrompt {
   height?: number
   frames?: number
   seed?: number
+  /** edit runs: the picture to edit (dataset-relative) */
+  control?: string
 }
 export const promptText = (p: string | SamplePrompt) => (typeof p === 'string' ? p : p.prompt)
 /** engine/zentrainer/segment.py: one SAM3 request from the mask editor */

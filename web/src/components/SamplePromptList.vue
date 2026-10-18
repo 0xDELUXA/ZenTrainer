@@ -7,13 +7,21 @@ import { vAutosize } from '@/autosize'
 import type { SamplePrompt } from '@/api/engine'
 
 const model = defineModel<(string | SamplePrompt)[]>({ required: true })
-const props = defineProps<{ width: number; height: number; frames: number; video: boolean; trigger: string }>()
+const props = defineProps<{
+  width: number
+  height: number
+  frames: number
+  video: boolean
+  trigger: string
+  /** edit runs: the dataset's input pictures to pick from (each sample edits one) */
+  controls?: { value: string; thumb: string }[]
+}>()
 
 const rows = computed(() => model.value.map((p) => (typeof p === 'string' ? { prompt: p } : p)))
 // plain strings while nothing is overridden, so older specs and saved sets stay as they were
 function put(i: number, patch: Partial<SamplePrompt>) {
   const next = { ...rows.value[i]!, ...patch }
-  const bare = next.width == null && next.height == null && next.frames == null && next.seed == null
+  const bare = next.width == null && next.height == null && next.frames == null && next.seed == null && !next.control
   const list = [...model.value]
   list[i] = bare ? next.prompt : next
   model.value = list
@@ -42,6 +50,11 @@ const sizeItems = computed(() => [
   { value: '', label: `Run size (${props.width}×${props.height})` },
   ...SIZES.map(([w, h]) => ({ value: `${w}x${h}`, label: `${w}×${h}${w === h ? ' square' : w < h ? ' portrait' : ' landscape'}` })),
 ])
+const controlItems = computed(() => [
+  { value: '', label: 'No input picture' },
+  ...(props.controls ?? []).map((c) => ({ value: c.value, label: c.value })),
+])
+const controlThumb = (v?: string) => props.controls?.find((c) => c.value === v)?.thumb
 const sizeOf = (r: SamplePrompt) => (r.width && r.height ? `${r.width}x${r.height}` : '')
 function setSize(i: number, v: string | number) {
   const [w, h] = String(v).split('x').map(Number)
@@ -62,7 +75,18 @@ function setSize(i: number, v: string | number) {
         @input="put(i, { prompt: ($event.target as HTMLTextAreaElement).value })"
       />
       <div class="opts">
-        <ZenCombo :model-value="sizeOf(r)" :items="sizeItems" :sorted="false" :searchable="false" size="sm" @update:model-value="setSize(i, $event)" />
+        <template v-if="controls">
+          <img v-if="controlThumb(r.control)" class="cthumb" :src="controlThumb(r.control)" alt="" />
+          <ZenCombo
+            :model-value="r.control ?? ''"
+            :items="controlItems"
+            :sorted="false"
+            size="sm"
+            title="The picture this sample edits; the sample comes out its shape"
+            @update:model-value="put(i, { control: String($event) || undefined })"
+          />
+        </template>
+        <ZenCombo v-if="!controls || !r.control" :model-value="sizeOf(r)" :items="sizeItems" :sorted="false" :searchable="false" size="sm" @update:model-value="setSize(i, $event)" />
         <label v-if="video" class="frames" title="Frames (at the run's fps); empty follows the run">
           <ZenNumber
             :model-value="r.frames ?? frames"
@@ -140,6 +164,13 @@ function setSize(i: number, v: string | number) {
 }
 .opts > :first-child {
   width: 220px;
+}
+.cthumb {
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-sm);
+  object-fit: cover;
+  flex: none;
 }
 .frames {
   display: flex;
