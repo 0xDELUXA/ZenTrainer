@@ -51,28 +51,24 @@ async function create() {
   }
 }
 
-// the pentagon's axes as columns; faces falls back to balance (and quality to resolution) like it does
-const AXES = [
-  { key: 'captions', label: 'Captions' },
-  { key: 'consistency', label: 'Consist.', tip: 'Consistency' },
-  { key: 'quality', label: 'Quality', alt: 'resolution' },
-  { key: 'uniqueness', label: 'Unique', tip: 'Uniqueness' },
-  { key: 'faces', label: 'Faces', alt: 'balance' },
-] as const
-type Axis = (typeof AXES)[number]
-function axisScore(d: DatasetInfo, a: Axis): { v: number; alt: boolean } | null {
-  const s = d.health?.scores
-  if (!s) return null
-  if (s[a.key] != null) return { v: s[a.key]!, alt: false }
-  return !('alt' in a) || s[a.alt] == null ? null : { v: s[a.alt]!, alt: true }
-}
+// the pentagon's five axes, averaged: one sortable number (the pentagon's tooltip has each score)
 function overall(d: DatasetInfo): number | null {
-  const vs = AXES.map((a) => axisScore(d, a)?.v).filter((v): v is number => v != null)
+  const sc = d.health?.scores
+  if (!sc) return null
+  const vs = [sc.captions, sc.consistency, sc.quality ?? sc.resolution, sc.uniqueness, sc.faces ?? sc.balance].filter((v): v is number => v != null)
   return vs.length ? vs.reduce((x, y) => x + y, 0) / vs.length : null
 }
 const pct = (v: number) => Math.round(v * 100)
+// what a dataset holds, as icon + count
+const kinds = (d: DatasetInfo) =>
+  [
+    { icon: 'mdi-image-outline', n: d.images - (d.videos ?? 0), tip: 'pictures' },
+    { icon: 'mdi-movie-open-outline', n: d.videos ?? 0, tip: 'videos' },
+    { icon: 'mdi-vector-selection', n: d.masked ?? 0, tip: 'with a mask' },
+    { icon: 'mdi-swap-horizontal', n: d.pairs ?? 0, tip: 'edit pairs' },
+  ].filter((k) => k.n)
 
-type Key = 'name' | 'items' | 'captioned' | 'size' | 'modified' | 'health' | Axis['key']
+type Key = 'name' | 'items' | 'captioned' | 'modified' | 'health'
 const sortKey = ref<Key>('modified')
 const sortDir = ref(-1)
 function sortBy(k: Key) {
@@ -88,9 +84,7 @@ const shown = computed(() => {
   const val = (d: DatasetInfo): string | number =>
     sortKey.value === 'health'
       ? (overall(d) ?? -1)
-      : AXES.find((a) => a.key === sortKey.value)
-        ? (axisScore(d, AXES.find((a) => a.key === sortKey.value)!)?.v ?? -1)
-        : ({ name: d.folder.toLowerCase(), items: d.images, captioned: d.images ? d.captioned / d.images : 0, size: d.bytes ?? 0, modified: d.modified ?? 0 } as Record<string, string | number>)[sortKey.value] ?? 0
+      : { name: d.folder.toLowerCase(), items: d.images, captioned: d.images ? d.captioned / d.images : 0, modified: d.modified ?? 0 }[sortKey.value]
   return [...list].sort((a, b) => (val(a) < val(b) ? -1 : val(a) > val(b) ? 1 : 0) * sortDir.value)
 })
 
@@ -178,39 +172,35 @@ const ago = (t?: number) => {
           <button class="sortable" @click="sortBy('items')">Items <i v-if="sortKey === 'items'" :class="sortDir > 0 ? 'mdi mdi-arrow-up' : 'mdi mdi-arrow-down'" /></button>
           <button class="sortable" @click="sortBy('captioned')">Captioned <i v-if="sortKey === 'captioned'" :class="sortDir > 0 ? 'mdi mdi-arrow-up' : 'mdi mdi-arrow-down'" /></button>
           <button class="sortable hide-s" title="The pentagon's five scores, averaged (from the last stats snapshot)" @click="sortBy('health')">Health <i v-if="sortKey === 'health'" :class="sortDir > 0 ? 'mdi mdi-arrow-up' : 'mdi mdi-arrow-down'" /></button>
-          <button v-for="a in AXES" :key="a.key" class="sortable num hide-m" :title="'tip' in a ? a.tip : a.label" @click="sortBy(a.key)">{{ a.label }} <i v-if="sortKey === a.key" :class="sortDir > 0 ? 'mdi mdi-arrow-up' : 'mdi mdi-arrow-down'" /></button>
-          <span class="hide-s">Caption sets</span>
-          <button class="sortable hide-s hide-m" @click="sortBy('size')">Size <i v-if="sortKey === 'size'" :class="sortDir > 0 ? 'mdi mdi-arrow-up' : 'mdi mdi-arrow-down'" /></button>
+          <span class="hide-s">Sets</span>
           <button class="sortable hide-s" @click="sortBy('modified')">Changed <i v-if="sortKey === 'modified'" :class="sortDir > 0 ? 'mdi mdi-arrow-up' : 'mdi mdi-arrow-down'" /></button>
           <span />
         </div>
         <div v-for="d in shown" :key="d.folder" class="tr" @click="router.push(link(d))">
           <span class="strip">
-            <img v-for="t in pics(d).slice(0, 3)" :key="t.filename" :src="thumb(d, t, 128)" loading="lazy" alt="" />
+            <img v-for="t in pics(d).slice(0, 2)" :key="t.filename" :src="thumb(d, t, 96)" loading="lazy" alt="" />
           </span>
           <RouterLink :to="link(d)" class="name ellipsis" :title="d.folder" @click.stop>{{ d.folder }}</RouterLink>
-          <span class="small">{{ counts(d) }}<span v-if="d.masked" class="muted"> · {{ d.masked }} masked</span></span>
+          <span class="kinds small mono">
+            <span v-for="k in kinds(d)" :key="k.icon" :title="`${k.n} ${k.tip}`"><i class="mdi" :class="k.icon" />{{ k.n }}</span>
+          </span>
           <span class="capline">
             <span class="meter"><span :class="{ part: d.captioned < d.images }" :style="{ width: `${d.images ? (d.captioned / d.images) * 100 : 0}%` }" /></span>
             <span class="small mono" :class="d.captioned < d.images ? 'warn' : 'muted'">{{ d.captioned }}/{{ d.images }}</span>
           </span>
           <span class="health hide-s" :title="d.health ? `Health of the “${d.health.set}” caption set` : 'Not measured yet: open the dataset'">
             <template v-if="d.health">
-              <HealthPentagon :scores="d.health.scores" :size="26" class="card-pent" />
+              <HealthPentagon :scores="d.health.scores" :size="22" class="card-pent" />
               <span class="small mono">{{ pct(overall(d) ?? 0) }}</span>
             </template>
             <span v-else class="small muted">—</span>
           </span>
-          <span v-for="a in AXES" :key="a.key" class="small mono num hide-m" :class="{ muted: !axisScore(d, a) || axisScore(d, a)!.alt, warn: (axisScore(d, a)?.v ?? 1) < 0.5 }" :title="axisScore(d, a)?.alt && 'alt' in a ? `${a.alt} (no ${a.key} score)` : undefined">
-            {{ axisScore(d, a) ? pct(axisScore(d, a)!.v) : '—' }}
-          </span>
           <span class="sets hide-s">
             <span v-for="st in d.sets" :key="st" class="set">{{ st }}</span>
           </span>
-          <span class="small mono muted hide-s hide-m">{{ fmtBytes(d.bytes) }}</span>
           <span class="small muted hide-s">{{ ago(d.modified) }}</span>
-          <RouterLink :to="{ path: '/runs/new', query: { dataset: d.folder } }" @click.stop>
-            <ZenButton size="sm" icon="mdi mdi-play">Train</ZenButton>
+          <RouterLink :to="{ path: '/runs/new', query: { dataset: d.folder } }" title="Train on this dataset" @click.stop>
+            <ZenButton size="sm" icon="mdi mdi-play" />
           </RouterLink>
         </div>
         <div v-if="!shown.length" class="muted small empty">No dataset matches “{{ query }}”.</div>
@@ -293,8 +283,8 @@ const ago = (t?: number) => {
   font-size: 28px;
 }
 .name {
-  font-weight: 650;
-  font-size: 14px;
+  font-weight: 600;
+  font-size: 13px;
   min-width: 0;
 }
 .capline {
@@ -337,10 +327,10 @@ const ago = (t?: number) => {
 }
 .tr {
   display: grid;
-  grid-template-columns: 112px minmax(140px, 1.4fr) 130px 130px 72px repeat(5, 58px) minmax(110px, 1fr) 70px 80px 84px;
+  grid-template-columns: 56px minmax(110px, 1.6fr) minmax(90px, 0.8fr) minmax(90px, 0.8fr) 56px minmax(70px, 1fr) 78px 30px;
   align-items: center;
-  gap: 12px;
-  padding: 8px 14px;
+  gap: 10px;
+  padding: 5px 10px;
   border-top: 1px solid color-mix(in srgb, var(--zen-border) 50%, transparent);
   cursor: pointer;
 }
@@ -348,6 +338,7 @@ const ago = (t?: number) => {
   background: color-mix(in srgb, var(--zen-text) 4%, transparent);
 }
 .tr.th {
+  white-space: nowrap;
   border-top: none;
   cursor: default;
   font-size: 11px;
@@ -372,9 +363,9 @@ const ago = (t?: number) => {
 }
 .strip {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 2px;
-  height: 36px;
+  height: 28px;
   border-radius: var(--r-sm);
   overflow: hidden;
   background: var(--zen-surface-2);
@@ -403,26 +394,29 @@ const ago = (t?: number) => {
 .health {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
 }
-.num {
-  text-align: right;
-  justify-content: flex-end;
+.kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 9px;
+  color: var(--zen-muted);
 }
-@media (max-width: 1350px) {
-  .tr {
-    grid-template-columns: 112px minmax(140px, 1.4fr) 130px 130px 72px minmax(110px, 1fr) 80px 84px;
-  }
-  .hide-m {
-    display: none;
-  }
+.kinds span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--zen-text);
+}
+.kinds .mdi {
+  color: var(--zen-muted);
+  font-size: 13px;
 }
 @media (max-width: 900px) {
   .tr {
-    grid-template-columns: 80px minmax(0, 1fr) 110px 84px;
+    grid-template-columns: 56px minmax(0, 1fr) minmax(80px, auto) 90px 30px;
   }
-  .hide-s,
-  .tr > :nth-child(3) {
+  .hide-s {
     display: none;
   }
 }
