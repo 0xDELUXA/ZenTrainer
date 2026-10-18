@@ -10,6 +10,13 @@
     zt attach COMFYUI_DIR
     zt doctor
 
+Headless (scriptable; starts ComfyUI in the background when it isn't running):
+    zt train SPEC.json [--profile ID] [--set key=value]... [--end] [--follow]
+    zt runs [--json]           zt follow RUN       zt spec RUN > spec.json
+    zt pause|unpause|stop|save RUN                 zt resume RUN [--set key=value]...
+    zt sample RUN "prompt" [--base] [--size WxH] [--seed N]
+    zt queue [pause|resume]    zt caption DATASET --model FILE [--style nl|tags] [--all]
+
 The managed ComfyUI lives in ./comfyui (pinned by comfy.lock, own .venv) and uses its
 own input/, output/ and user/ folders, as any ComfyUI does. All gitignored. Models are never copied:
 --models-from points the instance at existing ComfyUI installs or model folders.
@@ -385,6 +392,213 @@ def cmd_doctor(_a) -> None:
     else:
         print("torch      no venv")
 
+# ---- headless: drive the engine over its HTTP API ---------------------------------
+# Everything the app does goes through /zentrainer/api, so these are thin: a spec file in,
+# a run id out, and `follow` to block until it ends (exit 0 done, 1 failed/stopped).
+
+TERMINAL = ("done", "error", "stopped", "interrupted", "rejected")
+
+
+def _api(a, method: str, path: str, body=None):
+    import urllib.error
+    import urllib.request
+
+    url = f"http://127.0.0.1:{_port(a)}/zentrainer/api{path}"
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method, headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        try:
+            msg = json.load(e).get("error") or e.reason
+        except Exception:
+            msg = e.reason
+        die(f"{method} {path}: {msg}")
+    except urllib.error.URLError:
+        die(f"no ZenTrainer on :{_port(a)} (scripts/zt start)")
+
+
+def _ensure_server(a) -> None:
+    """Start the managed ComfyUI in the background if nothing answers; it keeps running."""
+    import time
+
+    port = _port(a)
+    if _alive(port):
+        return
+    if not venv_python().is_file():
+        die("no managed ComfyUI yet: run `scripts/zt setup` first")
+    log = ROOT / ".zentrainer" / "comfy.log"
+    log.parent.mkdir(exist_ok=True)
+    say(f"starting ComfyUI on :{port} in the background (log: {log.relative_to(ROOT)})")
+    subprocess.Popen([str(venv_python()), "main.py", *comfy_args(port)], cwd=COMFY, stdout=open(log, "ab"),
+                     stderr=subprocess.STDOUT, start_new_session=True)
+    for _ in range(480):
+        if _alive(port):
+            return
+        time.sleep(0.5)
+    die(f"ComfyUI didn't come up; see {log}")
+
+
+def _value(v: str):
+    try:
+        return json.loads(v)
+    except ValueError:
+        return v  # a bare string
+
+
+def _apply_sets(spec: dict, sets: list[str] | None) -> dict:
+    """--set optim.learning_rate=1e-4 --set samples.prompts='["a cat"]': dotted keys, JSON values."""
+    for item in sets or []:
+        key, eq, val = item.partition("=")
+        if not eq:
+            die(f"--set wants key=value, got {item!r}")
+        node = spec
+        *parents, leaf = key.split(".")
+        for k in parents:
+            node = node.setdefault(k, {})
+        node[leaf] = _value(val)
+    return spec
+
+
+def _deep_merge(base: dict, over: dict) -> dict:
+    out = dict(base)
+    for k, v in over.items():
+        out[k] = _deep_merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
+
+def cmd_train(a) -> None:
+    spec = json.loads(Path(a.spec).read_text()) if a.spec != "-" else json.load(sys.stdin)
+    if a.profile:
+        prof = ENGINE / "profiles" / f"{a.profile}.json"
+        if not prof.is_file():
+            die(f"no profile {a.profile!r}; have {', '.join(p.stem for p in (ENGINE / 'profiles').glob('*.json'))}")
+        spec = _deep_merge(json.loads(prof.read_text()).get("train", {}), spec)  # the file wins over the profile
+    spec = _apply_sets(spec, a.set)
+    _ensure_server(a)
+    run = _api(a, "POST", "/runs", {"spec": spec, "position": "end" if a.end else "next"})["run"]
+    print(run["run_id"])
+    if a.follow:
+        _follow(a, run["run_id"])
+
+
+def cmd_runs(a) -> None:
+    runs = _api(a, "GET", "/runs")["runs"]
+    if a.json:
+        print(json.dumps(runs, indent=2))
+        return
+    for r in runs:
+        print(f"{r['run_id']}  {r.get('status', '?'):<11} {r.get('final_step') or '':>6}  {r.get('name', '')}")
+
+
+def _follow(a, run_id: str) -> None:
+    """Print progress until the run ends; exit status says how it ended."""
+    import time
+
+    seen, last_status, last_samples = None, None, None
+    while True:
+        d = _api(a, "GET", f"/runs/{run_id}")
+        status = d["run"].get("status")
+        if status != last_status:
+            msg = d["run"].get("message")
+            say(f"{status}" + (f": {msg}" if msg else ""))
+            last_status = status
+        total = (d.get("spec") or {}).get("optim", {}).get("steps")
+        rows = d.get("metrics") or []
+        if seen is None:
+            seen = max(0, len(rows) - 1)  # joining a run partway: start at its latest step
+        for m in rows[seen:]:
+            if m.get("step", 0) % a.every == 0 or m is rows[-1]:
+                ph = m.get("phases") or {}
+                extra = " ".join(f"{k} {v:.2f}s" for k, v in ph.items()) if a.phases else ""
+                rate = m.get("rate") or m.get("it_s") or 0
+                print(f"step {m.get('step')}/{total}  loss {m.get('loss') or 0:.4f}  lr {m.get('lr') or 0:.2e}"
+                      + (f"  {1 / rate:.2f}s/step" if rate else "") + (f"  {extra}" if extra else ""), flush=True)
+        seen = len(rows)
+        n = len(d.get("samples") or [])
+        if last_samples is not None and n > last_samples:
+            print(f"  {n - last_samples} new sample(s)", flush=True)
+        last_samples = n
+        if status in TERMINAL:
+            ck = d.get("checkpoints") or []
+            if ck:
+                print(ck[-1]["path"])
+            sys.exit(0 if status == "done" else 1)
+        time.sleep(a.interval)
+
+
+def cmd_follow(a) -> None:
+    _follow(a, a.run)
+
+
+def cmd_spec(a) -> None:
+    print(json.dumps(_api(a, "GET", f"/runs/{a.run}")["spec"], indent=2))
+
+
+def cmd_control(a) -> None:
+    command = {"unpause": "resume"}.get(a.cmd, a.cmd)
+    _api(a, "POST", f"/runs/{a.run}/control", {"command": command})
+    say(f"{a.cmd}: {a.run}")
+
+
+def cmd_resume(a) -> None:
+    if a.set:  # settings that may change before it continues (memory, samples, LR, length...)
+        spec = _apply_sets(_api(a, "GET", f"/runs/{a.run}")["spec"], a.set)
+        _api(a, "PUT", f"/runs/{a.run}/spec", {"spec": spec})
+    _ensure_server(a)
+    _api(a, "POST", f"/runs/{a.run}/resume", {})
+    say(f"resumed {a.run}")
+    if a.follow:
+        _follow(a, a.run)
+
+
+def cmd_sample(a) -> None:
+    args = {"prompt": a.prompt, "base": a.base}
+    if a.size:
+        w, _, h = a.size.lower().partition("x")
+        args.update(width=int(w), height=int(h))
+    if a.seed is not None:
+        args["seed"] = a.seed
+    _api(a, "POST", f"/runs/{a.run}/control", {"command": "sample", "args": args})
+    say("queued; it renders at the next step boundary")
+
+
+def cmd_queue(a) -> None:
+    if a.action:
+        _api(a, "POST", "/queue", {"action": a.action})
+    q = _api(a, "GET", "/queue")
+    print(f"{'paused' if q['paused'] else 'running'}" + (f", training {q['current']['run_id']}" if q.get("current") else ""))
+    for r in q["items"]:
+        print(f"  {r['run_id']}  {r.get('name', '')}")
+
+
+def cmd_caption(a) -> None:
+    _ensure_server(a)
+    body = {"clip_name": a.model, "style": a.style, "mode": "all" if a.all else "missing",
+            "set": a.set_name, "replace_default": a.all}
+    job = _api(a, "POST", f"/datasets/{a.dataset}/caption", body)["job"]
+    print(job["job_id"])
+    if a.follow:
+        import time
+
+        while True:
+            j = _api(a, "GET", f"/caption/{job['job_id']}")
+            j = j.get("job", j)
+            print(f"\r{j.get('status')}  {j.get('done', 0)}/{j.get('total', '?')}  {j.get('message') or ''}"[:120],
+                  end="", flush=True)
+            if j.get("status") in ("done", "error", "cancelled", "stopped"):
+                print()
+                sys.exit(0 if j.get("status") == "done" else 1)
+            time.sleep(2)
+
+
+def _client(sub, name: str, fn, help: str):
+    s = sub.add_parser(name, help=help)
+    s.add_argument("--port", type=int)
+    s.set_defaults(fn=fn)
+    return s
+
 
 def main() -> None:
     ap = argparse.ArgumentParser(prog="zt", description=__doc__.split("\n\n")[0])
@@ -428,6 +642,46 @@ def main() -> None:
     s.set_defaults(fn=cmd_attach)
 
     sub.add_parser("doctor", help="show what's installed and where models come from").set_defaults(fn=cmd_doctor)
+
+    s = _client(sub, "train", cmd_train, "queue a training run from a spec file (- for stdin); prints its id")
+    s.add_argument("spec")
+    s.add_argument("--profile", help="start from an engine profile's settings (e.g. minimax-h3)")
+    s.add_argument("--set", action="append", metavar="KEY=VALUE", help="override a setting (dotted key, JSON value)")
+    s.add_argument("--end", action="store_true", help="join the end of the queue instead of starting next")
+    s.add_argument("--follow", action="store_true", help="print progress until it ends")
+    for name, fn, h in [("runs", cmd_runs, "list runs"), ("spec", cmd_spec, "print a run's settings as JSON")]:
+        s = _client(sub, name, fn, h)
+        if name == "runs":
+            s.add_argument("--json", action="store_true")
+        else:
+            s.add_argument("run")
+    s = _client(sub, "follow", cmd_follow, "print a run's progress until it ends (exit 0 = done)")
+    s.add_argument("run")
+    for name in ("pause", "unpause", "stop", "save"):
+        _client(sub, name, cmd_control, f"{name} a training run").add_argument("run")
+    s = _client(sub, "resume", cmd_resume, "continue a stopped run from its latest checkpoint")
+    s.add_argument("run")
+    s.add_argument("--set", action="append", metavar="KEY=VALUE", help="change a setting first (not model/dataset/network)")
+    s.add_argument("--follow", action="store_true")
+    s = _client(sub, "sample", cmd_sample, "render a prompt with the current LoRA mid-run")
+    s.add_argument("run")
+    s.add_argument("prompt")
+    s.add_argument("--base", action="store_true", help="without the LoRA, to compare")
+    s.add_argument("--size", metavar="WxH")
+    s.add_argument("--seed", type=int)
+    s = _client(sub, "queue", cmd_queue, "show the queue, or pause/resume it")
+    s.add_argument("action", nargs="?", choices=["pause", "resume"])
+    s = _client(sub, "caption", cmd_caption, "auto-caption a dataset")
+    s.add_argument("dataset")
+    s.add_argument("--model", required=True, help="a vision text encoder file (as listed in the app)")
+    s.add_argument("--style", default="nl")
+    s.add_argument("--set", dest="set_name", default="default", help="caption set")
+    s.add_argument("--all", action="store_true", help="rewrite existing captions too")
+    s.add_argument("--follow", action="store_true")
+    for name in ("train", "follow", "resume"):
+        sub.choices[name].add_argument("--every", type=int, default=10, help="print every Nth step")
+        sub.choices[name].add_argument("--interval", type=float, default=5.0, help="seconds between checks")
+        sub.choices[name].add_argument("--phases", action="store_true", help="show the step's timing breakdown")
 
     a = ap.parse_args()
     if getattr(a, "rest", None) and a.rest[0] == "--":
