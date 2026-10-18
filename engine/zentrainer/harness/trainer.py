@@ -529,6 +529,9 @@ class Trainer:
         key = (cap, tuple(sample.latent.shape), i if sample.refs else None)
         if key not in self._conds:
             cond = self.dataset.conditionings[cap]
+            if sample.cond is not None:  # grounded: the encoder saw this image's inputs
+                empty = cap == self.dataset.empty_caption and sample.cond_empty is not None
+                cond = sample.cond_empty if empty else sample.cond
             if sample.refs:
                 from .edit import with_refs
 

@@ -113,6 +113,8 @@ const runPresets = ref<Preset<Partial<TrainSpec>>[]>([])
 const promptSets = ref<Preset<Partial<TrainSpec['samples']>>[]>([])
 
 // ---- edit pairs: the chosen dataset's <name>_control pictures ---------------------------------
+const NK2E_TEMPLATE =
+  'Make the following edit to the reference image, changing only what is requested and keeping everything else identical: {}'
 const pairCount = computed(() => datasets.value.find((d) => d.folder === spec.dataset.folder)?.pairs ?? 0)
 const pairItems = ref<DatasetItem[]>([])
 watch(
@@ -541,6 +543,17 @@ async function start(position: 'next' | 'end' = 'next') {
             <ZenField label="Edit training" stack :tip="`Each image's <name>_control picture is the input the model edits from; the caption is the instruction. For models that take reference images (Flux 3 Klein, Flux 2, Kontext, Qwen Image Edit)${pairCount ? `. This dataset has ${pairCount} pairs` : ''}`">
               <div class="sw-row"><ZenSwitch :model-value="!!spec.dataset.edit" @update:model-value="spec.dataset.edit = $event" /><span class="sw-state">{{ spec.dataset.edit ? `On · ${pairCount} pairs` : 'Off' }}</span></div>
             </ZenField>
+            <template v-if="spec.dataset.edit">
+              <ZenField label="Instruction template" stack tip="Wraps every instruction ({} is the caption), in training and samples alike. Training on top of NK2E? Use its template: its LoRA learned wrapped instructions">
+                <div class="tpl-row">
+                  <ZenInput :model-value="spec.dataset.edit_template ?? ''" placeholder="None: the caption as it is" size="sm" @update:model-value="spec.dataset.edit_template = String($event)" />
+                  <button class="chip-btn" :class="{ on: spec.dataset.edit_template === NK2E_TEMPLATE }" title="NK2E's instruction template" @click="spec.dataset.edit_template = spec.dataset.edit_template === NK2E_TEMPLATE ? '' : NK2E_TEMPLATE">NK2E</button>
+                </div>
+              </ZenField>
+              <ZenField label="Encoder sees the input" stack tip="The text encoder looks at the input picture with the instruction (Qwen3-VL encoders: Krea 2, Qwen Image), as krea2edit's identity edits do: better at keeping who and what is in the picture. Each pair's text is encoded on its own, so caching takes longer">
+                <div class="sw-row"><ZenSwitch :model-value="!!spec.dataset.edit_grounded" @update:model-value="spec.dataset.edit_grounded = $event" /><span class="sw-state">{{ spec.dataset.edit_grounded ? 'On' : 'Off' }}</span></div>
+              </ZenField>
+            </template>
             <ZenField label="Masked training" stack tip="Masked images learn only where it's white"><div class="sw-row"><ZenSwitch v-model="spec.dataset.masked_loss" /><span class="sw-state">{{ spec.dataset.masked_loss ? 'On' : 'Off' }}</span></div></ZenField>
             <ZenField v-if="spec.dataset.masked_loss" label="Unmasked weight" stack tip="0 ignores the rest; 0.1 learns it lightly">
               <ZenNumber v-model="spec.dataset.unmasked_weight" :min="0" :max="1" :step="0.05" :precision="2" />
@@ -1060,6 +1073,15 @@ h2 {
   }
 }
 /* a switch field: label above like the rest, the switch on a control-height row beside its state */
+.tpl-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.tpl-row > :first-child {
+  flex: 1;
+  min-width: 0;
+}
 .sw-row {
   display: flex;
   align-items: center;

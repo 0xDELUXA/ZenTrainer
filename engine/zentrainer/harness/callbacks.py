@@ -219,29 +219,42 @@ class Samples(Callback):
 
         trig = t.spec.dataset.trigger
         self.items = sample_prompts(s)
-        # samples only substitute [trigger]; they're never rewritten otherwise
-        self.prompts = [p.prompt.replace("[trigger]", trig) if trig else p.prompt.replace("[trigger]", "") for p in self.items]
+        # samples only substitute [trigger] (and, on edit runs, take the instruction template)
+        self.prompts = [_sample_text(t, p.prompt) for p in self.items]
         negative = apply_trigger(s.negative, trig, False)
-        self._conds = self._encode_texts(t, self.prompts, negative)
+        self._conds = self._encode_texts(t, self.prompts, negative, [_grounding(t, p.control) for p in self.items])
 
-    def _encode_texts(self, t, prompts: list[str], negative: str) -> list:
+    def _encode_texts(self, t, prompts: list[str], negative: str, pictures: list | None = None) -> list:
         """[(cond, negative cond)] for these prompts; cached like captions, so a run with
-        nothing new to encode never loads the text encoder."""
-        path = _prompt_cache(t, prompts, negative)
+        nothing new to encode never loads the text encoder. A grounded edit sample's picture
+        (a path, or None) is seen by the encoder with its prompt and with the negative."""
+        pictures = pictures or [None] * len(prompts)
+        stamp = [f"{p}|{p.stat().st_mtime_ns}" if p else None for p in pictures]
+        path = _prompt_cache(t, prompts + ([stamp] if any(stamp) else []), negative)
         if path is not None and path.is_file():
             try:
                 cached = torch.load(path, weights_only=False)
-                return [(c, cached["negative"]) for c in cached["prompts"]]
+                negs = cached.get("negatives") or [None] * len(prompts)
+                return [(c, n if n is not None else cached["negative"]) for c, n in zip(cached["prompts"], negs)]
             except Exception:
                 pass
         clip = t.models.clip
         neg = clip.encode_from_tokens_scheduled(clip.tokenize(negative))
-        conds = [(clip.encode_from_tokens_scheduled(clip.tokenize(p)), neg) for p in prompts]
+        conds = []
+        for text, pic in zip(prompts, pictures):
+            if pic is None:
+                conds.append((clip.encode_from_tokens_scheduled(clip.tokenize(text)), neg))
+            else:
+                from .edit import encode_grounded, grounding_pixels
+
+                px = [grounding_pixels(pic)]
+                conds.append((encode_grounded(clip, text, px), encode_grounded(clip, negative, px)))
         if path is not None:
             from .data import _to_cpu
 
             path.parent.mkdir(parents=True, exist_ok=True)
-            torch.save({"prompts": [_to_cpu(c) for c, _ in conds], "negative": _to_cpu(neg)}, path)
+            torch.save({"prompts": [_to_cpu(c) for c, _ in conds], "negative": _to_cpu(neg),
+                        "negatives": [_to_cpu(n) if p is not None else None for (_, n), p in zip(conds, pictures)]}, path)
         return conds
 
     def render_manual(self, t, tries: list[dict], more=None) -> list[dict]:
@@ -265,9 +278,8 @@ class Samples(Callback):
                 jobs = []
                 with torch.no_grad():  # the encoder stays loaded across the batch's prompts
                     for a in tries:
-                        prompt = str(a["prompt"])
-                        text = prompt.replace("[trigger]", trig) if trig else prompt.replace("[trigger]", "")
-                        jobs.append((a, text, self._encode_texts(t, [text], negative)))
+                        text = _sample_text(t, str(a["prompt"]))
+                        jobs.append((a, text, self._encode_texts(t, [text], negative, [_grounding(t, a.get("control"))])))
                 if hasattr(t, "_drop_text_encoder"):
                     t._drop_text_encoder()  # don't keep a big encoder beside training
                 for a, text, conds in jobs:
@@ -276,7 +288,8 @@ class Samples(Callback):
                         len({f.name.split("_")[1] for f in Path(_out_dir(t)).glob("manual_*")})
                     item = SamplePrompt(str(a["prompt"]), a.get("width") or s.width, a.get("height") or s.height,
                                         a.get("frames") or s.frames,
-                                        int(time.time()) % 100000 if a.get("seed") is None else a["seed"])
+                                        int(time.time()) % 100000 if a.get("seed") is None else a["seed"],
+                                        a.get("control") or None)
                     self.items, self.prompts, self._conds = [item], [text], conds
                     if a.get("base"):  # the same prompt and seed without the LoRA, to compare against
                         with t.network.disabled():
@@ -509,20 +522,45 @@ def _prompt_cache(t, prompts: list[str], negative: str):
     return root / "prompts" / f"{key}.pt"
 
 
+def _sample_text(t, prompt: str) -> str:
+    """A sample prompt as the model gets it: [trigger] substituted, and on an edit run with an
+    instruction template, wrapped the way the captions are."""
+    trig = t.spec.dataset.trigger
+    text = prompt.replace("[trigger]", trig) if trig else prompt.replace("[trigger]", "")
+    d = t.spec.dataset
+    if d.edit and d.edit_template:
+        from .edit import instruction
+
+        text = instruction(text, d.edit_template)
+    return text
+
+
+def _control_path(t, control: str) -> Path:
+    import folder_paths
+
+    inp = Path(folder_paths.get_input_directory())
+    path = next((p for p in (inp / t.spec.dataset.folder / control, inp / control, Path(control)) if p.is_file()), None)
+    if path is None:
+        raise FileNotFoundError(f"sample control picture {control!r} not found (in the dataset folder or ComfyUI's input)")
+    return path
+
+
+def _grounding(t, control: str | None) -> Path | None:
+    """The picture a grounded edit run's text encoder sees with this sample (None otherwise)."""
+    d = t.spec.dataset
+    return _control_path(t, control) if control and d.edit and d.edit_grounded else None
+
+
 def _control(t, it, comp: int):
     """An edit sample's input picture as a raw latent, and the sample resized to its aspect (the
     same area as the sample's size): edits come out the shape of what they edit."""
     import dataclasses
 
-    import folder_paths
     from PIL import Image
 
     from .data import load_image
 
-    inp = Path(folder_paths.get_input_directory())
-    path = next((p for p in (inp / t.spec.dataset.folder / it.control, inp / it.control, Path(it.control)) if p.is_file()), None)
-    if path is None:
-        raise FileNotFoundError(f"sample control picture {it.control!r} not found (in the dataset folder or ComfyUI's input)")
+    path = _control_path(t, it.control)
     with Image.open(path) as im:
         w0, h0 = im.size
     step = comp * 2

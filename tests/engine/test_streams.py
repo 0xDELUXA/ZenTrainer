@@ -381,3 +381,19 @@ def test_edit_pairs_scan_and_reference_conditioning(tmp_path):
     out = with_refs(cond, [ref])
     assert out[0][1]["reference_latents"][0].shape == (1, 16, 2, 2)
     assert "reference_latents" not in cond[0][1]  # the cached caption conditioning is left alone
+
+
+def test_grounded_template_keeps_the_encoders_own_system_prompt():
+    from types import SimpleNamespace
+
+    from zentrainer.harness.edit import VISION, grounded_template, instruction
+
+    krea = "<|im_start|>system\nDescribe the image<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n"
+    clip = SimpleNamespace(tokenizer=SimpleNamespace(llama_template=krea))
+    t = grounded_template(clip, 2)
+    assert t.startswith("<|im_start|>system\nDescribe the image")  # not qwen3vl's default picture template
+    assert t.count(VISION) == 2 and t.index(VISION) == t.index("user\n") + len("user\n")
+    assert t.format("make it red").count("make it red") == 1
+    assert grounded_template(SimpleNamespace(tokenizer=SimpleNamespace()), 1) is None  # a T5/CLIP encoder
+    assert instruction("add a hat", "Make the following edit: {}") == "Make the following edit: add a hat"
+    assert instruction("add a hat", "") == "add a hat"

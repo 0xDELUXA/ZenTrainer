@@ -56,6 +56,10 @@ class Sample:
     variants: list[int] = field(default_factory=list)  # caption choices when mixing sets
     audio: torch.Tensor | None = None  # (C, 2, Ta): a clip's soundtrack latent (joint audio-video models)
     refs: list[torch.Tensor] | None = None  # edit pairs: the control pictures' raw latents, as reference_latents
+    # grounded edits: this image's own conditioning (the encoder saw its inputs), and the empty
+    # caption with them for caption dropout
+    cond: list | None = None
+    cond_empty: list | None = None
 
 
 @dataclass
@@ -206,6 +210,8 @@ def cache_key(items: list[Item], spec: DatasetSpec, encoder_id: str) -> str:
             ms = it.mask.stat()
             h.update(f"|mask:{it.mask}|{ms.st_mtime_ns}|{ms.st_size}".encode())
         if spec.edit:
+            if spec.edit_grounded:
+                h.update(b"grounded")
             for c in it.controls:
                 cs = c.stat()
                 h.update(f"|control:{c}|{cs.st_mtime_ns}|{cs.st_size}".encode())
@@ -233,6 +239,10 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
             texts = [it.captions.get(spec.caption_set, "")] if it.captions.get(spec.caption_set) else []
         texts = texts or [it.captions.get("default", "")]
         texts = [apply_trigger(t, spec.trigger, spec.trigger_prepend) for t in texts]
+        if spec.edit and spec.edit_template:
+            from .edit import instruction
+
+            texts = [instruction(t, spec.edit_template) for t in texts]
         variants.append(texts)
         it.caption = " ||| ".join(texts)  # only feeds the cache key
 
@@ -254,6 +264,7 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
 
     samples: list[Sample] = []
     owners: list[int] = []
+    grounded: list[tuple[int, list[Path], str]] = []  # (sample, inputs, caption): encoded with the captions
     sounds: list[tuple[int, Path, float, float]] = []  # (sample, video, t0, t1): encoded after the pictures
     for n, it in enumerate(items):
         idx = [cap_index[t] for t in variants[n]]
@@ -291,7 +302,15 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
             mask = torch.nn.functional.interpolate(m, size=tuple(latent.shape[-2:]), mode="area")[0, 0]
         refs = None
         if spec.edit and it.controls:  # the input picture(s) at the target's size, as the model's references
+            for c in it.controls:
+                with Image.open(c) as cim:
+                    cw, ch = cim.size
+                if abs((cw / ch) / (size[0] / size[1]) - 1) > 0.08:
+                    logging.warning("[ZenTrainer] %s is a different shape from %s: it's cropped to match, which "
+                                    "cuts part of it off", c.name, it.path.name)
             refs = [_encode(vae, load_image(c, size).unsqueeze(0), c) for c in it.controls]
+            if spec.edit_grounded:
+                grounded.append((len(samples), it.controls, variants[n][0]))
         samples.append(Sample(latent, idx[0], mask, idx, refs=refs))
         owners.append(n)
         if progress:
@@ -311,6 +330,17 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
         conditionings.append(_to_cpu(clip.encode_from_tokens_scheduled(tokens)))
         if progress:
             progress(len(items) + n + 1, len(items) + len(captions), "encoding captions")
+
+    if grounded:  # each with the encoder looking at its own inputs; the empty one only if dropout uses it
+        from .edit import encode_grounded, grounding_pixels
+
+        for k, (i, inputs, text) in enumerate(grounded):
+            pics = [grounding_pixels(c) for c in inputs]
+            samples[i].cond = _to_cpu(encode_grounded(clip, text, pics))
+            if spec.caption_dropout:
+                samples[i].cond_empty = _to_cpu(encode_grounded(clip, "", pics))
+            if progress:
+                progress(k + 1, len(grounded), "encoding instructions with their pictures")
 
     ds = Dataset(samples, conditionings, captions, cap_index[""], owners=owners)
     path.mkdir(parents=True, exist_ok=True)
@@ -360,6 +390,8 @@ def _to_plain(ds: Dataset) -> dict:
         "owners": ds.owners,
         "audio": [s.audio for s in ds.samples],
         "refs": [s.refs for s in ds.samples],
+        "conds": [s.cond for s in ds.samples],
+        "conds_empty": [s.cond_empty for s in ds.samples],
     }
 
 
@@ -367,9 +399,10 @@ def _from_plain(d: dict) -> Dataset:
     masks = d.get("masks") or [None] * len(d["latents"])
     variants = d.get("variants") or [[c] for c in d["caption_idx"]]
     audio = d.get("audio") or [None] * len(d["latents"])
-    refs = d.get("refs") or [None] * len(d["latents"])
-    samples = [Sample(lat, c, m, v, a, r)
-               for lat, c, m, v, a, r in zip(d["latents"], d["caption_idx"], masks, variants, audio, refs)]
+    n = len(d["latents"])
+    refs, conds, empties = (d.get(k) or [None] * n for k in ("refs", "conds", "conds_empty"))
+    samples = [Sample(lat, c, m, v, a, r, g, e)
+               for lat, c, m, v, a, r, g, e in zip(d["latents"], d["caption_idx"], masks, variants, audio, refs, conds, empties)]
     owners = d.get("owners") or list(range(len(samples)))  # before videos: one sample per item
     return Dataset(samples, d["conditionings"], d["captions"], d["empty_caption"], owners=owners)
 

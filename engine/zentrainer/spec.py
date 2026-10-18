@@ -47,6 +47,12 @@ class DatasetSpec:
     # how the input picture joins the sequence: "" = the model's own way ("index" for models
     # without one, like Krea 2), or "index", "offset", "index_timestep_zero"
     edit_method: str = ""
+    # wrap each instruction: "{}" is the caption (NK2E's generalist was trained on "Make the
+    # following edit to the reference image, ...: {}", so specialists on top of it want the same)
+    edit_template: str = ""
+    # the text encoder sees the input pictures too (Qwen3-VL based: Krea 2, Qwen Image), as
+    # krea2edit's identity edits do: conditioning becomes per image, encoded when the dataset caches
+    edit_grounded: bool = False
     caption_dropout: float = 0.0
     # Caption sets: <img>.txt is "default", <img>.<set>.txt the others (tags, nl, bbox, ...).
     # Train on one set, or mix several: each step picks one of the image's sets at random.
@@ -332,6 +338,8 @@ class TrainSpec:
             raise SpecError("objective.uniform_mix is a share between 0 and 1")
         if self.dataset.edit_method not in ("", "index", "offset", "index_timestep_zero", "negative_index", "uxo"):
             raise SpecError("dataset.edit_method is one of index, offset, index_timestep_zero (or empty for the model's own)")
+        if self.dataset.edit_template and "{}" not in self.dataset.edit_template:
+            raise SpecError("dataset.edit_template needs {} where the instruction goes")
         if not 0.0 <= self.optim.ema < 1.0:
             raise SpecError("optim.ema is a decay between 0 (off) and below 1, e.g. 0.98")
         if self.optim.lora_plus < 0:

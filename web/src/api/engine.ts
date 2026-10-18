@@ -27,6 +27,9 @@ export interface TrainSpec {
     caption_dropout: number
     masked_loss: boolean
     edit?: boolean
+    edit_method?: string
+    edit_template?: string
+    edit_grounded?: boolean
     unmasked_weight: number
     /** videos: longest clip (snapped to the VAE), fps (0 = source), which windows, how many, size */
     video_frames: number
