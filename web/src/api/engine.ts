@@ -663,6 +663,11 @@ export const engine = {
       method: 'POST',
       body: JSON.stringify({ link, family, file }),
     }),
+  addCaptionLora: (link: string, file?: string) =>
+    call<{ download?: ModelDownload; name?: string; choices?: { file: string; size: number | null }[]; repo?: string }>('/caption/loras', {
+      method: 'POST',
+      body: JSON.stringify({ link, file }),
+    }),
   downloadAdapter: (id: string) => call<ModelDownload>('/adapters/download', { method: 'POST', body: JSON.stringify({ id }) }),
   removeAdapter: (id: string) => call<{ removed: boolean }>(`/adapters?id=${encodeURIComponent(id)}`, { method: 'DELETE' }),
   health: () => call<Health>('/health'),
@@ -731,7 +736,7 @@ export const engine = {
   bulkCaptions: (name: string, op: 'prefix' | 'suffix' | 'replace', text: string, find = '', set = 'default') =>
     call<{ changed: number }>(`${dsPath(name)}/bulk`, { method: 'POST', body: JSON.stringify({ op, text, find, set }) }),
   captionInfo: (dataset?: string) =>
-    call<{ styles: CaptionStyle[]; models: string[]; hearing?: string[]; jobs: CaptionJob[] }>(`/caption${dataset ? `?dataset=${encodeURIComponent(dataset)}` : ''}`),
+    call<{ styles: CaptionStyle[]; models: string[]; hearing?: string[]; loras?: string[]; jobs: CaptionJob[] }>(`/caption${dataset ? `?dataset=${encodeURIComponent(dataset)}` : ''}`),
   startCaption: (name: string, body: CaptionRequest) =>
     call<{ job: CaptionJob }>(`${dsPath(name)}/caption`, { method: 'POST', body: JSON.stringify({ ...body, client_id: getClientId() }) }),
   captionJobs: () => call<{ jobs: CaptionJob[] }>('/caption?all=1').then((r) => r.jobs),

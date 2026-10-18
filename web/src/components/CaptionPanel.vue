@@ -2,7 +2,7 @@
 // Auto-captioning for one dataset, as a job: pick the model, the style, which caption set it
 // writes and which images; try it on a few first; watch it run, cancel it, and afterwards
 // review what it wrote or undo it. It never rewrites captions in "default" without asking.
-import { ZenButton, ZenCombo, ZenInput } from '@nynxz/zenkit-ui'
+import { ZenButton, ZenCombo, ZenInput, ZenNumber } from '@nynxz/zenkit-ui'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { onComfyMessage } from '@/api/comfy'
 import { setSetting, settings } from '@/settings'
@@ -15,6 +15,48 @@ const styles = ref<CaptionStyle[]>([])
 const models = ref<string[]>([])
 const hearing = ref<string[]>([]) // models that also hear a video's soundtrack (Gemma 4)
 const hasVideo = computed(() => props.items.some((it) => it.kind === 'video'))
+// LoRAs on the captioning model only (abliterated, uncensored, prompt styles): never training
+const teLoras = ref<string[]>([])
+const loras = ref<{ name: string; strength: number }[]>([])
+const loraLink = ref('')
+const loraChoices = ref<{ file: string; size: number | null }[]>([])
+const loraNote = ref('')
+try {
+  loras.value = JSON.parse(localStorage.getItem(`${PREFS}.loras`) ?? '[]')
+} catch {
+  // storage blocked
+}
+watch(
+  loras,
+  (v) => {
+    try {
+      localStorage.setItem(`${PREFS}.loras`, JSON.stringify(v))
+    } catch {
+      // storage blocked
+    }
+  },
+  { deep: true },
+)
+const addLora = () => loras.value.push({ name: teLoras.value.find((n) => !loras.value.some((l) => l.name === n)) ?? '', strength: 1 })
+async function fetchLora(file?: string) {
+  loraNote.value = ''
+  try {
+    const r = await engine.addCaptionLora(loraLink.value, file)
+    if (r.choices) {
+      loraChoices.value = r.choices
+      return
+    }
+    loraChoices.value = []
+    loraLink.value = ''
+    if (r.name) {
+      if (!teLoras.value.includes(r.name)) teLoras.value = [...teLoras.value, r.name]
+      loras.value.push({ name: r.name, strength: 1 })
+      loraNote.value = `downloading ${r.name.split('/').at(-1)}: it's ready when the download finishes`
+    }
+  } catch (e) {
+    loraNote.value = e instanceof Error ? e.message : String(e)
+  }
+}
 const jobs = ref<CaptionJob[]>([])
 const error = ref<string | null>(null)
 const PREFS = 'zentrainer.caption'
@@ -45,6 +87,7 @@ onMounted(async () => {
   styles.value = info.styles
   models.value = info.models // loadable only, vision-language first
   hearing.value = info.hearing ?? []
+  teLoras.value = info.loras ?? []
   jobs.value = info.jobs.filter((j) => !j.preview)
   preview.value = info.jobs.find((j) => j.preview) ?? null // a try-on still running, or just done
   if (!models.value.includes(form.clip_name))
@@ -125,6 +168,7 @@ function body(extra: Record<string, unknown> = {}) {
     mode: form.mode,
     paths: form.mode === 'selected' ? props.selected : undefined,
     subject: form.subject || undefined,
+    loras: loras.value.filter((l) => l.name),
     ...(editable.value ? { prompt: form.prompt } : { style: form.style }),
     ...extra,
   }
@@ -215,6 +259,22 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
         >
           <i class="mdi mdi-music-note" /> Caption with sound
         </button>
+        <div class="loras">
+          <div v-for="(l, i) in loras" :key="i" class="lora">
+            <ZenCombo v-model="l.name" :items="teLoras.map((n) => ({ value: n, label: n }))" :item-height="30" placeholder="A text-encoder LoRA" size="sm" />
+            <ZenNumber v-model="l.strength" :min="-2" :max="2" :step="0.05" :precision="2" size="sm" />
+            <button class="x" title="Remove" @click="loras.splice(i, 1)"><i class="mdi mdi-close" /></button>
+          </div>
+          <div class="lora-add">
+            <button class="hear-tip" title="Patch the captioning model with a text-encoder LoRA (captioning only, never training)" @click="addLora"><i class="mdi mdi-plus" /> LoRA</button>
+            <ZenInput v-model="loraLink" placeholder="or a Hugging Face link" size="sm" @keydown.enter="fetchLora()" />
+            <ZenButton v-if="loraLink" size="sm" icon="mdi mdi-download-outline" @click="fetchLora()">Get</ZenButton>
+          </div>
+          <div v-if="loraChoices.length" class="choices">
+            <button v-for="c in loraChoices" :key="c.file" class="hear-tip" @click="fetchLora(c.file)">{{ c.file }}</button>
+          </div>
+          <div v-if="loraNote" class="muted small">{{ loraNote }}</div>
+        </div>
       </label>
       <div class="f"><span class="eyebrow">Style</span>
         <div class="seg">
@@ -496,6 +556,42 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.loras {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+.lora {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 84px 22px;
+  gap: 4px;
+  align-items: center;
+}
+.lora-add {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.lora-add > :nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+.choices {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.x {
+  border: none;
+  background: none;
+  color: var(--zen-muted);
+  cursor: pointer;
+  padding: 0;
+}
+.x:hover {
+  color: var(--zen-text);
 }
 .hear-tip {
   margin-top: 4px;

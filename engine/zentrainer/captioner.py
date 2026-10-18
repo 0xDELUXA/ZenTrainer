@@ -51,6 +51,9 @@ class CaptionJob:
     subject: str = ""  # what to call the main subject (a trigger word, a name)
     preview: int = 0  # > 0: caption this many images, write nothing
     max_length: int = 300
+    # LoRAs on the captioning model (abliterated / uncensored / prompt-style extractions):
+    # [{"name": file in loras/, "strength": 1.0}]. Captioning only; training never uses them.
+    loras: list = field(default_factory=list)
     status: str = "queued"  # queued | running | done | error | stopped | undone
     done: int = 0
     total: int = 0
@@ -336,6 +339,7 @@ def run(job: CaptionJob) -> None:
             # (MOSS's Qwen3.5 drops the picture and leaves a think block open)
             ctype = GENERIC_TYPE if job.clip_type in ("", "auto") else job.clip_type
             clip = nodes.CLIPLoader().load_clip(job.clip_name, ctype)[0]
+            clip = _with_loras(clip, job)
             if not hasattr(clip, "generate"):
                 raise RuntimeError(f"{job.clip_name} can't generate text; pick a vision-language model (Qwen-VL, Gemma)")
             from .harness import video
@@ -381,6 +385,83 @@ def run(job: CaptionJob) -> None:
             raise
     finally:
         _comfy_compiler(True)
+
+
+def _with_loras(clip, job: CaptionJob):
+    """The captioning model with the job's text-encoder LoRAs patched on."""
+    import comfy.sd
+    import comfy.utils
+    import folder_paths
+
+    for lo in job.loras or []:
+        name, strength = str(lo.get("name", "")), float(lo.get("strength", 1.0))
+        path = folder_paths.get_full_path("loras", name)
+        if not path:
+            raise FileNotFoundError(f"LoRA {name} not found in loras/")
+        _model, clip = comfy.sd.load_lora_for_models(None, clip, comfy.utils.load_torch_file(path, safe_load=True), 0.0, strength)
+        log(job, f"LoRA {name} at {strength:g}")
+    return clip
+
+
+TE_LORA_SUBDIR = "text_encoder_loras"
+_te_cache: dict[str, tuple[float, bool]] = {}
+
+
+def _is_te_lora(path: str) -> bool:
+    """A LoRA for a text encoder (ComfyUI's text_encoders.* keys, or kohya's lora_te*): read from
+    its header, cached by mtime."""
+    import os
+    import struct
+
+    try:
+        mtime = os.path.getmtime(path)
+        hit = _te_cache.get(path)
+        if hit and hit[0] == mtime:
+            return hit[1]
+        with open(path, "rb") as f:
+            n = struct.unpack("<Q", f.read(8))[0]
+            header = f.read(min(n, 16 << 20)).decode("utf-8", "replace")
+        ok = '"text_encoders.' in header or '"lora_te' in header
+        _te_cache[path] = (mtime, ok)
+        return ok
+    except (OSError, struct.error):
+        return False
+
+
+def te_loras() -> list[str]:
+    """LoRAs in loras/ that patch a text encoder (the ones that make sense on a captioner)."""
+    import folder_paths
+
+    return [n for n in folder_paths.get_filename_list("loras")
+            if n.endswith(".safetensors") and (p := folder_paths.get_full_path("loras", n)) and _is_te_lora(p)]
+
+
+def add_te_lora(link: str, file: str | None = None) -> dict:
+    """Download a text-encoder LoRA from a Hugging Face link (a repo, or a file in it) into
+    loras/text_encoder_loras/. A repo with several .safetensors and no file picked returns
+    {choices}."""
+    from . import downloads, families
+    from .adapters import _HF_LINK
+
+    m = _HF_LINK.match(link.strip())
+    if not m:
+        raise ValueError("paste a Hugging Face link: https://huggingface.co/owner/repo (or a file in it)")
+    repo, path = m.group(1), (file or m.group(2) or "").strip("/")
+    try:
+        rows = [r for r in families.repo_files(repo, refresh=True) if r["path"].endswith(".safetensors")]
+    except Exception as e:
+        raise ValueError(f"couldn't list {repo}: {e}") from e
+    if path:
+        rows = [r for r in rows if r["path"] == path]
+    if not rows:
+        raise ValueError(f"no such .safetensors file in {repo}")
+    if len(rows) > 1:
+        return {"choices": [{"file": r["path"], "size": r.get("size")} for r in rows], "repo": repo}
+    row = rows[0]
+    target = downloads.target_dir("loras") / TE_LORA_SUBDIR
+    url = f"https://huggingface.co/{repo}/resolve/main/{row['path']}"
+    job = downloads.manager().enqueue("caption", "loras", Path(row["path"]).name, url, target, row.get("size"))
+    return {"download": job.public(), "name": f"{TE_LORA_SUBDIR}/{Path(row['path']).name}"}
 
 
 GEMMA_FPS = 2  # frames a second Gemma 4 sees of a clip (it subsamples whatever it's given to `fps`)

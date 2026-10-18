@@ -109,8 +109,20 @@ def register(server) -> None:
             "styles": [{"id": k, "label": v[0], "prompt": v[1]} for k, v in captioner.STYLES.items()],
             "models": await asyncio.to_thread(captioner.models),
             "hearing": await asyncio.to_thread(captioner.hearing_models),
+            "loras": await asyncio.to_thread(captioner.te_loras),
             "jobs": captioner.recent(request.query.get("dataset") or None),
         })
+
+    @routes.post("/zentrainer/api/caption/loras")
+    async def add_caption_lora(request):
+        """{"link", "file"?}: download a text-encoder LoRA for captioning from Hugging Face."""
+        from . import captioner
+
+        b = await request.json()
+        try:
+            return web.json_response(await asyncio.to_thread(captioner.add_te_lora, str(b.get("link", "")), b.get("file")))
+        except (ValueError, OSError) as e:
+            return _bad(str(e))
 
     @routes.post("/zentrainer/api/datasets/{name}/caption")
     async def caption_dataset(request):
@@ -150,7 +162,9 @@ def register(server) -> None:
                             "default set", 409, replaces=existing)
         job = captioner.create(**{f: getattr(job, f) for f in ("dataset", "set_name", "clip_name", "clip_type", "prompt",
                                                                "mode", "paths", "subject", "preview")},
-                               max_length=int(b.get("max_length") or 300))
+                               max_length=int(b.get("max_length") or 300),
+                               loras=[{"name": str(lo.get("name")), "strength": float(lo.get("strength", 1.0))}
+                                      for lo in (b.get("loras") or []) if lo.get("name")])
         prompt_id = str(uuid.uuid4())
         from . import jobqueue
 
