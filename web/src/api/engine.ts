@@ -218,7 +218,28 @@ export interface RunDetail {
   checkpoints: CheckpointRow[]
   samples: SampleRow[]
   validation: ValidationRow[]
+  /** faces extra: each sample's face scored against the dataset's (cosine; same person ≳ 0.5) */
+  likeness?: LikenessRow[]
   live: boolean
+}
+
+export interface LikenessRow {
+  run_id: string
+  step: number
+  index: number
+  score: number | null
+  manual?: boolean
+  base?: boolean
+}
+
+/** a dataset's faces (engine faces.dataset_faces) */
+export interface DatasetFaces {
+  available: boolean
+  hint?: string
+  items?: Record<string, { faces: number; share: number; likeness: number | null; outlier: boolean }>
+  with_face?: number
+  total?: number
+  pack?: string
 }
 
 export interface DatasetInfo {
@@ -691,6 +712,7 @@ export const engine = {
       method: 'POST',
       body: JSON.stringify({ link, family, file }),
     }),
+  datasetFaces: (name: string) => call<DatasetFaces>(`/datasets/${encodeURIComponent(name)}/faces`),
   addCaptionLora: (link: string, file?: string, id?: string) =>
     call<{ download?: ModelDownload; name?: string; choices?: { file: string; size: number | null }[]; repo?: string }>('/caption/loras', {
       method: 'POST',
@@ -799,6 +821,7 @@ export const EVENTS = {
   sample: 'zentrainer.sample',
   sampleProgress: 'zentrainer.sample_progress',
   validation: 'zentrainer.validation',
+  likeness: 'zentrainer.likeness',
   caption: 'zentrainer.caption',
   download: 'zentrainer.download',
 } as const

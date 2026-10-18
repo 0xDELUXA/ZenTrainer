@@ -125,6 +125,20 @@ class Samples(Callback):
         self._conds = None
         self._alt = None  # base patcher of the alternate sampling model, loaded once
 
+    def _like(self, t, row: dict) -> None:
+        """Hand a landed sample to the likeness worker (faces extra), started on first use."""
+        if not t.spec.samples.likeness or not t.store:
+            return
+        if getattr(self, "_liker", None) is None:
+            from .. import faces
+
+            if not faces.available():
+                self._liker = False
+                return
+            self._liker = faces.LikenessWorker(t.store, t.run_id, t.spec.dataset.folder)
+        if self._liker:
+            self._liker.submit(row)
+
     def on_start(self, t):
         # encode even when unscheduled: a "sample now" command can still ask for them
         with torch.no_grad():
@@ -307,6 +321,12 @@ class Samples(Callback):
         if self.every and t.step % self.every == 0:
             self.render(t)
 
+    def on_end(self, t, status):
+        liker = getattr(self, "_liker", None)
+        if liker:
+            liker.close()  # it finishes what's queued, then stops
+        self._liker = None
+
     def render(self, t: Trainer, manual: int | None = None, base: bool = False, stay: bool = False) -> list[dict]:
         """The run's samples (or, from render_manual, one try). `stay` leaves the model set up
         for sampling afterwards: the caller renders more and switches back once. With weight
@@ -344,6 +364,7 @@ class Samples(Callback):
                 t.emit(events.SAMPLE, row)
                 if t.store:
                     t.store.append(t.run_id, "samples", row)
+                    self._like(t, row)
             return rows
 
         previewer = _previewer(t)
@@ -429,6 +450,7 @@ class Samples(Callback):
                     t.emit(events.SAMPLE, row)
                     if t.store:
                         t.store.append(t.run_id, "samples", row)
+                        self._like(t, row)
         finally:
             t.network.assist = True
             mm.EXTRA_RESERVED_VRAM = reserved

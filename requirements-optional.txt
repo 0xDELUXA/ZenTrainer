@@ -3,3 +3,7 @@ bitsandbytes
 prodigyopt
 schedulefree
 came-pytorch
+# faces (face reports, sample likeness; InsightFace models are non-commercial research only)
+insightface
+onnxruntime
+opencv-python-headless

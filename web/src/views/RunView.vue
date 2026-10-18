@@ -24,7 +24,7 @@ import {
   type RunStatus,
   type SampleProgress,
   type SampleRow,
-  type ValidationRow,
+  type ValidationRow, type LikenessRow,
 } from '@/api/engine'
 import LossChart from '@/components/LossChart.vue'
 import ScrollArea from '@/components/ScrollArea.vue'
@@ -70,6 +70,8 @@ onMounted(() => {
       if (row.manual && !row.base) queuedTries.value = queuedTries.value.slice(1) // its render landed
     } else if (m.type === EVENTS.validation) {
       d.validation.push(m.data as unknown as ValidationRow)
+    } else if (m.type === EVENTS.likeness) {
+      ;(d.likeness ??= []).push(m.data as unknown as LikenessRow)
     } else if (m.type === EVENTS.sampleProgress) {
       const p = m.data as unknown as SampleProgress
       if (p.phase === 'done') setTimeout(() => (sampling.value = null), 600)
@@ -341,9 +343,20 @@ const ckptVal = (stepAt: number) => {
   for (const r of detail.value?.validation ?? []) if (r.step <= stepAt) v = r.val_loss
   return v ?? null
 }
+// faces extra: the run's samples' likeness at a step (their mean; manual tries left out)
+const likeAt = (stepAt: number): number | null => {
+  const xs = (detail.value?.likeness ?? []).filter((r) => r.step === stepAt && !r.manual && r.score != null).map((r) => r.score!)
+  return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null
+}
+// the best checkpoint: highest likeness when faces are scored (a character LoRA), else lowest validation loss
+const bestBy = computed(() => {
+  const cks = detail.value?.checkpoints ?? []
+  return cks.filter((c) => likeAt(c.step) != null).length >= 2 ? 'likeness' : 'val'
+})
 const bestStep = computed(() => {
-  const cks = (detail.value?.checkpoints ?? []).filter((c) => ckptVal(c.step) != null)
+  const cks = (detail.value?.checkpoints ?? []).filter((c) => (bestBy.value === 'likeness' ? likeAt(c.step) : ckptVal(c.step)) != null)
   if (cks.length < 2) return null
+  if (bestBy.value === 'likeness') return cks.reduce((a, b) => (likeAt(b.step)! > likeAt(a.step)! ? b : a)).step
   return cks.reduce((a, b) => (ckptVal(b.step)! < ckptVal(a.step)! ? b : a)).step
 })
 // how far into the run it was saved
@@ -823,12 +836,14 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
                 <div class="ck-main">
                   <span class="ck-step mono">{{ c.step }}</span>
                   <span v-if="c.final" class="chip">final</span>
-                  <span v-if="c.step === bestStep" class="chip best-chip" title="Lowest validation loss of the saved checkpoints">best</span>
+                  <span v-if="c.step === bestStep" class="chip best-chip" :title="bestBy === 'likeness' ? 'Its samples look most like the dataset\'s faces' : 'Lowest validation loss of the saved checkpoints'">best</span>
                   <span class="spacer" />
                   <span class="ck-size mono" :class="{ gone: c.size === null }">{{ [ckptAt(c.step), c.size ? fmtBytes(c.size) : c.size === null ? 'file missing' : ''].filter(Boolean).join(' · ') }}</span>
                 </div>
                 <div class="ck-acts">
-                  <span class="ck-sub mono">{{ ckptVal(c.step) != null ? `val ${ckptVal(c.step)!.toFixed(4)}` : 'no val' }}</span>
+                  <span class="ck-sub mono">
+                    <template v-if="likeAt(c.step) != null"><span title="How much its samples' faces look like the dataset's (same person ≳ 0.5)">likeness {{ likeAt(c.step)!.toFixed(2) }}</span> · </template>{{ ckptVal(c.step) != null ? `val ${ckptVal(c.step)!.toFixed(4)}` : 'no val' }}
+                  </span>
                   <span class="spacer" />
                   <RouterLink class="mini-btn" :to="`/apps/test-lora?run=${id}&lora=${encodeURIComponent(c.lora_name)}`" title="Try it in Test LoRA, on this run's model">Test</RouterLink>
                   <button v-if="resumable && !c.final" class="mini-btn" title="Resume this run from here, optimizer state and all" @click="resume(c.path)">Resume</button>

@@ -107,6 +107,23 @@ def register(server) -> None:
         return await _ds(lambda: {"changed": datasets.bulk(name, b.get("op", ""), b.get("text", ""), b.get("find", ""),
                                                            set_name=str(b.get("set") or "default"))})
 
+    @routes.get("/zentrainer/api/datasets/{name}/faces")
+    async def dataset_faces(request):
+        """The dataset's faces (faces extra): per picture, faces found, the main face's size, how
+        much it looks like the rest, outliers. Cached per file; the first look takes a while."""
+        from . import faces
+
+        if not faces.available():
+            return web.json_response({"available": False,
+                                      "hint": "install the faces extra: scripts/zt extras faces "
+                                              "(pip install insightface onnxruntime opencv-python-headless)"})
+        name = request.match_info["name"]
+        try:
+            out = await asyncio.to_thread(faces.dataset_faces, name)
+        except FileNotFoundError:
+            return _bad("dataset not found", 404)
+        return web.json_response({"available": True, **out})
+
     @routes.post("/zentrainer/api/datasets/{name}/split")
     async def split_videos(request):
         """Cut long videos into short clips: {seconds?, count? (per video, 0 = all), longer_than?}."""
@@ -328,6 +345,7 @@ def register(server) -> None:
                 "checkpoints": [_with_size(c) for c in store.read(run_id, "checkpoints")],
                 "samples": store.read(run_id, "samples"),
                 "validation": store.read(run_id, "validation"),
+                "likeness": store.read(run_id, "likeness"),
                 "live": control.get(run_id) is not None,
             })
         except (FileNotFoundError, ValueError):
@@ -411,7 +429,7 @@ def register(server) -> None:
                 return _bad("that checkpoint has no saved training state", 400)
         ckpt = max(resumable, key=lambda c: c["step"]) if resumable else None
         step = ckpt["step"] if ckpt else 0
-        for stream in ("metrics", "samples", "checkpoints", "validation"):
+        for stream in ("metrics", "samples", "checkpoints", "validation", "likeness"):
             store.truncate(run_id, stream, step)
         store.update(run_id, resume_from=ckpt["path"] if ckpt else None,
                      resume_state=state_for(ckpt, run_id) if ckpt else None, message=None, final_step=None,

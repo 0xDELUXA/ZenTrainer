@@ -6,7 +6,7 @@ import { ZenButton, ZenCompare, ZenEmpty, ZenInput, ZenLightbox, ZenSlider } fro
 import type { LightboxItem } from '@nynxz/zenkit-ui'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { engine, thumbUrl, viewUrl, type CaptionJob, type DatasetItem } from '@/api/engine'
+import { engine, thumbUrl, viewUrl, type CaptionJob, type DatasetFaces, type DatasetItem } from '@/api/engine'
 import { activeCaptions } from '@/captions'
 import CaptionPanel from '@/components/CaptionPanel.vue'
 import { vAutosize } from '@/autosize'
@@ -73,7 +73,7 @@ async function load() {
 onMounted(load)
 
 // ---- filter / sort / select -------------------------------------------------------------------
-type Filter = 'all' | 'uncaptioned' | 'masked' | 'unmasked' | 'pairs'
+type Filter = 'all' | 'uncaptioned' | 'masked' | 'unmasked' | 'pairs' | 'faces'
 const filter = ref<Filter>('all')
 const query = ref('')
 const sortKey = ref<'name' | 'size' | 'res' | 'caption'>('name')
@@ -98,7 +98,32 @@ const counts = computed(() => ({
   mismatched: items.value.filter((i) => i.mask_mismatch).length,
   videos: items.value.filter((i) => i.kind === 'video').length,
   pairs: items.value.filter((i) => i.controls?.length).length,
+  faceIssues: items.value.filter((i) => faceIssue(i)).length,
 }))
+
+// ---- faces (faces extra): a face per picture, how much it looks like the rest -----------------
+const faces = ref<DatasetFaces | null>(null)
+const facesBusy = ref(false)
+async function checkFaces() {
+  facesBusy.value = true
+  try {
+    faces.value = await engine.datasetFaces(props.name)
+  } catch (e) {
+    faces.value = { available: false, hint: e instanceof Error ? e.message : String(e) }
+  } finally {
+    facesBusy.value = false
+  }
+}
+const faceOf = (it: DatasetItem) => faces.value?.items?.[it.path]
+/** why a picture's face needs a look: none found, more than one person, or not like the others */
+function faceIssue(it: DatasetItem): string | null {
+  const f = faceOf(it)
+  if (!f) return null
+  if (f.faces === 0) return 'No face found'
+  if (f.outlier) return `Doesn't look like the others (likeness ${f.likeness?.toFixed(2)})`
+  if (f.faces > 1) return `${f.faces} faces: another person can bleed into the likeness`
+  return null
+}
 const shown = computed(() => {
   const q = query.value.trim().toLowerCase()
   const f = filter.value
@@ -110,7 +135,8 @@ const shown = computed(() => {
         (f === 'uncaptioned' && !cap(it)) ||
         (f === 'masked' && it.mask) ||
         (f === 'unmasked' && !it.mask) ||
-        (f === 'pairs' && it.controls?.length)) &&
+        (f === 'pairs' && it.controls?.length) ||
+        (f === 'faces' && faceIssue(it))) &&
       (!q || cap(it).toLowerCase().includes(q) || it.path.toLowerCase().includes(q)),
   )
   const key = (it: DatasetItem): string | number =>
@@ -359,9 +385,19 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
         <button :class="{ on: filter === 'masked' }" @click="filter = 'masked'">Masked {{ counts.masked }}</button>
         <button :class="{ on: filter === 'unmasked' }" @click="filter = 'unmasked'">Unmasked</button>
         <button v-if="counts.pairs" :class="{ on: filter === 'pairs' }" title="Edit pairs: images with a <name>_control input picture" @click="filter = 'pairs'">Pairs {{ counts.pairs }}</button>
+        <button v-if="faces?.items" :class="{ on: filter === 'faces' }" title="Pictures whose face needs a look: none found, several people, or not like the others" @click="filter = 'faces'">Face issues {{ counts.faceIssues }}</button>
       </div>
       <div class="search"><ZenInput v-model="query" placeholder="Search captions or names" size="sm" /></div>
       <span class="spacer" />
+      <button
+        class="chip-btn"
+        :class="{ on: !!faces?.items }"
+        :disabled="facesBusy"
+        :title="faces && !faces.available ? faces.hint : faces?.items ? `${faces.with_face} of ${faces.total} have a face (${faces.pack}); click to check again` : 'Find the face in every picture and how much each looks like the rest (faces extra, CPU)'"
+        @click="checkFaces"
+      >
+        <i :class="facesBusy ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-face-recognition'" /> {{ facesBusy ? 'Checking…' : faces?.items ? `Faces ${faces.with_face}/${faces.total}` : 'Faces' }}
+      </button>
       <button class="chip-btn" :class="{ on: capOpen }" @click="capOpen = !capOpen"><i class="mdi mdi-creation-outline" /> Auto-caption</button>
       <button class="chip-btn" :class="{ on: bulkOpen }" @click="bulkOpen = !bulkOpen"><i class="mdi mdi-text-box-edit-outline" /> Bulk</button>
       </template>
@@ -419,6 +455,10 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
             </span>
             <span v-if="it.kind === 'video'" class="badge" :title="`Video: ${it.frames ?? '?'} frames at ${it.fps ?? '?'} fps`"><i class="mdi mdi-play" /> {{ secs(it.duration) }}</span>
             <span v-if="it.repeats > 1" class="badge" :title="`Repeats ${it.repeats}×`">×{{ it.repeats }}</span>
+            <span v-if="faceOf(it)" class="badge" :class="{ warn: !!faceIssue(it) }" :title="faceIssue(it) ?? `Face ${Math.round((faceOf(it)!.share) * 100)}% of the height; likeness to the others ${faceOf(it)!.likeness?.toFixed(2)}`">
+              <i :class="faceOf(it)!.faces === 0 ? 'mdi mdi-face-man-outline' : 'mdi mdi-face-recognition'" />
+              {{ faceOf(it)!.faces === 0 ? '0' : faceOf(it)!.likeness != null ? faceOf(it)!.likeness!.toFixed(2) : faceOf(it)!.faces }}
+            </span>
             <span v-if="!cap(it)" class="badge warn" title="No caption"><i class="mdi mdi-text-box-remove-outline" /></span>
           </span>
         </button>

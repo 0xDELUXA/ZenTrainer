@@ -6,6 +6,7 @@
     zt dev [--port N]          ComfyUI in the background + the web app with hot reload
     zt restart [--force]       restart the running managed ComfyUI
     zt extras optimizers       Prodigy, 8-bit AdamW/Lion, schedule-free, CAME
+    zt extras faces            face reports and sample likeness (InsightFace, non-commercial models)
     zt update [--ref REF]
     zt attach COMFYUI_DIR
     zt doctor
@@ -330,6 +331,8 @@ def cmd_restart(a) -> None:
 
 EXTRAS = {
     "optimizers": ["prodigyopt", "bitsandbytes", "schedulefree", "came-pytorch"],
+    # face reports and sample likeness (InsightFace models: non-commercial research use only)
+    "faces": ["insightface", "onnxruntime", "opencv-python-headless"],
 }
 
 
@@ -653,7 +656,8 @@ def main() -> None:
     s.set_defaults(fn=cmd_restart)
 
     s = sub.add_parser("extras", help="install optional packages into the managed ComfyUI")
-    s.add_argument("groups", nargs="+", choices=["optimizers"], help="optimizers: Prodigy, 8-bit, schedule-free, CAME")
+    s.add_argument("groups", nargs="+", choices=["optimizers", "faces"],
+                   help="optimizers: Prodigy, 8-bit, schedule-free, CAME; faces: InsightFace face reports + likeness")
     s.set_defaults(fn=cmd_extras)
 
     s = sub.add_parser("update", help="re-sync to comfy.lock, or move the pin with --ref")
