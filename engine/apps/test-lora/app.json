@@ -3,7 +3,7 @@
   "name": "Test LoRA",
   "icon": "mdi mdi-grid",
   "category": "train",
-  "description": "A grid of checkpoints \u00d7 strengths \u00d7 prompts with a fixed seed: find the step and strength that land.",
+  "description": "A grid of checkpoints × strengths × prompts with a fixed seed: find the step and strength that land.",
   "workflows": [
     {
       "file": "../_common/txt2img_checkpoint.json",
@@ -134,5 +134,6 @@
       "from": "Save",
       "view": "grid"
     }
-  ]
+  ],
+  "cover": "cover.webp"
 }

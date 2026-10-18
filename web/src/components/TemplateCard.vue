@@ -66,13 +66,12 @@ defineProps<{
   overflow: hidden;
   background: var(--zen-surface);
   color: var(--zen-text);
-  transition:
-    transform var(--zen-dur) ease,
-    border-color var(--zen-dur-fast) ease;
+  transition: border-color var(--zen-dur-fast) ease;
 }
-.tcard:hover {
-  border-color: color-mix(in srgb, var(--a) 70%, var(--zen-border));
-  transform: translateY(-2px);
+/* hover: the theme's primary colour on the border; nothing moves */
+.tcard:hover,
+.tcard:focus-visible {
+  border-color: var(--zen-accent);
 }
 .thumb {
   position: relative;

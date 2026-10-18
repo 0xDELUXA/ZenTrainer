@@ -23,7 +23,6 @@ onMounted(async () => {
 // of job (never your own outputs: those can be anything, and live in the Gallery)
 const FALLBACK: Record<string, string> = {
   'text-to-image': '/templates/image_z_image_turbo-1.webp',
-  'test-lora': '/templates/image_krea2_turbo_int8_image_style_reference-1.webp',
 }
 const cover = (a: AppInfo) => (a.cover ? `/zentrainer/api/apps/${a.id}/cover` : (FALLBACK[a.id] ?? null))
 
