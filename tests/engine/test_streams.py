@@ -193,3 +193,28 @@ def test_released_text_encoder_loads_again():
     m.release_clip()
     assert m._clip is None
     assert m.clip == "clip" and len(loads) == 2  # a later prompt can still be encoded
+
+
+def test_manual_tries_batch_into_one_session_and_pick_up_late_ones():
+    from zentrainer.harness.control import Control
+    from zentrainer.harness.trainer import Trainer
+
+    calls = []
+
+    class Samples:
+        def render(self, t):
+            calls.append("run samples")
+
+        def render_manual(self, t, tries, more):
+            batch = list(tries)
+            t.control.send("sample", prompt="late")  # queued while the first batch renders
+            nxt = more()
+            calls.append(("session", [a["prompt"] for a in batch], [a["prompt"] for a in nxt]))
+
+    t = object.__new__(Trainer)
+    t.control = Control()
+    t._samples = Samples()
+    t.control.send("sample", prompt="a")
+    t.control.send("sample", prompt="b")
+    t._apply(t.control.drain())
+    assert calls == [("session", ["a", "b"], ["late"])]

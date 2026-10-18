@@ -241,42 +241,58 @@ class Samples(Callback):
             torch.save({"prompts": [_to_cpu(c) for c, _ in conds], "negative": _to_cpu(neg)}, path)
         return conds
 
-    def render_manual(self, t, prompt: str, width: int | None = None, height: int | None = None,
-                      frames: int | None = None, seed: int | None = None, base: bool = False,
-                      index: int | None = None) -> list[dict]:
-        """One sample of any prompt at the current step ("Try a prompt"): rendered like the
-        run's samples but kept apart from them (manual rows, their own files)."""
+    def render_manual(self, t, tries: list[dict], more=None) -> list[dict]:
+        """Manual tries ("Try a prompt"): rendered like the run's samples but kept apart (manual
+        rows, their own files). A batch shares one text-encoder session (every new prompt
+        encoded, then the encoder freed once) and one sampling session (the model switched to
+        sampling once, back to training once); `more()` can hand over tries queued meanwhile,
+        which join the same session. Each try: {prompt, width?, height?, frames?, seed?, base?,
+        index?}."""
         from ..spec import SamplePrompt
         from .data import apply_trigger
 
         if self._conds is None:
             self.on_start(t)
         s, trig = t.spec.samples, t.spec.dataset.trigger
-        text = prompt.replace("[trigger]", trig) if trig else prompt.replace("[trigger]", "")
-        with torch.no_grad():
-            conds = self._encode_texts(t, [text], apply_trigger(s.negative, trig, False))
-        if hasattr(t, "_drop_text_encoder"):
-            t._drop_text_encoder()  # don't keep a big encoder beside training for one prompt
-        # a new try gets the next number; "again at this step" reuses its try's (same card)
-        n = index if index is not None else len({f.name.split("_")[1] for f in Path(_out_dir(t)).glob("manual_*")})
-        item = SamplePrompt(prompt, width or s.width, height or s.height, frames or s.frames,
-                            int(time.time()) % 100000 if seed is None else seed)
+        negative = apply_trigger(s.negative, trig, False)
+        rows: list[dict] = []
         saved = (self.items, self.prompts, self._conds)
-        self.items, self.prompts, self._conds = [item], [text], conds
         try:
-            rows = []
-            if base:  # the same prompt and seed without the LoRA first, to compare against
-                with t.network.disabled():
-                    rows += self.render(t, manual=n, base=True)
-            return rows + self.render(t, manual=n)
+            while tries:
+                jobs = []
+                with torch.no_grad():  # the encoder stays loaded across the batch's prompts
+                    for a in tries:
+                        prompt = str(a["prompt"])
+                        text = prompt.replace("[trigger]", trig) if trig else prompt.replace("[trigger]", "")
+                        jobs.append((a, text, self._encode_texts(t, [text], negative)))
+                if hasattr(t, "_drop_text_encoder"):
+                    t._drop_text_encoder()  # don't keep a big encoder beside training
+                for a, text, conds in jobs:
+                    # a new try gets the next number; "again at this step" reuses its try's (same card)
+                    n = a["index"] if a.get("index") is not None else \
+                        len({f.name.split("_")[1] for f in Path(_out_dir(t)).glob("manual_*")})
+                    item = SamplePrompt(str(a["prompt"]), a.get("width") or s.width, a.get("height") or s.height,
+                                        a.get("frames") or s.frames,
+                                        int(time.time()) % 100000 if a.get("seed") is None else a["seed"])
+                    self.items, self.prompts, self._conds = [item], [text], conds
+                    if a.get("base"):  # the same prompt and seed without the LoRA, to compare against
+                        with t.network.disabled():
+                            rows += self.render(t, manual=n, base=True, stay=True)
+                    rows += self.render(t, manual=n, stay=True)
+                tries = more() if more else []
         finally:
             self.items, self.prompts, self._conds = saved
+            t.exit_inference()  # back to training once, after the whole batch
+            mm_empty()
+        return rows
 
     def on_step(self, t):
         if self.every and t.step % self.every == 0:
             self.render(t)
 
-    def render(self, t: Trainer, manual: int | None = None, base: bool = False) -> list[dict]:
+    def render(self, t: Trainer, manual: int | None = None, base: bool = False, stay: bool = False) -> list[dict]:
+        """The run's samples (or, from render_manual, one try). `stay` leaves the model set up
+        for sampling afterwards: the caller renders more and switches back once."""
         if self._conds is None:
             self.on_start(t)
         if not self._conds:
@@ -387,8 +403,9 @@ class Samples(Callback):
             mm.EXTRA_RESERVED_VRAM = reserved
             if guided is not None:
                 model.model_options = plain_options
-            t.exit_inference()
-            mm.soft_empty_cache()
+            if not stay:
+                t.exit_inference()
+                mm.soft_empty_cache()
             t.emit(events.SAMPLE_PROGRESS, {"run_id": t.run_id, "step": t.step, "phase": "done", "count": count})
 
         return rows
@@ -576,3 +593,9 @@ def _out_dir(t) -> str:
     d = os.path.join(folder_paths.get_output_directory(), "zentrainer", "samples", t.run_id)
     os.makedirs(d, exist_ok=True)
     return d
+
+
+def mm_empty() -> None:
+    import comfy.model_management as mm
+
+    mm.soft_empty_cache()

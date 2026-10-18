@@ -482,20 +482,34 @@ class Trainer:
             self._status("training")
 
     def _apply(self, commands) -> None:
+        tries: list[dict] = []
         for cmd in commands:
             if cmd.name == "stop":
                 raise Stop("stopped")
             if cmd.name == "save":
                 self.save(f"manual-step{self.step:06d}")
             elif cmd.name == "sample" and self._samples:
-                if cmd.args.get("prompt"):  # "Try a prompt": one sample, kept apart from the run's
-                    a = cmd.args
-                    self._samples.render_manual(self, str(a["prompt"]), a.get("width"), a.get("height"),
-                                                a.get("frames"), a.get("seed"), bool(a.get("base")), a.get("index"))
+                if cmd.args.get("prompt"):
+                    tries.append(cmd.args)  # "Try a prompt": batched below
                 else:
                     self._samples.render(self)
             elif cmd.name == "set_lr":
                 optim.set_lr(self.optimizer, self.scheduler, float(cmd.args["lr"]))
+        if tries and self._samples:
+            # manual tries in one session; ones queued while it renders join it, so the model and
+            # encoder aren't swapped in and out per try. Other commands that arrive meanwhile
+            # wait for the next step boundary.
+            later = []
+
+            def more():
+                got = []
+                for c in self.control.drain():
+                    (got.append(c.args) if c.name == "sample" and c.args.get("prompt") else later.append(c))
+                return got
+
+            self._samples.render_manual(self, tries, more)
+            if later:
+                self._apply(later)
 
     # ---- outputs ---------------------------------------------------------------
 
