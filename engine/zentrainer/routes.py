@@ -175,6 +175,8 @@ def register(server) -> None:
             return web.json_response({"jobs": captioner.history()})
         return web.json_response({
             "styles": [{"id": k, "label": v[0], "prompt": v[1]} for k, v in captioner.STYLES.items()],
+            # what goes around a style's prompt, so the panel can show exactly what the model is told
+            "notes": {"video": captioner.VIDEO_NOTE, "sound": captioner.SOUND_NOTE, "subject": captioner.SUBJECT_NOTE},
             "models": await asyncio.to_thread(captioner.models),
             "hearing": await asyncio.to_thread(captioner.hearing_models),
             "senses": await asyncio.to_thread(captioner.model_senses),

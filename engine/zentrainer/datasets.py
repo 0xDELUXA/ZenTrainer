@@ -180,7 +180,9 @@ def set_muted(name: str, set_name: str, paths: list[str], on: bool) -> dict[str,
 
 # ---- per-dataset settings (kept beside ZenTrainer's other state, not in the dataset folder) ------
 
-DEFAULT_SETTINGS = {"faces": False}  # faces: face report on open, faces in the stats, sample likeness
+# faces: face report on open, faces in the stats, sample likeness; caption_subject: what auto-captions
+# call the main subject (a trigger word, a name): it belongs to the dataset, not the browser
+DEFAULT_SETTINGS = {"faces": False, "caption_subject": ""}
 
 
 def _settings_file() -> Path:
@@ -206,7 +208,8 @@ def put_settings(name: str, changes: dict) -> dict:
         allx = json.loads(f.read_text())
     except (OSError, ValueError):
         allx = {}
-    cur = {**get_settings(name), **{k: changes[k] for k in DEFAULT_SETTINGS if k in changes}}
+    cur = {**get_settings(name), **{k: type(v)(changes[k]) for k, v in DEFAULT_SETTINGS.items() if k in changes}}
+    cur["caption_subject"] = cur["caption_subject"].strip()
     allx[name] = cur
     f.write_text(json.dumps(allx, indent=2))
     return cur

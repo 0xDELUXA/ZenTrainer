@@ -8,7 +8,7 @@ import { onComfyMessage } from '@/api/comfy'
 import { setSetting, settings } from '@/settings'
 import { EVENTS, EngineError, engine, thumbUrl, type CaptionJob, type CaptionLora, type CaptionMode, type CaptionStyle, type DatasetItem, type ModelSenses } from '@/api/engine'
 
-const props = defineProps<{ dataset: string; items: DatasetItem[]; sets: string[]; selected: string[] }>()
+const props = defineProps<{ dataset: string; items: DatasetItem[]; sets: string[]; selected: string[]; subject?: string }>()
 const emit = defineEmits<{ changed: [set: string]; review: [job: CaptionJob] }>()
 
 const styles = ref<CaptionStyle[]>([])
@@ -109,9 +109,10 @@ async function fetchLora(file?: string) {
 const jobs = ref<CaptionJob[]>([])
 const error = ref<string | null>(null)
 const PREFS = 'zentrainer.caption'
-const form = reactive({ clip_name: '', style: 'nl', prompt: '', set: 'nl', mode: 'missing' as CaptionMode, subject: '' })
+const form = reactive({ clip_name: '', style: 'nl', prompt: '', set: 'nl', mode: 'missing' as CaptionMode })
 try {
-  Object.assign(form, JSON.parse(localStorage.getItem(PREFS) ?? '{}'), { mode: 'missing' })
+  const { subject: _s, ...saved } = JSON.parse(localStorage.getItem(PREFS) ?? '{}') // subject: now the dataset's
+  Object.assign(form, saved, { mode: 'missing' })
 } catch {
   // storage blocked
 }
@@ -123,6 +124,16 @@ watch(form, () => {
     // storage blocked
   }
 })
+// what to call the subject belongs to the dataset (its settings), not to this browser
+const subject = ref(props.subject ?? '')
+watch(() => props.subject, (v) => (subject.value = v ?? ''))
+let subjectTimer: ReturnType<typeof setTimeout> | undefined
+watch(subject, (v) => {
+  clearTimeout(subjectTimer)
+  if (v.trim() === (props.subject ?? '')) return
+  subjectTimer = setTimeout(() => engine.datasetSettings(props.dataset, { caption_subject: v.trim() }).catch(() => {}), 500)
+})
+
 watch(
   () => form.style,
   (st, old) => {
@@ -134,6 +145,7 @@ watch(
 onMounted(async () => {
   const info = await engine.captionInfo(props.dataset)
   styles.value = info.styles
+  notes.value = info.notes ?? null
   models.value = info.models // loadable only, vision-language first
   hearing.value = info.hearing ?? []
   senses.value = info.senses ?? {}
@@ -185,6 +197,22 @@ function pick(id: string) {
   if (m) form.prompt = m.prompt
 }
 const editable = computed(() => form.style === 'custom' || !!own.value)
+const styleItems = computed(() => [
+  ...styles.value.map((st) => ({ value: st.id, label: st.label })),
+  ...mine.value.map((st) => ({ value: `u:${st.id}`, label: `${st.label} · yours` })),
+  { value: 'custom', label: 'Custom…' },
+])
+
+// ---- what the model is told: shown, so nobody has to take the built-in prompts on trust ----------
+const notes = ref<{ video: string; sound: string; subject: string } | null>(null)
+const showPrompt = ref(false)
+const stylePrompt = computed(() => (editable.value ? form.prompt : styles.value.find((st) => st.id === form.style)?.prompt ?? ''))
+const clipNote = computed(() => (!hasVideo.value || !notes.value ? '' : hearing.value.includes(form.clip_name) ? notes.value.sound : notes.value.video))
+const subjectNote = computed(() => (subject.value.trim() && notes.value ? notes.value.subject.replace('{subject}', subject.value.trim()).trim() : ''))
+function editCopy() {
+  form.prompt = stylePrompt.value
+  form.style = 'custom'
+}
 const dirty = computed(() => !!own.value && own.value.prompt !== form.prompt)
 function saveStyle() {
   if (own.value) {
@@ -218,7 +246,7 @@ function body(extra: Record<string, unknown> = {}) {
     set: form.set,
     mode: form.mode,
     paths: form.mode === 'selected' ? props.selected : undefined,
-    subject: form.subject || undefined,
+    subject: subject.value.trim() || undefined,
     loras: loras.value.filter((l) => l.name),
     ...(editable.value ? { prompt: form.prompt } : { style: form.style }),
     ...extra,
@@ -348,15 +376,23 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
           <div v-if="loraNote" class="muted small">{{ loraNote }}</div>
         </div>
       </div>
-      <div class="f"><span class="eyebrow">Style</span>
-        <div class="seg">
-          <button v-for="st in styles" :key="st.id" :class="{ on: form.style === st.id }" :title="st.prompt" @click="pick(st.id)">{{ st.label }}</button>
-          <button v-for="st in mine" :key="st.id" :class="{ on: form.style === `u:${st.id}` }" :title="st.prompt" @click="pick(`u:${st.id}`)"><i class="mdi mdi-account-outline" /> {{ st.label }}</button>
-          <button :class="{ on: form.style === 'custom' }" title="Write your own instruction" @click="pick('custom')"><i class="mdi mdi-plus" /> Custom</button>
+      <div class="f style"><span class="eyebrow">Style</span>
+        <div class="style-row">
+          <ZenCombo :model-value="form.style" :items="styleItems" :sorted="false" :searchable="false" size="sm" @update:model-value="pick(String($event))" />
+          <button class="mini" :class="{ on: showPrompt }" title="Show exactly what the model is told" @click="showPrompt = !showPrompt"><i class="mdi mdi-text-box-search-outline" /> Prompt</button>
         </div>
       </div>
     </div>
+    <div v-if="showPrompt && !editable" class="told">
+      <p v-if="clipNote" class="told-wrap"><span class="eyebrow">Clips first get</span>{{ clipNote }}</p>
+      <p class="told-main">{{ stylePrompt }}</p>
+      <p v-if="subjectNote" class="told-wrap"><span class="eyebrow">Then</span>{{ subjectNote }}</p>
+      <div class="own-acts">
+        <ZenButton size="sm" icon="mdi mdi-pencil-outline" title="Start a custom style from this prompt: the built-in stays as it is" @click="editCopy">Edit a copy</ZenButton>
+      </div>
+    </div>
     <div v-if="editable" class="own">
+      <p v-if="showPrompt && clipNote" class="told-wrap"><span class="eyebrow">Clips first get</span>{{ clipNote }}</p>
       <ZenInput v-model="form.prompt" type="textarea" :rows="3" placeholder="What should the model write? It sees the image, e.g. “Describe the outfit and pose in one sentence.”" />
       <div class="own-acts">
         <ZenButton size="sm" icon="mdi mdi-content-save-outline" :disabled="!form.prompt.trim() || (!!own && !dirty)" :title="own ? 'Save your changes to this style' : 'Keep this instruction as a style of your own'" @click="saveStyle">
@@ -365,6 +401,7 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
         <button v-if="own" class="mini" title="Delete this style" @click="removeStyle"><i class="mdi mdi-trash-can-outline" /></button>
         <span class="muted small">Saved styles follow you to any browser on this ComfyUI.</span>
       </div>
+      <p v-if="showPrompt && subjectNote" class="told-wrap"><span class="eyebrow">Then</span>{{ subjectNote }}</p>
     </div>
 
     <div class="row">
@@ -380,7 +417,7 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
         </div>
       </div>
       <label class="f subject"><span class="eyebrow">Call the subject</span>
-        <ZenInput v-model="form.subject" size="sm" placeholder="optional, e.g. a trigger word" />
+        <ZenInput v-model="subject" size="sm" placeholder="optional, e.g. a trigger word" title="Saved with this dataset" />
       </label>
     </div>
 
@@ -390,10 +427,12 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
         {{ summary }}<template v-if="replaces"> · undoable</template>
       </span>
       <span class="spacer" />
+      <span class="foot-acts">
       <ZenButton size="sm" icon="mdi mdi-eye-outline" :disabled="busy || !form.clip_name || !targets.length || !!active" title="Caption 3 of these without saving anything" @click="start(3)">Try on 3</ZenButton>
       <ZenButton size="sm" variant="primary" icon="mdi mdi-creation-outline" :disabled="busy || !form.clip_name || !validSet || !targets.length || !!active" @click="start()">
         Caption {{ targets.length || '' }}
       </ZenButton>
+      </span>
     </div>
     <div v-if="error" class="err small mono">{{ error }}</div>
 
@@ -446,6 +485,45 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
 </template>
 
 <style scoped>
+.style-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.style-row :deep(.zen-combo) {
+  flex: 1;
+  min-width: 0;
+}
+.style-row .mini {
+  flex: none;
+  white-space: nowrap;
+}
+.mini.on {
+  color: var(--zen-accent);
+}
+.told {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.told-main,
+.told-wrap {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--zen-border);
+  border-radius: var(--zen-radius, 7px);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+.told-wrap {
+  color: var(--zen-muted);
+  border-style: dashed;
+}
+.told-wrap .eyebrow {
+  display: block;
+  margin-bottom: 2px;
+}
 .cp {
   display: flex;
   flex-direction: column;
@@ -465,6 +543,9 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
 }
 .model {
   flex: 2 1 260px;
+}
+.f.style {
+  flex: 1 1 220px;
 }
 .type {
   flex: 0 1 140px;
@@ -516,6 +597,15 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
 }
 .spacer {
   flex: 1;
+}
+.foot {
+  flex-wrap: wrap;
+}
+.foot-acts {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+  white-space: nowrap;
 }
 .small {
   font-size: 12px;

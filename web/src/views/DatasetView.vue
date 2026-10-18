@@ -84,6 +84,7 @@ async function load() {
     const r = await engine.dataset(props.name)
     items.value = r.items
     const facesOn = !!r.settings?.faces
+    captionSubject.value = r.settings?.caption_subject ?? ''
     if (facesOn !== facesSetting.value) {
       facesSetting.value = facesOn
       if (facesOn && !faces.value) checkFaces() // cached per picture: quick after the first time
@@ -155,6 +156,7 @@ const imageFlags = ref<Record<string, string[]>>({})
 // ---- faces (faces extra): a face per picture, how much it looks like the rest -----------------
 const faces = ref<DatasetFaces | null>(null)
 const facesBusy = ref(false)
+const captionSubject = ref('') // this dataset's "caption_subject" setting: what auto-captions call the subject
 const facesSetting = ref(false) // this dataset's "faces" setting: on = checked on open, in the stats and runs
 async function toggleFaces() {
   const on = !facesSetting.value
@@ -674,7 +676,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
           <header class="side-head clickable" @click="capOpen = !capOpen">
             <span>Auto-caption</span><i :class="capOpen ? 'mdi mdi-chevron-up' : 'mdi mdi-chevron-down'" />
           </header>
-          <CaptionPanel v-if="capOpen" :dataset="name" :items="items" :sets="sets" :selected="[...selected]" class="side-caption" @changed="onCaptioned" @review="review" />
+          <CaptionPanel v-if="capOpen" :dataset="name" :items="items" :sets="sets" :selected="[...selected]" :subject="captionSubject" class="side-caption" @changed="onCaptioned" @review="review" />
         </section>
         <section class="side-sec">
           <header class="side-head clickable" @click="bulkOpen = !bulkOpen">

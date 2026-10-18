@@ -242,6 +242,8 @@ export interface DatasetStats {
 export interface DatasetSettings {
   /** face report on open, faces in the stats, sample likeness in runs */
   faces: boolean
+  /** what auto-captions call the main subject (a trigger word, a name) */
+  caption_subject?: string
 }
 
 /** a dataset's faces (engine faces.dataset_faces) */
@@ -814,7 +816,7 @@ export const engine = {
   bulkCaptions: (name: string, op: 'prefix' | 'suffix' | 'replace', text: string, find = '', set = 'default') =>
     call<{ changed: number }>(`${dsPath(name)}/bulk`, { method: 'POST', body: JSON.stringify({ op, text, find, set }) }),
   captionInfo: (dataset?: string) =>
-    call<{ styles: CaptionStyle[]; models: string[]; hearing?: string[]; loras?: string[]; lora_catalog?: CaptionLora[]; senses?: Record<string, ModelSenses>; jobs: CaptionJob[] }>(`/caption${dataset ? `?dataset=${encodeURIComponent(dataset)}` : ''}`),
+    call<{ styles: CaptionStyle[]; notes?: { video: string; sound: string; subject: string }; models: string[]; hearing?: string[]; loras?: string[]; lora_catalog?: CaptionLora[]; senses?: Record<string, ModelSenses>; jobs: CaptionJob[] }>(`/caption${dataset ? `?dataset=${encodeURIComponent(dataset)}` : ''}`),
   startCaption: (name: string, body: CaptionRequest) =>
     call<{ job: CaptionJob }>(`${dsPath(name)}/caption`, { method: 'POST', body: JSON.stringify({ ...body, client_id: getClientId() }) }),
   captionJobs: () => call<{ jobs: CaptionJob[] }>('/caption?all=1').then((r) => r.jobs),

@@ -286,12 +286,13 @@ SOUND_NOTE = ("This is a short video clip, with its soundtrack. Describe the cli
               "the cuts and motion follow the beat. Treat \"image\" in what follows as the clip.\n")
 
 
+SUBJECT_NOTE = "\nRefer to the main subject as \"{subject}\" (exactly that, not a description of who they are)."
+
+
 def instruction(job: CaptionJob, is_video: bool = False, hears: bool = False) -> str:
+    """Everything the model is told: the UI shows the same pieces (routes: caption info "notes")."""
     text = (SOUND_NOTE if is_video and hears else VIDEO_NOTE if is_video else "") + job.prompt
-    if not job.subject:
-        return text
-    return (f"{text}\nRefer to the main subject as \"{job.subject}\" (exactly that, not a description "
-            f"of who they are).")
+    return text + SUBJECT_NOTE.format(subject=job.subject) if job.subject else text
 
 
 def todo(job: CaptionJob, items: list) -> list:
