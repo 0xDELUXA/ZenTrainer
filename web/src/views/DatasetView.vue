@@ -518,6 +518,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
     <div v-if="error" class="card err mono">{{ error }}</div>
 
     <!-- one fixed-height row: nothing in it appears, disappears or wraps -->
+    <div class="ds-toolbar-wrap">
     <div class="ds-toolbar card">
       <div class="seg" role="tablist" aria-label="View">
         <button :class="{ on: layout === 'grid' }" title="Grid" @click="view = 'grid'"><i class="mdi mdi-view-grid-outline" /></button>
@@ -540,6 +541,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
       <button class="icon-btn" :class="{ on: sideOpen }" :title="sideOpen ? 'Hide the side panel' : 'Show the side panel: health, faces, auto-caption, bulk edit, display'" @click="toggleSide">
         <i class="mdi mdi-dock-right" />
       </button>
+    </div>
     </div>
 
     <div class="ds-body" :class="{ 'with-side': sideOpen }">
@@ -1620,16 +1622,19 @@ dd {
   padding: 0 8px;
   flex-wrap: nowrap;
   overflow: hidden;
-  position: sticky;
-  top: 10px;
-  z-index: 5;
-  /* opaque, so the grid doesn't show through once it's stuck; the two shadows paint the page's
-     background 10px above and below it (the gap to the grid), so it sits in an even margin and
-     scrolled pictures disappear before they reach it */
+  /* opaque, so the grid doesn't show through once it's stuck */
   background: color-mix(in srgb, var(--zen-surface) 70%, var(--zen-bg));
-  box-shadow:
-    0 -8px 0 2px var(--zen-bg),
-    0 8px 0 2px var(--zen-bg);
+}
+/* what sticks: a square strip of the page's background with the toolbar inside, 10px above and
+   below it, so scrolled pictures vanish before they reach it (corners included). The negative
+   margins cancel the padding, so at rest the page lays out as if it weren't there */
+.ds-toolbar-wrap {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  margin: -10px 0;
+  padding: 10px 0;
+  background: var(--zen-bg);
 }
 .ds-toolbar .zoom {
   width: 150px;
