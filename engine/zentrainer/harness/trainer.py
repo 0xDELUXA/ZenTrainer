@@ -489,7 +489,12 @@ class Trainer:
             if cmd.name == "save":
                 self.save(f"manual-step{self.step:06d}")
             elif cmd.name == "sample" and self._samples:
-                self._samples.render(self)
+                if cmd.args.get("prompt"):  # "Try a prompt": one sample, kept apart from the run's
+                    a = cmd.args
+                    self._samples.render_manual(self, str(a["prompt"]), a.get("width"), a.get("height"),
+                                                a.get("frames"), a.get("seed"))
+                else:
+                    self._samples.render(self)
             elif cmd.name == "set_lr":
                 optim.set_lr(self.optimizer, self.scheduler, float(cmd.args["lr"]))
 

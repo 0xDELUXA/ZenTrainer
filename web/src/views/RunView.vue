@@ -2,12 +2,13 @@
 // One run. Header with the controls; progress beside the latest samples; the loss and
 // validation curves; then samples as a prompt × step grid, so a prompt's row reads as
 // its training progression (click a cell to page through that row in the lightbox).
-import { ZenButton, ZenLightbox, ZenModal, ZenNumber, ZenSlider } from '@nynxz/zenkit-ui'
+import { ZenButton, ZenCombo, ZenLightbox, ZenModal, ZenNumber, ZenSlider } from '@nynxz/zenkit-ui'
 import type { LightboxItem } from '@nynxz/zenkit-ui'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { loadedModels, watchLoaded } from '@/loaded'
 import { gb } from '@/system'
+import { vAutosize } from '@/autosize'
 import { onComfyMessage } from '@/api/comfy'
 import {
   ACTIVE,
@@ -150,7 +151,7 @@ const marks = computed(() => {
   if (!d) return []
   const out: { step: number; kind: 'ckpt' | 'sample'; done: boolean }[] = []
   const saved = new Set(d.checkpoints.map((c) => c.step))
-  const sampled = new Set(d.samples.map((x) => x.step))
+  const sampled = new Set(d.samples.filter((x) => !x.manual).map((x) => x.step))
   const every = d.spec.save_every
   if (every) for (let s = every; s < total.value; s += every) out.push({ step: s, kind: 'ckpt', done: saved.has(s) })
   const se = d.spec.samples.every
@@ -176,18 +177,21 @@ const valLast = computed(() => detail.value?.validation.at(-1))
 const valFirst = computed(() => detail.value?.validation[0])
 
 // ---- samples: prompt × step grid ---------------------------------------------------------------
-const steps = computed(() => [...new Set((detail.value?.samples ?? []).map((x) => x.step))].sort((a, b) => a - b))
+// the run's own samples (its prompts at its steps) vs one-off "Try a prompt" renders
+const runSamples = computed(() => (detail.value?.samples ?? []).filter((x) => !x.manual))
+const manualSamples = computed(() => (detail.value?.samples ?? []).filter((x) => x.manual).sort((a, b) => b.index - a.index))
+const steps = computed(() => [...new Set(runSamples.value.map((x) => x.step))].sort((a, b) => a - b))
 const prompts = computed(() => {
   const by = new Map<number, string>()
-  for (const x of detail.value?.samples ?? []) by.set(x.index, x.prompt)
+  for (const x of runSamples.value) by.set(x.index, x.prompt)
   return [...by.entries()].sort((a, b) => a[0] - b[0])
 })
-const cell = (index: number, s: number) => detail.value?.samples.find((x) => x.index === index && x.step === s)
+const cell = (index: number, s: number) => runSamples.value.find((x) => x.index === index && x.step === s)
 const latest = computed(() => {
   const s = steps.value.at(-1)
   if (s == null) return []
   const byIndex = new Map<number, SampleRow>()
-  for (const x of detail.value?.samples ?? []) if (x.step === s) byIndex.set(x.index, x)
+  for (const x of runSamples.value) if (x.step === s) byIndex.set(x.index, x)
   return [...byIndex.values()].sort((a, b) => a.index - b.index)
 })
 const promptCount = computed(() => Math.max(detail.value?.spec.samples.prompts.length ?? 0, prompts.value.length))
@@ -195,13 +199,29 @@ const promptCount = computed(() => Math.max(detail.value?.spec.samples.prompts.l
 // while the rest keep the previous one until their turn
 const latestByIndex = computed(() => {
   const by = new Map<number, SampleRow>()
-  for (const x of detail.value?.samples ?? []) if ((by.get(x.index)?.step ?? -1) <= x.step) by.set(x.index, x)
+  for (const x of runSamples.value) if ((by.get(x.index)?.step ?? -1) <= x.step) by.set(x.index, x)
   return by
 })
 const latestFor = (i: number) => latestByIndex.value.get(i)
 const promptText = (i: number) => latestFor(i)?.prompt ?? prompts.value.find(([k]) => k === i)?.[1] ?? (detail.value?.spec.samples.prompts[i] != null ? specPrompt(detail.value.spec.samples.prompts[i]!) : '')
 const specOpen = ref(false)
-const sampleView = ref<'latest' | 'grid'>('latest')
+const sampleView = ref<'latest' | 'grid' | 'manual'>('latest')
+// "Try a prompt": one render at the current step, apart from the run's samples
+const tryPrompt = ref('')
+const trySize = ref('')
+const tryFrames = ref<number | null>(null)
+async function renderTry() {
+  if (!tryPrompt.value.trim()) return
+  const [w, h] = trySize.value ? trySize.value.split('x').map(Number) : [undefined, undefined]
+  await send('sample', { prompt: tryPrompt.value.trim(), width: w, height: h, frames: tryFrames.value ?? undefined })
+}
+const trySizes = computed(() => {
+  const sp = detail.value?.spec.samples
+  return [
+    { value: '', label: sp ? `Run size (${sp.width}×${sp.height})` : 'Run size' },
+    ...[[1024, 1024], [832, 1216], [1216, 832], [480, 832], [832, 480], [512, 512]].map(([w, h]) => ({ value: `${w}x${h}`, label: `${w}×${h}` })),
+  ]
+})
 const fmtLr = (v?: number | null) => (v == null ? '–' : v === 0 ? '0' : v.toExponential(1))
 interface Stat {
   k: string
@@ -340,6 +360,9 @@ const sampleAspect = computed(() => {
   const sp = detail.value?.spec.samples
   return sp?.width && sp?.height ? `${sp.width} / ${sp.height}` : '1'
 })
+function openManual(i: number) {
+  lb.value = { items: manualSamples.value.map(sampleItem), index: i }
+}
 const isVideo = (x: SampleRow) => /\.(mp4|webm)$/i.test(x.filename)
 const sampleItem = (x: SampleRow): LightboxItem => ({
   src: viewUrl(x),
@@ -492,6 +515,7 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
               <div class="seg" role="tablist">
                 <button :class="{ on: sampleView === 'latest' }" @click="sampleView = 'latest'">Latest</button>
                 <button :class="{ on: sampleView === 'grid' }" :disabled="!steps.length" title="Each prompt across training: in the viewer ←→ steps, ↑↓ prompts (or WASD)" @click="sampleView = 'grid'">Progression</button>
+                <button :class="{ on: sampleView === 'manual' }" title="Try any prompt at the current step, apart from the run's samples" @click="sampleView = 'manual'">Manual<span v-if="manualSamples.length" class="muted"> {{ manualSamples.length }}</span></button>
               </div>
               <button
                 v-if="running"
@@ -503,7 +527,25 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
                 <i :class="sampling ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-image-refresh-outline'" /> Sample now
               </button>
             </header>
-            <div v-if="sampleView === 'latest'" class="tiles" :style="{ '--cols': latestCols, '--ar': sampleAspect }">
+            <div v-if="sampleView === 'manual'" class="manual">
+              <div class="try">
+                <textarea v-model="tryPrompt" v-autosize rows="1" class="try-in" placeholder="Try a prompt at this step, e.g. [trigger] reading a book in a cafe" @keydown.ctrl.enter="renderTry" />
+                <div class="try-opts">
+                  <ZenCombo v-model="trySize" :items="trySizes" :sorted="false" :searchable="false" size="sm" />
+                  <ZenNumber v-if="(detail.spec.samples.frames ?? 1) > 1" :model-value="tryFrames ?? detail.spec.samples.frames ?? 1" :min="1" :max="361" :step="17" :precision="0" size="sm" title="Frames" @update:model-value="tryFrames = $event" />
+                  <ZenButton size="sm" variant="primary" icon="mdi mdi-creation-outline" :disabled="!!busy || status !== 'training' || !tryPrompt.trim() || !!sampling" :title="status !== 'training' ? 'Only while it trains' : 'Ctrl+Enter'" @click="renderTry">Render</ZenButton>
+                </div>
+              </div>
+              <div v-if="!manualSamples.length" class="muted small empty-manual">Prompts you try here render with the LoRA as it is now, at the step it's on. They don't join the run's samples.</div>
+              <div class="mtiles">
+                <button v-for="(x, i) in manualSamples" :key="x.filename" class="mtile" @click="openManual(i)">
+                  <video v-if="isVideo(x)" :src="viewUrl(x)" muted loop playsinline preload="metadata" @mouseenter="($event.target as HTMLVideoElement).play()" @mouseleave="($event.target as HTMLVideoElement).pause()" />
+                  <img v-else :src="viewUrl(x)" loading="lazy" alt="" />
+                  <span class="mcap"><b class="mono">step {{ x.step }}</b> {{ x.prompt }}</span>
+                </button>
+              </div>
+            </div>
+            <div v-else-if="sampleView === 'latest'" class="tiles" :style="{ '--cols': latestCols, '--ar': sampleAspect }">
               <div v-for="i in promptCount" :key="i" class="tile-wrap">
                 <div class="tile" :class="{ live: liveIndex === i - 1 }">
                   <template v-if="liveIndex === i - 1">
@@ -932,6 +974,77 @@ dd {
   height: 100%;
   object-fit: contain;
   display: block;
+}
+.manual {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.try {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.try-in {
+  width: 100%;
+  resize: none;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 8px 10px;
+  border-radius: var(--r-md);
+  border: 1px solid color-mix(in srgb, var(--zen-border) 70%, transparent);
+  background: var(--zen-field-bg, var(--zen-input));
+  color: var(--zen-text);
+  max-height: 10em;
+}
+.try-in:focus {
+  outline: none;
+  border-color: var(--zen-accent);
+}
+.try-opts {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.try-opts > :first-child {
+  width: 200px;
+}
+.empty-manual {
+  padding: 8px 0;
+}
+.mtiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+}
+.mtile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: none;
+  background: none;
+  padding: 0;
+  text-align: left;
+  color: var(--zen-text);
+  cursor: pointer;
+}
+.mtile img,
+.mtile video {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: contain;
+  border-radius: var(--r-md);
+  background: var(--zen-surface-2);
+  display: block;
+}
+.mcap {
+  font-size: 11px;
+  color: var(--zen-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .play-badge {
   position: absolute;

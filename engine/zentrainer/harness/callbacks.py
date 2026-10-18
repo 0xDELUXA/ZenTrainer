@@ -218,29 +218,58 @@ class Samples(Callback):
         # samples only substitute [trigger]; they're never rewritten otherwise
         self.prompts = [p.prompt.replace("[trigger]", trig) if trig else p.prompt.replace("[trigger]", "") for p in self.items]
         negative = apply_trigger(s.negative, trig, False)
-        # cached like captions, so a run with nothing new to encode never loads the text encoder
-        path = _prompt_cache(t, self.prompts, negative)
+        self._conds = self._encode_texts(t, self.prompts, negative)
+
+    def _encode_texts(self, t, prompts: list[str], negative: str) -> list:
+        """[(cond, negative cond)] for these prompts; cached like captions, so a run with
+        nothing new to encode never loads the text encoder."""
+        path = _prompt_cache(t, prompts, negative)
         if path is not None and path.is_file():
             try:
                 cached = torch.load(path, weights_only=False)
-                self._conds = [(c, cached["negative"]) for c in cached["prompts"]]
-                return
+                return [(c, cached["negative"]) for c in cached["prompts"]]
             except Exception:
                 pass
         clip = t.models.clip
         neg = clip.encode_from_tokens_scheduled(clip.tokenize(negative))
-        self._conds = [(clip.encode_from_tokens_scheduled(clip.tokenize(p)), neg) for p in self.prompts]
+        conds = [(clip.encode_from_tokens_scheduled(clip.tokenize(p)), neg) for p in prompts]
         if path is not None:
             from .data import _to_cpu
 
             path.parent.mkdir(parents=True, exist_ok=True)
-            torch.save({"prompts": [_to_cpu(c) for c, _ in self._conds], "negative": _to_cpu(neg)}, path)
+            torch.save({"prompts": [_to_cpu(c) for c, _ in conds], "negative": _to_cpu(neg)}, path)
+        return conds
+
+    def render_manual(self, t, prompt: str, width: int | None = None, height: int | None = None,
+                      frames: int | None = None, seed: int | None = None) -> list[dict]:
+        """One sample of any prompt at the current step ("Try a prompt"): rendered like the
+        run's samples but kept apart from them (manual rows, their own files)."""
+        from ..spec import SamplePrompt
+        from .data import apply_trigger
+
+        if self._conds is None:
+            self.on_start(t)
+        s, trig = t.spec.samples, t.spec.dataset.trigger
+        text = prompt.replace("[trigger]", trig) if trig else prompt.replace("[trigger]", "")
+        with torch.no_grad():
+            conds = self._encode_texts(t, [text], apply_trigger(s.negative, trig, False))
+        if hasattr(t, "_drop_text_encoder"):
+            t._drop_text_encoder()  # don't keep a big encoder beside training for one prompt
+        n = sum(1 for _ in Path(_out_dir(t)).glob("manual_*"))
+        item = SamplePrompt(prompt, width or s.width, height or s.height, frames or s.frames,
+                            int(time.time()) % 100000 if seed is None else seed)
+        saved = (self.items, self.prompts, self._conds)
+        self.items, self.prompts, self._conds = [item], [text], conds
+        try:
+            return self.render(t, manual=n)
+        finally:
+            self.items, self.prompts, self._conds = saved
 
     def on_step(self, t):
         if self.every and t.step % self.every == 0:
             self.render(t)
 
-    def render(self, t: Trainer) -> list[dict]:
+    def render(self, t: Trainer, manual: int | None = None) -> list[dict]:
         if self._conds is None:
             self.on_start(t)
         if not self._conds:
@@ -259,7 +288,7 @@ class Samples(Callback):
         os.makedirs(out_dir, exist_ok=True)
         rows = []
 
-        if t.step == 0 and all(any(self._baseline_dir().glob(f"{self._baseline_key(t, i)}.*")) for i in range(len(self._conds))):
+        if manual is None and t.step == 0 and all(any(self._baseline_dir().glob(f"{self._baseline_key(t, i)}.*")) for i in range(len(self._conds))):
             # every baseline rendered before with these exact settings: copy them, load nothing
             for i in range(len(self._conds)):
                 row = self._baseline_hit(t, i, out_dir)
@@ -296,7 +325,7 @@ class Samples(Callback):
                 if guided is not None:
                     model.model_options = guided  # put back in finally
                 for i, (pos, neg) in enumerate(self._conds):
-                    reused = self._baseline_hit(t, i, out_dir) if t.step == 0 else None
+                    reused = self._baseline_hit(t, i, out_dir) if t.step == 0 and manual is None else None
                     if reused is not None:
                         rows.append(reused)
                         t.emit(events.SAMPLE, reused)
@@ -323,19 +352,21 @@ class Samples(Callback):
                     if t_lat:
                         from . import video
 
-                        name = f"step{t.step:06d}_{i:02d}.mp4"
+                        name = f"manual_{manual:03d}_step{t.step:06d}.mp4" if manual is not None else f"step{t.step:06d}_{i:02d}.mp4"
                         video.write(Path(out_dir) / name, img, s.fps, _sound(t, out))
                     else:
-                        name = f"step{t.step:06d}_{i:02d}.png"
+                        name = f"manual_{manual:03d}_step{t.step:06d}.png" if manual is not None else f"step{t.step:06d}_{i:02d}.png"
                         Image.fromarray((img[0].clamp(0, 1).cpu().numpy() * 255).astype("uint8")).save(
                             os.path.join(out_dir, name))
-                    if t.step == 0:
+                    if t.step == 0 and manual is None:
                         self._baseline_keep(t, i, Path(out_dir) / name)
                     row = {
                         "run_id": t.run_id, "step": t.step, "index": i, "prompt": self.prompts[i],
                         "filename": name, "subfolder": f"zentrainer/samples/{t.run_id}", "type": "output",
                         "model": s.model_name or None,
                     }
+                    if manual is not None:
+                        row.update(manual=True, index=manual, width=self.items[i].width, height=self.items[i].height)
                     # recorded as each one lands, so the UI swaps that tile now, not after the pass
                     rows.append(row)
                     t.emit(events.SAMPLE, row)
@@ -494,3 +525,11 @@ def _sound(t, out):
     wave = wave / std.clamp(min=1.0)
     rate = getattr(avae, "audio_sample_rate_output", getattr(avae, "audio_sample_rate", 44100))
     return wave[0].float().cpu(), int(rate)
+
+
+def _out_dir(t) -> str:
+    import folder_paths
+
+    d = os.path.join(folder_paths.get_output_directory(), "zentrainer", "samples", t.run_id)
+    os.makedirs(d, exist_ok=True)
+    return d

@@ -180,6 +180,8 @@ export interface SampleRow {
   subfolder: string
   type: string
   model?: string | null
+  /** a "Try a prompt" render, apart from the run's samples (index counts them) */
+  manual?: boolean
 }
 
 export interface RunDetail {
