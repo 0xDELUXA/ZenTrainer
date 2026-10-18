@@ -35,7 +35,7 @@ const sideOpen = ref<boolean>(saved.side ?? true) // the side panel: health, fac
 // bottom and staying there (a negative sticky top), so it never scrolls out of sight
 const sideEl = ref<HTMLElement | null>(null)
 const sideTop = ref(58)
-const PIN = 66 // the sticky toolbar (10px down, 46px tall) + its 10px margin
+const PIN = 66 // the sticky toolbar (10px down, 46px tall) + a 10px gap
 function placeSide() {
   const h = sideEl.value?.offsetHeight ?? 0
   sideTop.value = Math.min(PIN, window.innerHeight - h - 12)
@@ -53,8 +53,8 @@ onUnmounted(() => {
   window.removeEventListener('resize', placeSide)
 })
 
-// the side panel changes the grid's columns: the cards on screen glide to their new places (FLIP)
-// instead of jumping there
+// the side panel changes the grid's columns: each card on screen takes its new place at once and
+// grows or shrinks there from its old size, rather than snapping (no flying across the grid)
 async function toggleSide() {
   const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
   const vh = window.innerHeight
@@ -69,13 +69,11 @@ async function toggleSide() {
   for (const [el, a] of before) {
     const b = el.getBoundingClientRect()
     if (!b.width || !b.height) continue
-    const dx = a.left - b.left
-    const dy = a.top - b.top
     const sx = a.width / b.width
     const sy = a.height / b.height
-    if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(sx - 1) < 0.01) continue
+    if (Math.abs(sx - 1) < 0.01 && Math.abs(sy - 1) < 0.01) continue
     el.animate(
-      [{ transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})` }, { transform: 'none' }],
+      [{ transform: `scale(${sx}, ${sy})` }, { transform: 'none' }],
       { duration: 240, easing: 'cubic-bezier(0.2, 0.7, 0.2, 1)' },
     )
   }
@@ -1625,16 +1623,17 @@ dd {
   /* opaque, so the grid doesn't show through once it's stuck */
   background: color-mix(in srgb, var(--zen-surface) 70%, var(--zen-bg));
 }
-/* what sticks: a square strip of the page's background with the toolbar inside, 10px above and
-   below it, so scrolled pictures vanish before they reach it (corners included). The negative
-   margins cancel the padding, so at rest the page lays out as if it weren't there */
+/* what sticks: the toolbar on a strip of the page's background from 10px above it down to its
+   middle: nothing peeks over the top, and the strip's edge hides behind the toolbar, so below it
+   pictures just pass under the bar (no line anywhere). The negative margin cancels the padding,
+   so at rest the page lays out as if the strip weren't there */
 .ds-toolbar-wrap {
   position: sticky;
   top: 0;
   z-index: 5;
-  margin: -10px 0;
-  padding: 10px 0;
-  background: var(--zen-bg);
+  margin-top: -10px;
+  padding-top: 10px;
+  background: linear-gradient(to bottom, var(--zen-bg) calc(10px + 23px), transparent 0);
 }
 .ds-toolbar .zoom {
   width: 150px;
