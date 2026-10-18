@@ -164,8 +164,11 @@ class _Lazy:
 class Trainer:
     def __init__(self, spec: TrainSpec, run_id: str, *, store=None, emit: Callable = events.emit,
                  control: control_mod.Control | None = None, callbacks: list[Callback] | None = None,
-                 resume_from: str | None = None, resume_state: str | None = None):
+                 resume_from: str | None = None, resume_state: str | None = None, sample_job: dict | None = None):
         self.spec = spec
+        # a finished run's checkpoint to sample instead of training (routes: POST .../sample):
+        # {"path", "step", "run_prompts", "tries", "prev_status", "prev_message"}
+        self.sample_job = sample_job
         self.resume_from = resume_from  # a checkpoint .safetensors
         self.resume_state = resume_state  # its training state (see state_for)
         self.run_id = run_id
@@ -186,6 +189,9 @@ class Trainer:
     def run(self) -> str:
         """Train to completion (or stop). Returns the final status."""
         import comfy.model_management as mm
+
+        if self.sample_job:
+            return self._sample_only()
 
         status = "error"
         with torch.inference_mode(False):  # ComfyUI executes nodes under inference_mode
@@ -244,6 +250,59 @@ class Trainer:
                 mm.soft_empty_cache()
         self._status(status, final_step=self.step)
         return status
+
+    def _sample_only(self) -> str:
+        """Sample a finished run's checkpoint: its LoRA loaded, the run's prompts (and any tries)
+        rendered at the checkpoint's step as if training had sampled there, so they join the
+        samples, the likeness line and the progression; then everything is given back. Nothing
+        trains, and the run keeps the status it had."""
+        import comfy.model_management as mm
+
+        job = self.sample_job
+        from . import int8_backward
+
+        samples = self._samples
+        out = "error"
+        with torch.inference_mode(False):
+            try:
+                self._status("sampling", message=f"sampling step {job['step']}")
+                self.setup()
+                self.step = int(job["step"])
+                self.enter_training()  # loads the model and attaches the LoRA; sampling switches from there
+                samples.on_start(self)  # encodes the prompts (no baseline: the step isn't 0)
+                self._drop_text_encoder()
+                if job.get("run_prompts", True):
+                    samples.render(self)
+                if job.get("tries"):
+                    samples.render_manual(self, list(job["tries"]))
+                out = "done"
+            except BaseException as e:
+                logging.exception("[ZenTrainer] sampling %s at step %s failed", self.run_id, job.get("step"))
+                out = f"sampling failed: {e or type(e).__name__}"
+                raise
+            finally:
+                mm.in_training = False
+                try:
+                    samples.on_end(self, "done")  # the likeness worker finishes what's queued
+                except Exception:
+                    logging.exception("[ZenTrainer] samples on_end failed")
+                if getattr(self, "network", None) is not None and hasattr(self, "models"):
+                    self.network.eject(self.models.patcher)
+                    self.models.patcher.cleanup()
+                _comfy_compiler(True)
+                mm.training_fp8_bwd = False
+                int8_backward.uninstall()
+                self._release()
+                mm.soft_empty_cache()
+                prev = job.get("prev_status") or "done"
+                msg = job.get("prev_message") if out == "done" else out
+                self.emit(events.STATUS, {"run_id": self.run_id, "status": prev, "message": msg, "step": self.step})
+                self.emit(events.ZENKIT_JOB, {"id": f"zentrainer:{self.run_id}", "name": f"Sample {self.spec.name}",
+                                              "status": "done" if out == "done" else "error", "current": 1, "total": 1,
+                                              "message": "sampled" if out == "done" else out, "source": "ZenTrainer"})
+                if self.store:
+                    self.store.update(self.run_id, status=prev, message=msg, sample_job=None)
+        return prev
 
     def _release(self) -> None:
         """Give back what a run holds on the GPU (finished or failed): the optimizer state, the
@@ -356,6 +415,8 @@ class Trainer:
         init = None
         if self.resume_from:
             init = comfy.utils.load_torch_file(self.resume_from)
+        elif self.sample_job:
+            init = comfy.utils.load_torch_file(self.sample_job["path"])
         elif s.network.init_from:
             init = comfy.utils.load_torch_file(folder_paths.get_full_path_or_raise("loras", s.network.init_from))
         # A weight wrapper on a quantized layer turns off its quantized matmul (every forward
@@ -778,10 +839,13 @@ class Trainer:
         return str(path)
 
     def _status(self, status: str, message: str | None = None, **fields: Any) -> None:
+        if self.sample_job and status in ("loading", "training"):
+            status = "sampling"  # setup's progress, while sampling a finished run: still just sampling
         self.emit(events.STATUS, {"run_id": self.run_id, "status": status, "message": message, "step": self.step})
         self.emit(events.ZENKIT_JOB, {
             "id": f"zentrainer:{self.run_id}", "name": f"Train {self.spec.name}",
-            "status": {"loading": "start", "training": "progress", "paused": "progress", "done": "done"}.get(
+            "status": {"loading": "start", "training": "progress", "paused": "progress", "sampling": "progress",
+                       "done": "done"}.get(
                 status, "error"),
             "current": self.step, "total": self.spec.optim.steps, "message": message or status,
             "source": "ZenTrainer",

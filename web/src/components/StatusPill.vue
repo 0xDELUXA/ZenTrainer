@@ -14,6 +14,7 @@ const look = computed(
       running: { icon: 'mdi mdi-progress-helper', tone: 'ok' },
       undone: { icon: 'mdi mdi-undo-variant', tone: 'info' },
       paused: { icon: 'mdi mdi-pause-circle-outline', tone: 'warn' },
+      sampling: { icon: 'mdi mdi-image-refresh-outline', tone: 'info' },
       stopped: { icon: 'mdi mdi-stop-circle-outline', tone: 'warn' },
       done: { icon: 'mdi mdi-check-circle-outline', tone: 'ok' },
       interrupted: { icon: 'mdi mdi-stop-circle-outline', tone: 'warn' },

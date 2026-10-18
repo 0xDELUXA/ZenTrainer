@@ -100,7 +100,22 @@ const total = computed(() => detail.value?.spec.optim.steps ?? 0)
 const step = computed(() => last.value?.step ?? 0)
 const progress = computed(() => (total.value ? step.value / total.value : 0))
 const status = computed(() => detail.value?.run.status)
-const running = computed(() => !!status.value && ACTIVE.includes(status.value))
+// queued to sample a finished run's checkpoint isn't training (no Pause or Stop)
+const queuedToSample = computed(() => status.value === 'queued' && !!detail.value?.run.message?.startsWith('sampling'))
+const running = computed(() => !!status.value && ACTIVE.includes(status.value) && !queuedToSample.value)
+// finished, with a checkpoint file: Sample now and Manual tries run as a short job on its newest
+// checkpoint instead (engine: POST .../sample), and the results land at that step
+const sampleCkpt = computed(() => (running.value || sampleBusy.value ? null : (ckRows.value.find((c) => c.size !== null) ?? null)))
+const sampleBusy = computed(() => status.value === 'sampling' || queuedToSample.value)
+async function sampleFinished(tries?: Record<string, unknown>[]) {
+  if (!sampleCkpt.value) return
+  try {
+    const r = await engine.sampleRun(props.id, tries ? { checkpoint: sampleCkpt.value.path, run_prompts: false, tries } : { checkpoint: sampleCkpt.value.path })
+    if (detail.value) detail.value.run.status = r.run.status
+  } catch (e) {
+    error.value = String((e as Error).message ?? e)
+  }
+}
 const dur = (s: number | null | undefined) => {
   if (s == null || !isFinite(s)) return '–'
   const h = Math.floor(s / 3600)
@@ -279,6 +294,12 @@ async function renderTry() {
   if (!lines.length) return
   const [w, h] = trySize.value ? trySize.value.split('x').map(Number) : [undefined, undefined]
   tryPrompt.value = ''
+  if (sampleCkpt.value) {
+    // finished: one job renders them all on the newest checkpoint
+    for (const prompt of lines) queuedTries.value = [...queuedTries.value, { id: ++tryIds, prompt }]
+    await sampleFinished(lines.map((prompt) => ({ prompt, width: w, height: h, frames: tryFrames.value ?? undefined, base: tryBase.value })))
+    return
+  }
   for (const prompt of lines)
     await queueTry({ prompt, width: w, height: h, frames: tryFrames.value ?? undefined, base: tryBase.value }, prompt)
 }
@@ -716,6 +737,15 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
               >
                 <i :class="sampling ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-image-refresh-outline'" /> Sample now
               </button>
+              <button
+                v-else-if="(sampleCkpt && !steps.includes(sampleCkpt.step)) || sampleBusy"
+                class="chip-btn"
+                :disabled="sampleBusy || !detail.spec.samples.prompts.length"
+                :title="sampleCkpt ? `Render the sample prompts with the step ${sampleCkpt.step} checkpoint: they join the samples and the likeness line (replacing any already at that step)` : 'Sampling'"
+                @click="sampleFinished()"
+              >
+                <i :class="sampleBusy || sampling ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-image-refresh-outline'" /> {{ sampleBusy ? 'Sampling…' : `Sample step ${sampleCkpt!.step}` }}
+              </button>
             </header>
             <div v-if="sampleView === 'manual'" class="manual">
               <div class="try">
@@ -724,7 +754,7 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
                   <ZenCombo v-model="trySize" :items="trySizes" :sorted="false" :searchable="false" size="sm" />
                   <ZenNumber v-if="(detail.spec.samples.frames ?? 1) > 1" :model-value="tryFrames ?? detail.spec.samples.frames ?? 1" :min="1" :max="361" :step="17" :precision="0" size="sm" title="Frames" @update:model-value="tryFrames = $event" />
                   <label class="base-sw small" title="Also render the same prompt and seed without the LoRA, to compare"><ZenSwitch v-model="tryBase" size="sm" /> Compare with base</label>
-                  <ZenButton size="sm" variant="primary" icon="mdi mdi-creation-outline" :disabled="status !== 'training' || !tryPrompt.trim()" :title="status !== 'training' ? 'Only while it trains' : 'Queues it (Ctrl+Enter). One prompt per line queues several'" @click="renderTry">Render</ZenButton>
+                  <ZenButton size="sm" variant="primary" icon="mdi mdi-creation-outline" :disabled="(status !== 'training' && !sampleCkpt) || !tryPrompt.trim()" :title="status === 'training' ? 'Queues it (Ctrl+Enter). One prompt per line queues several' : sampleCkpt ? `Renders with the step ${sampleCkpt.step} checkpoint (Ctrl+Enter). One prompt per line for several` : 'Only while it trains, or once it has a checkpoint'" @click="renderTry">Render</ZenButton>
                 </div>
               </div>
               <div v-if="!manualGroups.length && !liveManual" class="muted small empty-manual">Prompts you try here render with the LoRA as it is now, at the step it's on. They don't join the run's samples.</div>

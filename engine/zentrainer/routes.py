@@ -472,6 +472,40 @@ def register(server) -> None:
         _remember_client(body.get("client_id"))
         return web.json_response({"run": store.meta(run_id)})
 
+    @routes.post("/zentrainer/api/runs/{run_id}/sample")
+    async def sample_run(request):
+        """Sample a finished run's checkpoint: {"checkpoint"?: path (default the latest), "run_prompts"?:
+        bool (default true), "tries"?: [{prompt, width?, height?, seed?}]}. Renders at that checkpoint's
+        step, replacing the run's samples already there; the run keeps its status."""
+        store, run_id = state.store(), request.match_info["run_id"]
+        try:
+            meta = store.meta(run_id)
+        except (FileNotFoundError, ValueError):
+            return _bad("run not found", 404)
+        if control.get(run_id) is not None or meta["status"] in ("queued", "loading", "training", "paused", "sampling"):
+            return _bad("run is active: use Sample now while it trains", 409)
+        body = await request.json() if request.can_read_body else {}
+        ckpts = [c for c in store.read(run_id, "checkpoints") if c.get("path") and Path(c["path"]).is_file()]
+        if body.get("checkpoint"):
+            ckpts = [c for c in ckpts if c["path"] == body["checkpoint"]]
+        if not ckpts:
+            return _bad("no checkpoint file to sample", 400)
+        ckpt = max(ckpts, key=lambda c: (c["step"], bool(c.get("final"))))
+        run_prompts = body.get("run_prompts", True)
+        tries = [t for t in body.get("tries") or [] if isinstance(t, dict) and str(t.get("prompt", "")).strip()]
+        if not run_prompts and not tries:
+            return _bad("nothing to sample", 400)
+        if run_prompts:  # a re-sample replaces the run's samples (and their likeness) at that step
+            for stream in ("samples", "likeness"):
+                rows = store.read(run_id, stream)
+                store.rewrite(run_id, stream, [r for r in rows if r.get("step") != ckpt["step"] or r.get("manual")])
+        store.update(run_id, status="queued", message=f"sampling step {ckpt['step']}", sample_job={
+            "path": ckpt["path"], "step": ckpt["step"], "run_prompts": bool(run_prompts), "tries": tries,
+            "prev_status": meta["status"], "prev_message": meta.get("message")})
+        jobqueue.get().add(run_id, front=True)
+        _remember_client(body.get("client_id"))
+        return web.json_response({"run": store.meta(run_id)})
+
     @routes.post("/zentrainer/api/runs/{run_id}/control")
     async def control_run(request):
         """{"command": "pause"|"resume"|"stop"|"save"|"sample"|"set_lr", "args": {...}}"""
@@ -1067,6 +1101,12 @@ def register(server) -> None:
         # runs that were mid-flight when this process last stopped can't be running now
         store, waiting = state.store(), set(jobqueue.get().snapshot()["order"])
         for m in store.list():
+            job = m.get("sample_job")
+            if job and (m["status"] == "sampling" or (m["status"] == "queued" and m["run_id"] not in waiting)):
+                # a checkpoint was being sampled: the run itself was finished, so it goes back as it was
+                store.update(m["run_id"], status=job.get("prev_status") or "done", message=job.get("prev_message"),
+                             sample_job=None)
+                continue
             if m["status"] in ("loading", "training", "paused") or (m["status"] == "queued" and m["run_id"] not in waiting):
                 store.update(m["run_id"], status="interrupted", message="ComfyUI stopped during this run; resume it")
 

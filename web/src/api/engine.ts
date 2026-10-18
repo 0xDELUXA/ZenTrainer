@@ -146,6 +146,7 @@ export type RunStatus =
   | 'loading'
   | 'training'
   | 'paused'
+  | 'sampling' // a finished run's checkpoint being sampled (it goes back to its status after)
   | 'done'
   | 'stopped'
   | 'error'
@@ -804,6 +805,9 @@ export const engine = {
   restart: (force = false) => call<{ ok: true }>('/restart', { method: 'POST', body: JSON.stringify({ force }) }),
   control: (id: string, command: Command, args?: Record<string, unknown>) =>
     call<{ ok: true }>(`${runPath(id)}/control`, { method: 'POST', body: JSON.stringify({ command, args }) }),
+  /** sample a finished run's checkpoint (default the latest): the run's prompts and/or tries */
+  sampleRun: (id: string, body: { checkpoint?: string; run_prompts?: boolean; tries?: Record<string, unknown>[] } = {}) =>
+    call<{ run: RunMeta }>(`${runPath(id)}/sample`, { method: 'POST', body: JSON.stringify({ ...body, client_id: getClientId() }) }),
   resume: (id: string, checkpoint?: string) =>
     call<{ run: RunMeta }>(`${runPath(id)}/resume`, {
       method: 'POST',

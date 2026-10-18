@@ -40,7 +40,8 @@ class ZenTrainSession(io.ComfyNode):
         ctl = control.register(run_id)
         try:
             Trainer(spec, run_id, store=store, control=ctl,
-                    resume_from=meta.get("resume_from"), resume_state=meta.get("resume_state")).run()
+                    resume_from=meta.get("resume_from"), resume_state=meta.get("resume_state"),
+                    sample_job=meta.get("sample_job")).run()
         finally:
             control.unregister(run_id)
         return io.NodeOutput()
