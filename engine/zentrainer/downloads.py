@@ -77,13 +77,18 @@ class Downloads:
         f = families.find_file(family, folder, name)
         if f is None:
             raise ValueError(f"{name!r} isn't a {folder} file of {family!r}")
+        return self.enqueue(family, folder, name, f.url, target_dir(folder), f.size)
+
+    def enqueue(self, family: str, folder: str, name: str, url: str, target: Path, size: int | None) -> Download:
+        """Queue a file whose URL the caller has already vetted (a catalog entry, never a raw URL)."""
         if os.sep in name or "/" in name or name.startswith("."):
             raise ValueError("bad file name")
         with self._cv:
             for j in self._jobs.values():
                 if j.name == name and j.folder == folder and j.status in ("queued", "downloading"):
                     return j
-            job = Download(uuid.uuid4().hex[:10], family, folder, name, f.url, str(target_dir(folder)), total=f.size)
+            target.mkdir(parents=True, exist_ok=True)
+            job = Download(uuid.uuid4().hex[:10], family, folder, name, url, str(target), total=size)
             self._jobs[job.id] = job
             if self._worker is None:
                 self._worker = threading.Thread(target=self._run, name="zentrainer-downloads", daemon=True)

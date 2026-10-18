@@ -7,6 +7,7 @@ import { ZenButton, ZenCombo, ZenField, ZenInput, ZenNumber, ZenSwitch, ZenTip }
 import { computed, nextTick, onMounted, reactive, ref, toRaw, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { inputChoices } from '@/api/comfy'
+import AdapterPicker from '@/components/AdapterPicker.vue'
 import FamilyPicker, { type SampleSuggestion } from '@/components/FamilyPicker.vue'
 import { downloadFor, fmtBytes } from '@/downloads'
 import { setSetting, settings } from '@/settings'
@@ -60,6 +61,7 @@ const usingSuggestion = computed(
 )
 // the family's hand-picked settings: applied when the family is picked, re-appliable after edits
 const profile = ref<ModelProfile | null>(null)
+const familyId = ref<string | null>(null)
 function applyProfile(p: ModelProfile) {
   merge(spec as unknown as Record<string, unknown>, p.train)
   merge(spec.samples as unknown as Record<string, unknown>, p.samples as Record<string, unknown>)
@@ -393,6 +395,7 @@ async function start(position: 'next' | 'end' = 'next') {
             @sample-suggestion="sampleSuggestion = $event"
             @custom="customModel = $event"
             @profile="onProfile"
+            @family="familyId = $event"
           />
           <div v-if="profile" class="profile" :class="{ open: profileOpen }">
             <div class="profile-head">
@@ -619,8 +622,8 @@ async function start(position: 'next' | 'end' = 'next') {
                 <ZenField label="Continue from" stack>
                   <ZenCombo v-model="initFrom" :items="[{ value: '', label: 'New LoRA' }, ...items(choices.loras)]" :item-height="30" />
                 </ZenField>
-                <ZenField label="Training adapter" stack tip="A LoRA applied while training only, never in samples or the saved file. Guidance-distilled models (MiniMax H3) train much better on a de-distillation adapter">
-                  <ZenCombo v-model="trainingAdapter" :items="[{ value: '', label: 'None' }, ...items(choices.loras)]" :item-height="30" />
+                <ZenField label="Training adapter" stack class="span-2" tip="A LoRA applied while training only, never in samples or the saved file. Guidance-distilled models (MiniMax H3) train much better on a de-distillation adapter">
+                  <AdapterPicker v-model="trainingAdapter" :family="familyId" />
                 </ZenField>
                 <ZenField label="Train biases & norms" stack><div class="sw-row"><ZenSwitch v-model="spec.network.train_bias_norm" /><span class="sw-state">{{ spec.network.train_bias_norm ? 'On' : 'Off' }}</span></div></ZenField>
               </div>

@@ -29,6 +29,8 @@ const emit = defineEmits<{
   custom: [boolean]
   /** the family's hand-picked settings (null = none); picked = the user chose this family just now */
   profile: [ModelProfile | null, boolean]
+  /** the picked family's id (null: none, or custom files) */
+  family: [string | null]
 }>()
 
 const CUSTOM = '__custom'
@@ -131,6 +133,7 @@ watch(famId, async (id, old) => {
   const picked = !!fam.value && userPicked && id !== old
   if (picked) apply(fam.value!)
   emit('profile', fam.value?.profile ?? null, picked)
+  emit('family', fam.value?.id ?? null)
 })
 const pick = (id: string | number) => {
   userPicked = true

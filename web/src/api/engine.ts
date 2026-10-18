@@ -513,6 +513,27 @@ export interface ModelFamily {
   recommended: { train: Partial<Record<ModelFolder, string | null>>; sample: SampleDefaults | null }
   missing: { folder: ModelFolder; name: string; size: number | null }[]
 }
+/** engine/zentrainer/adapters.py listing() */
+export interface TrainingAdapter {
+  id: string
+  label: string
+  /** local file name */
+  name: string
+  /** the name ComfyUI lists it by when installed (what the spec stores), else null */
+  installed: string | null
+  source: 'curated' | 'custom' | 'local'
+  /** suits the family asked about */
+  fits: boolean
+  /** worth offering when the family is picked */
+  suggest: boolean
+  families: string[]
+  note: string
+  repo: string
+  file: string
+  size: number | null
+  /** the repo page */
+  url: string
+}
 export interface ModelProfile {
   id: string
   families: string[]
@@ -527,7 +548,7 @@ export interface ModelProfile {
 export interface ModelDownload {
   id: string
   family: string
-  folder: ModelFolder
+  folder: ModelFolder | 'loras'
   name: string
   target: string
   total: number | null
@@ -548,6 +569,15 @@ export const engine = {
     call<ModelDownload>('/downloads', { method: 'POST', body: JSON.stringify({ family, folder, name }) }),
   cancelDownload: (id: string) => call<{ cancelled: boolean }>(`/downloads/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   clearDownloads: () => call<{ ok: true }>('/downloads/clear', { method: 'POST' }),
+  adapters: (family?: string | null) =>
+    call<{ adapters: TrainingAdapter[] }>(`/adapters${family ? `?family=${encodeURIComponent(family)}` : ''}`).then((r) => r.adapters),
+  addAdapter: (link: string, family?: string | null, file?: string) =>
+    call<{ adapter?: TrainingAdapter; choices?: { file: string; size: number | null }[]; repo?: string }>('/adapters', {
+      method: 'POST',
+      body: JSON.stringify({ link, family, file }),
+    }),
+  downloadAdapter: (id: string) => call<ModelDownload>('/adapters/download', { method: 'POST', body: JSON.stringify({ id }) }),
+  removeAdapter: (id: string) => call<{ removed: boolean }>(`/adapters?id=${encodeURIComponent(id)}`, { method: 'DELETE' }),
   health: () => call<Health>('/health'),
   datasets: () => call<{ datasets: DatasetInfo[] }>('/datasets').then((r) => r.datasets),
   runs: () => call<{ runs: RunMeta[] }>('/runs').then((r) => r.runs),
