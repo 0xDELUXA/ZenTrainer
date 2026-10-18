@@ -82,8 +82,8 @@ the rest of your setup.
 Two ways in, same engine:
 
 **Into your ComfyUI, as a node pack** (the simple way). Install ZenTrainer from ComfyUI Manager or
-the Registry, or clone this repository into `ComfyUI/custom_nodes/`, then restart ComfyUI and open
-`/zentrainer/` on its port (e.g. http://127.0.0.1:8188/zentrainer/). It uses that ComfyUI's
+the Registry, or clone this repository into `ComfyUI/custom_nodes/`, then restart ComfyUI and click the lotus
+in its top bar (or open `/zentrainer/` on its port, e.g. http://127.0.0.1:8188/zentrainer/). It uses that ComfyUI's
 models, `input/` and `output/`; it needs ComfyUI 0.41 or newer and says so if yours is older.
 Nothing extra to install: everything it needs ships with ComfyUI (optional optimizers:
 `pip install -r requirements-optional.txt`). A Registry/Manager install includes the built app; a
