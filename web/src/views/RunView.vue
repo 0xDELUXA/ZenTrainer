@@ -2,7 +2,7 @@
 // One run. Header with the controls; progress beside the latest samples; the loss and
 // validation curves; then samples as a prompt × step grid, so a prompt's row reads as
 // its training progression (click a cell to page through that row in the lightbox).
-import { ZenButton, ZenCombo, ZenCompare, ZenLightbox, ZenModal, ZenNumber, ZenSlider, ZenSwitch } from '@nynxz/zenkit-ui'
+import { ZenButton, ZenCombo, ZenLightbox, ZenModal, ZenNumber, ZenSlider, ZenSwitch } from '@nynxz/zenkit-ui'
 import type { LightboxItem } from '@nynxz/zenkit-ui'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -195,14 +195,10 @@ const manualGroups = computed(() => {
   return [...by.values()].filter((g) => g.steps.length || g.base).sort((a, b) => b.index - a.index)
 })
 const manualCount = computed(() => manualGroups.value.length)
-const pickedStep = ref<Record<number, number>>({}) // try -> which step the slider compares
-const shownStep = (g: { index: number; steps: SampleRow[] }) =>
-  g.steps.find((x) => x.step === pickedStep.value[g.index]) ?? g.steps.at(-1) ?? null
 async function again(g: { index: number; base: SampleRow | null; steps: SampleRow[] }) {
   const x = g.steps.at(-1) ?? g.base
   if (!x) return
   sampleView.value = 'manual'
-  delete pickedStep.value[g.index]
   await queueTry({ prompt: x.prompt, width: x.width, height: x.height, frames: x.frames, seed: x.seed, base: false, index: g.index }, x.prompt, g.index)
 }
 
@@ -223,11 +219,13 @@ const waitingCards = computed(() => {
     key: `q${q.id}`,
     prompt: q.prompt,
     again: q.again != null,
+    againIndex: q.again,
     live: i === 0 && !!live,
     frac: i === 0 ? frac : 0,
     state: i === 0 && live ? phase : i === (live ? 1 : 0) ? 'Next' : `Queued · ${i - (live ? 1 : 0)} ahead`,
   }))
-  if (live && !cards.length) cards.push({ key: 'live', prompt: live.prompt ?? '', again: false, live: true, frac, state: phase })
+  if (live && !cards.length)
+    cards.push({ key: 'live', prompt: live.prompt ?? '', again: false, againIndex: undefined, live: true, frac, state: phase })
   return cards
 })
 let tryIds = 0
@@ -428,6 +426,8 @@ const sampleAspect = computed(() => {
   const sp = detail.value?.spec.samples
   return sp?.width && sp?.height ? `${sp.width} / ${sp.height}` : '1'
 })
+const rowOf = (g: { base: SampleRow | null; steps: SampleRow[] }) => (g.steps[0] ?? g.base)!
+const copyText = (t: string) => navigator.clipboard?.writeText(t).catch(() => {})
 function openManual(i: number, row?: SampleRow | null) {
   // the viewer pages through every try (its no-LoRA render first, then each step) and opens on
   // the render that was clicked
@@ -616,47 +616,54 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
                 </div>
               </div>
               <div v-if="!manualGroups.length && !liveManual" class="muted small empty-manual">Prompts you try here render with the LoRA as it is now, at the step it's on. They don't join the run's samples.</div>
-              <div class="mtiles">
-                <!-- the try rendering now (live preview where it'll land), then the ones waiting -->
-                <div v-for="t in waitingCards" :key="t.key" class="mtile">
-                  <div class="mmedia queued" :class="{ live: t.live }">
-                    <img v-if="t.live && liveManual?.preview" :src="liveManual.preview" alt="" />
-                    <template v-else>
-                      <i :class="t.live ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-clock-outline'" />
-                    </template>
-                    <span class="qstate small">{{ t.state }}</span>
-                    <div v-if="t.live" class="qbar"><span :style="{ width: `${t.frac * 100}%` }" /></div>
+              <!-- one row per try: its prompt, then its renders across (no LoRA, then each step) -->
+              <div class="mrows">
+                <div v-for="t in waitingCards.filter((w) => w.againIndex == null)" :key="t.key" class="mrow2">
+                  <div class="mprompt"><span class="mtext">{{ t.prompt }}</span></div>
+                  <div class="mcells">
+                    <div class="tcell pending" :class="{ live: t.live }">
+                      <img v-if="t.live && liveManual?.preview" :src="liveManual.preview" alt="" />
+                      <i v-else :class="t.live ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-clock-outline'" />
+                      <div v-if="t.live" class="qbar"><span :style="{ width: `${t.frac * 100}%` }" /></div>
+                      <span class="clabel">{{ t.state }}</span>
+                    </div>
                   </div>
-                  <span class="mcap">{{ t.again ? 'Again: ' : '' }}{{ t.prompt }}</span>
                 </div>
-                <div v-for="(g, gi) in manualGroups" :key="g.index" class="mtile" :class="{ pair: g.base && shownStep(g) }">
-                  <!-- with a base render: images as a before/after slider, videos side by side -->
-                  <div v-if="g.base && shownStep(g) && !isVideo(g.base)" class="mmedia" :style="shapeOf(g.base)" @click="openManual(gi, shownStep(g))">
-                    <ZenCompare :before="viewUrl(g.base)" :after="viewUrl(shownStep(g)!)" before-label="No LoRA" :after-label="`Step ${shownStep(g)!.step}`" />
-                  </div>
-                  <div v-else-if="g.base && shownStep(g)" class="mmedia two" :style="shapeOf(g.base, true)">
-                    <video v-for="x in [g.base, shownStep(g)!]" :key="x.filename" :src="viewUrl(x)" muted loop playsinline preload="metadata" @mouseenter="($event.target as HTMLVideoElement).play()" @mouseleave="($event.target as HTMLVideoElement).pause()" @click="openManual(gi, x)" />
-                  </div>
-                  <div v-else class="mmedia" :style="shapeOf(shownStep(g) ?? g.base)" @click="openManual(gi, shownStep(g) ?? g.base)">
-                    <video v-if="isVideo((shownStep(g) ?? g.base)!)" :src="viewUrl((shownStep(g) ?? g.base)!)" muted loop playsinline preload="metadata" @mouseenter="($event.target as HTMLVideoElement).play()" @mouseleave="($event.target as HTMLVideoElement).pause()" />
-                    <img v-else :src="viewUrl((shownStep(g) ?? g.base)!)" loading="lazy" alt="" />
-                  </div>
-                  <div class="mfoot">
-                    <span v-if="g.steps.length > 1" class="msteps">
-                      <button v-for="x in g.steps" :key="x.step" :class="{ on: shownStep(g) === x }" @click="pickedStep[g.index] = x.step">{{ x.step }}</button>
+                <div v-for="(g, gi) in manualGroups" :key="g.index" class="mrow2">
+                  <div class="mprompt">
+                    <span class="mtext" :title="rowOf(g).prompt">{{ rowOf(g).prompt }}</span>
+                    <span class="mmeta mono">
+                      {{ rowOf(g).width }}×{{ rowOf(g).height }}<template v-if="(rowOf(g).frames ?? 1) > 1"> · {{ rowOf(g).frames }}f</template> · seed {{ rowOf(g).seed }}
                     </span>
-                    <span v-else class="mono small muted">{{ g.base ? 'no LoRA / ' : '' }}step {{ shownStep(g)?.step ?? '–' }}</span>
-                    <span class="spacer" />
+                    <span class="macts">
+                      <button title="Put this prompt back in the box to change it" @click="tryPrompt = rowOf(g).prompt"><i class="mdi mdi-pencil-outline" /></button>
+                      <button title="Copy the prompt" @click="copyText(rowOf(g).prompt)"><i class="mdi mdi-content-copy" /></button>
+                    </span>
+                  </div>
+                  <div class="mcells">
+                    <button v-for="x in [...(g.base ? [g.base] : []), ...g.steps]" :key="x.filename" class="tcell" :style="shapeOf(x)" @click="openManual(gi, x)">
+                      <video v-if="isVideo(x)" :src="viewUrl(x)" muted loop playsinline preload="metadata" @mouseenter="($event.target as HTMLVideoElement).play()" @mouseleave="($event.target as HTMLVideoElement).pause()" />
+                      <img v-else :src="viewUrl(x)" loading="lazy" alt="" />
+                      <span class="clabel">{{ x.base ? 'No LoRA' : `Step ${x.step}` }}</span>
+                    </button>
+                    <div v-for="t in waitingCards.filter((w) => w.againIndex === g.index)" :key="t.key" class="tcell pending" :class="{ live: t.live }" :style="shapeOf(g.steps.at(-1) ?? g.base)">
+                      <img v-if="t.live && liveManual?.preview" :src="liveManual.preview" alt="" />
+                      <i v-else :class="t.live ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-clock-outline'" />
+                      <div v-if="t.live" class="qbar"><span :style="{ width: `${t.frac * 100}%` }" /></div>
+                      <span class="clabel">{{ t.state }}</span>
+                    </div>
+                    <!-- the next render of this prompt: same seed, the LoRA as it is now -->
                     <button
-                      class="again"
-                      :disabled="status !== 'training' || g.steps.some((x) => x.step === step) || queuedTries.some((q) => q.again === g.index)"
-                      :title="g.steps.some((x) => x.step === step) ? 'Already rendered at this step' : 'The same prompt and seed with the LoRA as it is now'"
+                      v-if="status === 'training' && !g.steps.some((x) => x.step === step) && !queuedTries.some((q) => q.again === g.index)"
+                      class="tcell add"
+                      :style="shapeOf(g.steps.at(-1) ?? g.base)"
+                      title="Render this prompt again (same seed) with the LoRA as it is now"
                       @click="again(g)"
                     >
-                      <i class="mdi mdi-refresh" /> Again at {{ step }}
+                      <i class="mdi mdi-plus" />
+                      <span>Step {{ step }}</span>
                     </button>
                   </div>
-                  <span class="mcap">{{ (g.steps[0] ?? g.base)!.prompt }}</span>
                 </div>
               </div>
             </div>
@@ -1130,77 +1137,139 @@ dd {
 .empty-manual {
   padding: 8px 0;
 }
-.mtiles {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 10px;
-}
-.mtile {
+.mrows {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+}
+.mrow2 {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 12px;
+  padding: 8px 6px;
+  border-radius: var(--r-md);
+}
+.mrow2 + .mrow2 {
+  border-top: 1px solid color-mix(in srgb, var(--zen-border) 40%, transparent);
+}
+.mrow2:hover {
+  background: color-mix(in srgb, var(--zen-text) 3%, transparent);
+}
+.mprompt {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   min-width: 0;
 }
-.mtile.pair {
-  grid-column: span 2;
+.mtext {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--zen-text);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
-.mmedia {
+.mmeta {
+  font-size: 10px;
+  color: var(--zen-muted);
+}
+.macts {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--zen-dur-fast);
+}
+.mrow2:hover .macts,
+.macts:focus-within {
+  opacity: 1;
+}
+.macts button {
+  width: 24px;
+  height: 22px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--zen-muted);
+  cursor: pointer;
+}
+.macts button:hover {
+  color: var(--zen-text);
+  background: var(--zen-surface-2);
+}
+.tcell.add {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: 1px dashed color-mix(in srgb, var(--zen-border) 90%, transparent);
+  background: none;
+  color: var(--zen-muted);
+  font: inherit;
+  font-size: 11px;
+}
+.tcell.add i {
+  font-size: 18px;
+}
+.tcell.add:hover {
+  border-color: var(--zen-accent);
+  color: var(--zen-accent);
+}
+.mcells {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.tcell {
+  position: relative;
+  flex: none;
+  height: 96px;
   aspect-ratio: 1;
+  border: none;
+  padding: 0;
   border-radius: var(--r-md);
   overflow: hidden;
   background: var(--zen-surface-2);
   cursor: pointer;
 }
-.mmedia.two {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 2px;
-}
-.mmedia img,
-.mmedia video {
+.tcell img,
+.tcell video {
   width: 100%;
   height: 100%;
   object-fit: contain;
   display: block;
 }
-.mmedia :deep(.zen-compare img) {
-  object-fit: contain;
-}
-.mmedia.queued {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
+.tcell.pending {
+  display: grid;
+  place-items: center;
+  cursor: default;
   border: 1px dashed color-mix(in srgb, var(--zen-border) 90%, transparent);
   background: none;
   color: var(--zen-muted);
   font-size: 20px;
-  cursor: default;
 }
-.mmedia.queued.live {
+.tcell.pending.live {
   border: 1px solid color-mix(in srgb, var(--zen-accent) 60%, transparent);
 }
-.mmedia.queued img {
+.tcell.pending img {
   position: absolute;
   inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
 }
-.qstate {
-  position: relative;
-  z-index: 1;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--zen-surface) 80%, transparent);
-  color: var(--zen-text);
-}
-.live .qstate {
+.clabel {
   position: absolute;
-  left: 8px;
-  top: 8px;
+  left: 6px;
+  bottom: 6px;
+  max-width: calc(100% - 12px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  pointer-events: none;
 }
 .qbar {
   position: absolute;
@@ -1216,35 +1285,15 @@ dd {
   background: var(--zen-accent);
   transition: width var(--zen-dur) ease;
 }
-.mmedia.live {
-  display: grid;
-  place-items: center;
-  color: var(--zen-muted);
-}
-.mfoot {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.msteps {
-  display: flex;
-  gap: 3px;
-  flex-wrap: wrap;
-}
-.msteps button,
 .again {
   border: 1px solid color-mix(in srgb, var(--zen-border) 70%, transparent);
   background: none;
   color: var(--zen-muted);
   font: inherit;
   font-size: 11px;
-  padding: 1px 7px;
+  padding: 2px 8px;
   border-radius: var(--r-sm);
   cursor: pointer;
-}
-.msteps button.on {
-  color: var(--zen-text);
-  border-color: var(--zen-accent);
 }
 .again:hover:not(:disabled) {
   color: var(--zen-text);
@@ -1266,14 +1315,6 @@ dd {
   gap: 6px;
   color: var(--zen-muted);
   white-space: nowrap;
-}
-.mcap {
-  font-size: 11px;
-  color: var(--zen-muted);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
 }
 .play-badge {
   position: absolute;
