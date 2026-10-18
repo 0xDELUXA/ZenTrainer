@@ -5,6 +5,7 @@ import { ZenButton, ZenEmpty, ZenInput } from '@nynxz/zenkit-ui'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { engine, thumbUrl, type DatasetInfo } from '@/api/engine'
+import TemplateCard from '@/components/TemplateCard.vue'
 
 const router = useRouter()
 const datasets = ref<DatasetInfo[] | null>(null)
@@ -76,6 +77,11 @@ const counts = (d: DatasetInfo) => {
   const im = d.images - v
   return [im ? `${im} image${im === 1 ? '' : 's'}` : '', v ? `${v} video${v === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')
 }
+const tagsFor = (d: DatasetInfo) => {
+  const v = d.videos ?? 0
+  const im = d.images - v
+  return [im ? `${im} image${im === 1 ? '' : 's'}` : '', v ? `${v} video${v === 1 ? '' : 's'}` : '', d.masked ? `${d.masked} masked` : ''].filter(Boolean)
+}
 const fmtBytes = (b?: number) => (b == null ? '' : b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(b / 1e6))} MB`)
 const ago = (t?: number) => {
   if (!t) return ''
@@ -116,27 +122,25 @@ const ago = (t?: number) => {
 
       <!-- cards: one shape for every card -->
       <div v-if="view === 'cards'" class="grid">
-        <article v-for="d in shown" :key="d.folder" class="ds card">
-          <RouterLink :to="link(d)" class="mosaic" :class="`n${pics(d).length}`">
-            <img v-for="t in pics(d)" :key="t.filename" :src="thumb(d, t)" loading="lazy" alt="" />
-            <span v-if="!pics(d).length" class="none"><i class="mdi mdi-image-off-outline" /></span>
-          </RouterLink>
-          <div class="body">
-            <RouterLink :to="link(d)" class="name ellipsis" :title="d.folder">{{ d.folder }}</RouterLink>
-            <div class="meta muted">{{ counts(d) }}<template v-if="d.bytes"> · {{ fmtBytes(d.bytes) }}</template></div>
-            <div class="capline" :title="`${d.captioned} of ${d.images} have a default caption`">
-              <div class="meter"><span :class="{ part: d.captioned < d.images }" :style="{ width: `${d.images ? (d.captioned / d.images) * 100 : 0}%` }" /></div>
-              <span class="small" :class="d.captioned < d.images ? 'warn' : 'muted'">{{ d.captioned }}/{{ d.images }} captioned</span>
+        <TemplateCard
+          v-for="d in shown"
+          :key="d.folder"
+          :to="link(d)"
+          :title="d.folder"
+          :tags="tagsFor(d)"
+          :meta="[ago(d.modified), fmtBytes(d.bytes)].filter(Boolean)"
+        >
+          <template #thumb>
+            <div class="mosaic" :class="`n${pics(d).length}`">
+              <img v-for="t in pics(d)" :key="t.filename" :src="thumb(d, t)" loading="lazy" alt="" />
+              <span v-if="!pics(d).length" class="none"><i class="mdi mdi-image-off-outline" /></span>
             </div>
-            <div class="foot">
-              <span class="small muted">{{ ago(d.modified) }}</span>
-              <span class="spacer" />
-              <RouterLink :to="{ path: '/runs/new', query: { dataset: d.folder } }">
-                <ZenButton size="sm" icon="mdi mdi-play">Train</ZenButton>
-              </RouterLink>
-            </div>
+          </template>
+          <div class="capline" :title="`${d.captioned} of ${d.images} have a default caption`">
+            <div class="meter"><span :class="{ part: d.captioned < d.images }" :style="{ width: `${d.images ? (d.captioned / d.images) * 100 : 0}%` }" /></div>
+            <span class="small" :class="d.captioned < d.images ? 'warn' : 'muted'">{{ d.captioned }}/{{ d.images }} captioned</span>
           </div>
-        </article>
+        </TemplateCard>
       </div>
 
       <!-- table -->
@@ -215,24 +219,15 @@ const ago = (t?: number) => {
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 14px;
 }
-.ds {
-  padding: 0;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
 /* a fixed 4:3 mosaic whatever the thumbnails' shapes or count */
 .mosaic {
   display: grid;
-  aspect-ratio: 4 / 3;
+  height: 100%;
   gap: 2px;
   background: var(--zen-surface-2);
   grid-template: 1fr 1fr / 1fr 1fr;
   overflow: hidden;
   transition: opacity var(--zen-dur-fast) ease;
-}
-.mosaic:hover {
-  opacity: 0.88;
 }
 .mosaic img {
   width: 100%;
@@ -258,20 +253,10 @@ const ago = (t?: number) => {
   color: var(--zen-muted);
   font-size: 28px;
 }
-.body {
-  padding: 12px 14px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  flex: 1;
-}
 .name {
   font-weight: 650;
   font-size: 14px;
   min-width: 0;
-}
-.meta {
-  font-size: 12px;
 }
 .capline {
   display: flex;
@@ -292,12 +277,6 @@ const ago = (t?: number) => {
 }
 .meter span.part {
   background: var(--zen-warn);
-}
-.foot {
-  display: flex;
-  align-items: center;
-  margin-top: auto;
-  padding-top: 4px;
 }
 .spacer {
   flex: 1;

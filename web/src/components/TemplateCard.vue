@@ -35,7 +35,8 @@ defineProps<{
 <template>
   <RouterLink :to="to" class="tcard" :style="accent ? { '--a': accent } : undefined">
     <div class="thumb">
-      <ZenCompare v-if="image && after" :before="image" :after="after" :mode="mode ?? 'slider'" :before-label="beforeLabel" :after-label="afterLabel" />
+      <slot v-if="$slots.thumb" name="thumb" />
+      <ZenCompare v-else-if="image && after" :before="image" :after="after" :mode="mode ?? 'slider'" :before-label="beforeLabel" :after-label="afterLabel" />
       <img v-else-if="image" :src="image" alt="" loading="lazy" />
       <div v-else class="thumb-none"><i :class="icon ?? 'mdi mdi-image-outline'" /></div>
       <span v-if="badge" class="badge">{{ badge }}</span>
