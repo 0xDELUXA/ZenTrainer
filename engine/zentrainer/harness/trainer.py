@@ -34,6 +34,22 @@ from .objective import Objective, is_flow, sample_percents, sigmas_for
 _DTYPES = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}
 
 
+def _release_frames(e: BaseException) -> None:
+    """Drop the locals held by a failed run's traceback (and what it was raised from). ComfyUI
+    keeps the exception as the job's error, and its frames hold the failed step's activations
+    and gradients: after an out-of-VRAM error that's GBs the next run then can't load into
+    (measured: a resumed H3 run got 4.9 of its 20 GB onto the GPU). The message and line
+    numbers stay."""
+    import traceback
+
+    seen = set()
+    while e is not None and id(e) not in seen:
+        seen.add(id(e))
+        if e.__traceback__ is not None:
+            traceback.clear_frames(e.__traceback__)
+        e = e.__cause__ or e.__context__
+
+
 def _oom_advice(spec: TrainSpec, step: int) -> str:
     m, d, o = spec.memory, spec.dataset, spec.optim
     tips = []
@@ -185,7 +201,8 @@ class Trainer:
                         status = s.status
                     except torch.OutOfMemoryError as e:
                         status = "error"
-                        raise RuntimeError(_oom_advice(self.spec, self.step)) from e
+                        _release_frames(e)
+                        raise RuntimeError(_oom_advice(self.spec, self.step)) from None
                     except BaseException as e:
                         status = "interrupted" if type(e).__name__ == "InterruptProcessingException" else "error"
                         raise
@@ -202,15 +219,32 @@ class Trainer:
             except BaseException as e:
                 interrupted = type(e).__name__ == "InterruptProcessingException"
                 self._status("interrupted" if interrupted else "error", message=str(e) or type(e).__name__)
+                _release_frames(e)
                 raise
             finally:
                 mm.training_fp8_bwd = False
                 from . import int8_backward
 
                 int8_backward.uninstall()  # the model is cached: leave its layers as they were
+                self._release()
                 mm.soft_empty_cache()
         self._status(status, final_step=self.step)
         return status
+
+    def _release(self) -> None:
+        """Give back what a run holds on the GPU (finished or failed): the optimizer state, the
+        adapter, cached conds; the next run starts on a clean card."""
+        import gc
+
+        for name in ("optimizer", "scheduler", "ema", "network", "denoiser", "_previewer"):
+            if hasattr(self, name):
+                setattr(self, name, None)
+        conds = getattr(self, "_conds", None)
+        if isinstance(conds, dict):
+            conds.clear()
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     def setup(self) -> None:
         import comfy.model_management as mm
