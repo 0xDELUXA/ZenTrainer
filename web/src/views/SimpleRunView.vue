@@ -188,7 +188,7 @@ async function tryIt() {
         />
       </div>
       <div class="meta small muted">
-        <span v-if="!done && !failed">{{ Math.round(pct) }}%</span>
+        <span v-if="!done && !failed" class="mono">Step {{ step }} / {{ total }}<span class="muted"> · {{ Math.round(pct) }}%</span></span>
         <span v-if="nextPreview">Next preview at step {{ nextPreview.step }}, {{ nextPreview.in }}</span>
         <span>Trigger word <b class="mono">{{ d.spec.dataset.trigger || '–' }}</b></span>
         <span class="spacer" />
