@@ -10,7 +10,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { activeRuns, latest, lossTrail } from '@/runs'
 import { activeCaptions, startCaptionSync } from '@/captions'
 import { settings } from '@/settings'
-import { comfyBehind, engineStale, restartEngine, restarting, startStatusSync } from '@/status'
+import { comfyBehind, comfyOld, engineStale, restartEngine, restarting, startStatusSync } from '@/status'
 import { activeDownloads, fmtBytes, startDownloadSync } from '@/downloads'
 import { disks, gb, memLatest, startSystemSync } from '@/system'
 import { drawerOpen, toggleDrawer, unseenErrors } from '@/logs'
@@ -214,8 +214,12 @@ onUnmounted(() => {
       </span>
     </div>
 
+    <div v-if="comfyOld" class="row mem status-row warn-row" :title="comfyOld">
+      <span class="ic"><i class="mdi mdi-alert-outline" /></span>
+      <span class="lbl status-lbl">Update ComfyUI for ZenTrainer</span>
+    </div>
     <button
-      v-if="engineStale"
+      v-else-if="engineStale"
       class="row mem status-row"
       :disabled="trainingNow || restarting"
       :title="trainingNow ? 'Updated engine code is waiting: restart once nothing is training' : 'The engine’s code changed since it started: restart ComfyUI to load it'"
@@ -647,5 +651,9 @@ nav {
   .rail.open {
     transform: none;
   }
+}
+.warn-row {
+  color: var(--zen-warn);
+  cursor: help;
 }
 </style>

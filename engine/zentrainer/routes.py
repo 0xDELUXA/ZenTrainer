@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import shutil
 import time
 import uuid
@@ -34,12 +35,30 @@ def _bad(message: str, status: int = 400, **extra) -> web.Response:
     return web.json_response({"error": message, **extra}, status=status)
 
 
+# The oldest ComfyUI ZenTrainer is tested with (comfy.lock pins newer). Installed as a node pack
+# into someone's ComfyUI, an older one would fail in odd places; this says so plainly instead.
+MIN_COMFY = (0, 41, 0)
+
+
+def comfy_too_old() -> str | None:
+    try:
+        from comfyui_version import __version__ as v
+    except Exception:
+        return None
+    nums = tuple(int(x) for x in re.findall(r"\d+", v)[:3])
+    if nums and nums < MIN_COMFY:
+        return (f"ComfyUI {v} is older than ZenTrainer needs ({'.'.join(map(str, MIN_COMFY))} or newer): "
+                "update ComfyUI (Manager > Update ComfyUI, or git pull)")
+    return None
+
+
 def register(server) -> None:
     routes = server.routes
 
     @routes.get("/zentrainer/api/health")
     async def health(_request):
-        return web.json_response({"version": __version__, "capabilities": _capabilities(), "stale": _code_stale()})
+        return web.json_response({"version": __version__, "capabilities": _capabilities(), "stale": _code_stale(),
+                                  "comfy_old": comfy_too_old()})
 
     @routes.get("/zentrainer/api/themes")
     async def themes(_request):

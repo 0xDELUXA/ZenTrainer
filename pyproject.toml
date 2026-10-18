@@ -1,0 +1,17 @@
+[project]
+name = "comfyui-zentrainer"
+version = "0.1.0"
+description = "LoRA training and inference apps for ComfyUI: open /zentrainer/ after installing."
+license = { text = "MIT" }
+requires-python = ">=3.10"
+# everything the engine needs ships with ComfyUI; optional extras: requirements-optional.txt
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/Nynxz/ZenTrainer"
+
+[tool.comfy]
+PublisherId = "nynxz"
+DisplayName = "ZenTrainer"
+# the prebuilt app (web/dist is built, not committed) and the engine's frontend extension
+includes = ["web/dist", "engine/js"]

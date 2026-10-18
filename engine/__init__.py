@@ -24,6 +24,9 @@ def _setup() -> None:
     folder_paths.add_model_folder_path("loras", lora_dir)
 
     routes.register(PromptServer.instance)
+    too_old = routes.comfy_too_old()
+    if too_old:
+        logging.warning("[ZenTrainer] %s", too_old)
 
 
 class ZenTrainerExtension(ComfyExtension):

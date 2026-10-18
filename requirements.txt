@@ -1,0 +1,2 @@
+# Everything ZenTrainer needs ships with ComfyUI (torch, av, safetensors, comfy-kitchen...).
+# Optional optimizers: pip install -r requirements-optional.txt

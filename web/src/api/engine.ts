@@ -532,6 +532,8 @@ export interface Health {
     vram_total?: number
     vram_free?: number
   }
+  /** ComfyUI is older than ZenTrainer needs: the message says what to do */
+  comfy_old?: string | null
 }
 
 export type Command = 'pause' | 'resume' | 'stop' | 'save' | 'sample' | 'set_lr'

@@ -1,0 +1,5 @@
+# Optional optimizers for ZenTrainer (also: scripts/zt extras optimizers)
+bitsandbytes
+prodigyopt
+schedulefree
+came-pytorch

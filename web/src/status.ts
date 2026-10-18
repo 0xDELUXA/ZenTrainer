@@ -6,6 +6,8 @@ import { ref } from 'vue'
 import { engine } from './api/engine'
 
 export const engineStale = ref(false)
+/** set when this ComfyUI is older than ZenTrainer needs (a node-pack install into an old one) */
+export const comfyOld = ref<string | null>(null)
 export const comfyBehind = ref(0)
 export const restarting = ref(false)
 
@@ -15,7 +17,10 @@ export function startStatusSync(): void {
   started = true
   const tick = async () => {
     const h = await engine.health().catch(() => null)
-    if (h) engineStale.value = !!h.stale
+    if (h) {
+      engineStale.value = !!h.stale
+      comfyOld.value = h.comfy_old ?? null
+    }
   }
   tick()
   setInterval(tick, 60_000)
