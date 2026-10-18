@@ -813,23 +813,33 @@ class Trainer:
         folder = base / slugify(self.spec.name) if final else base / "checkpoints" / self.run_id
         folder.mkdir(parents=True, exist_ok=True)
         path = folder / f"{name}.safetensors"
-        sft.save_file(self.network.state_dict(), str(path),
-                                    metadata=write_metadata(self.spec.to_dict(), self.step))
-        # safetensors writes owner-only (0600); a LoRA is an output like ComfyUI's images, readable
-        # by whatever else serves or syncs the folder (Docker, a share, another user's ComfyUI)
-        os.chmod(path, 0o644)
-        # resumable state (optimizer, schedule, step, RNG) goes outside the LoRA folders:
-        # those are registered with ComfyUI, which would list a .pt there as a "LoRA"
+        weights = self.network.state_dict()
         keep = self.spec.output.keep_states
         state = state_dir(self.run_id) / f"{name}.pt"
+        _room_for(folder, sum(t.numel() * t.element_size() for t in weights.values()))
+        # written beside it under a name ComfyUI doesn't list, then swapped in: a full disk or a
+        # kill mid-save leaves no half-written LoRA in the loras folder
+        part = folder / f".{name}.part"
+        try:
+            sft.save_file(weights, str(part), metadata=write_metadata(self.spec.to_dict(), self.step))
+            # safetensors writes owner-only (0600); a LoRA is an output like ComfyUI's images, readable
+            # by whatever else serves or syncs the folder (Docker, a share, another user's ComfyUI)
+            os.chmod(part, 0o644)
+            os.replace(part, path)
+        finally:
+            part.unlink(missing_ok=True)
+        # resumable state (optimizer, schedule, step, RNG) goes outside the LoRA folders:
+        # those are registered with ComfyUI, which would list a .pt there as a "LoRA"
         if keep != "none":
             state.parent.mkdir(parents=True, exist_ok=True)
+            tmp_state = state.with_name(f".{state.name}.part")
             torch.save({
                 "step": self.step, "optimizer": self.optimizer.state_dict(), "scheduler": self.scheduler.state_dict(),
                 "rng": self.generator.get_state(), "batches_epoch": self.batches.epoch,
                 "train_seconds": self.train_seconds,
                 **({"live": {k: v.cpu() for k, v in live.items()}, "ema": self.ema.state_dict()} if live is not None else {}),
-            }, str(state))
+            }, str(tmp_state))
+            os.replace(tmp_state, state)
             if keep == "latest":  # resume only ever needs the newest
                 for old in state.parent.glob("*.pt"):
                     if old != state:
@@ -856,3 +866,15 @@ class Trainer:
         })
         if self.store:
             self.store.update(self.run_id, status=status, message=message, **fields)
+
+
+def _room_for(folder: Path, need: int) -> None:
+    """Stop with a clear message instead of a half-written file when the disk is nearly full:
+    room for this save twice over (the LoRA and its training state) plus a margin."""
+    import shutil
+
+    free = shutil.disk_usage(folder).free
+    if free < need * 2 + (256 << 20):
+        raise RuntimeError(f"not enough disk space to save a checkpoint in {folder}: {free / 1e9:.1f} GB free. "
+                           "Free some up (System → Storage) and resume from the last checkpoint")
+
