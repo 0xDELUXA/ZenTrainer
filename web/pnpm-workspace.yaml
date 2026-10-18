@@ -1,3 +1,7 @@
 # pnpm requires build scripts to be opted into explicitly (same as ZenKit).
 allowBuilds:
   esbuild: true
+# pnpm holds back packages published under a day ago (supply-chain policy); ZenKit's are ours,
+# published by its own CI, and a release here usually follows one there within the hour
+minimumReleaseAgeExclude:
+  - '@nynxz/*'
