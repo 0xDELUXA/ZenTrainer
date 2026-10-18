@@ -236,6 +236,15 @@ export interface DatasetInfo {
   thumbs: { subfolder: string; filename: string; path?: string }[]
 }
 
+/** what a captioning model takes in (engine captioner.model_senses) */
+export interface ModelSenses {
+  image: boolean
+  /** "clip": a whole timestamped clip (Gemma 4); "stills": a few frames spread over it */
+  video: 'clip' | 'stills'
+  audio: boolean
+  frames: number
+}
+
 export interface DatasetItem {
   path: string
   subfolder: string
@@ -736,7 +745,7 @@ export const engine = {
   bulkCaptions: (name: string, op: 'prefix' | 'suffix' | 'replace', text: string, find = '', set = 'default') =>
     call<{ changed: number }>(`${dsPath(name)}/bulk`, { method: 'POST', body: JSON.stringify({ op, text, find, set }) }),
   captionInfo: (dataset?: string) =>
-    call<{ styles: CaptionStyle[]; models: string[]; hearing?: string[]; loras?: string[]; jobs: CaptionJob[] }>(`/caption${dataset ? `?dataset=${encodeURIComponent(dataset)}` : ''}`),
+    call<{ styles: CaptionStyle[]; models: string[]; hearing?: string[]; loras?: string[]; senses?: Record<string, ModelSenses>; jobs: CaptionJob[] }>(`/caption${dataset ? `?dataset=${encodeURIComponent(dataset)}` : ''}`),
   startCaption: (name: string, body: CaptionRequest) =>
     call<{ job: CaptionJob }>(`${dsPath(name)}/caption`, { method: 'POST', body: JSON.stringify({ ...body, client_id: getClientId() }) }),
   captionJobs: () => call<{ jobs: CaptionJob[] }>('/caption?all=1').then((r) => r.jobs),

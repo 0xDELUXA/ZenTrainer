@@ -6,7 +6,7 @@ import { ZenButton, ZenCombo, ZenInput, ZenNumber } from '@nynxz/zenkit-ui'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { onComfyMessage } from '@/api/comfy'
 import { setSetting, settings } from '@/settings'
-import { EVENTS, EngineError, engine, thumbUrl, type CaptionJob, type CaptionMode, type CaptionStyle, type DatasetItem } from '@/api/engine'
+import { EVENTS, EngineError, engine, thumbUrl, type CaptionJob, type CaptionMode, type CaptionStyle, type DatasetItem, type ModelSenses } from '@/api/engine'
 
 const props = defineProps<{ dataset: string; items: DatasetItem[]; sets: string[]; selected: string[] }>()
 const emit = defineEmits<{ changed: [set: string]; review: [job: CaptionJob] }>()
@@ -15,6 +15,26 @@ const styles = ref<CaptionStyle[]>([])
 const models = ref<string[]>([])
 const hearing = ref<string[]>([]) // models that also hear a video's soundtrack (Gemma 4)
 const hasVideo = computed(() => props.items.some((it) => it.kind === 'video'))
+const senses = ref<Record<string, ModelSenses>>({})
+// each model's senses as icons, coloured for this dataset: fine, short of what it needs (warn), or not needed (dim)
+function senseIcons(name: string) {
+  const s = senses.value[name]
+  if (!s) return []
+  const vid = hasVideo.value
+  return [
+    { icon: 'mdi mdi-image-outline', tone: vid ? 'dim' : 'ok', tip: 'Sees pictures' },
+    {
+      icon: 'mdi mdi-movie-open-outline',
+      tone: !vid ? 'dim' : s.video === 'clip' ? 'ok' : 'warn',
+      tip: s.video === 'clip' ? 'Watches a video as a timestamped clip' : `Sees a video as ${s.frames} stills: motion and timing are guesses`,
+    },
+    {
+      icon: s.audio ? 'mdi mdi-music-note' : 'mdi mdi-music-note-off',
+      tone: !vid ? 'dim' : s.audio ? 'ok' : 'warn',
+      tip: s.audio ? "Hears a video's soundtrack" : "Can't hear: captions won't describe the sound",
+    },
+  ]
+}
 // LoRAs on the captioning model only (abliterated, uncensored, prompt styles): never training
 const teLoras = ref<string[]>([])
 const loras = ref<{ name: string; strength: number }[]>([])
@@ -87,6 +107,7 @@ onMounted(async () => {
   styles.value = info.styles
   models.value = info.models // loadable only, vision-language first
   hearing.value = info.hearing ?? []
+  senses.value = info.senses ?? {}
   teLoras.value = info.loras ?? []
   jobs.value = info.jobs.filter((j) => !j.preview)
   preview.value = info.jobs.find((j) => j.preview) ?? null // a try-on still running, or just done
@@ -245,12 +266,26 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
       <label class="f model"><span class="eyebrow">Model</span>
         <ZenCombo
           v-model="form.clip_name"
-          :items="models.map((n) => ({ value: n, label: hearing.includes(n) ? `${n} · hears sound` : n }))"
+          :items="models.map((n) => ({ value: n, label: n }))"
           :sorted="false"
           :item-height="30"
           placeholder="A vision-language model (Qwen-VL, Qwen3.5, Gemma 4)"
           size="sm"
-        />
+        >
+          <template #option="{ item }">
+            <span class="mopt">
+              <span class="mname">{{ item.label }}</span>
+              <span class="senses"><i v-for="s in senseIcons(String(item.value))" :key="s.icon" :class="[s.icon, s.tone]" :title="s.tip" /></span>
+            </span>
+          </template>
+          <template #selected="{ item }">
+            <span v-if="item" class="mopt">
+              <span class="mname">{{ item.label }}</span>
+              <span class="senses"><i v-for="s in senseIcons(String(item.value))" :key="s.icon" :class="[s.icon, s.tone]" :title="s.tip" /></span>
+            </span>
+            <span v-else class="muted">A vision-language model</span>
+          </template>
+        </ZenCombo>
         <button
           v-if="hasVideo && hearing.length && !hearing.includes(form.clip_name)"
           class="hear-tip"
@@ -592,6 +627,36 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
 }
 .x:hover {
   color: var(--zen-text);
+}
+.mopt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+}
+.mname {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.senses {
+  display: inline-flex;
+  gap: 4px;
+  flex: none;
+  font-size: 14px;
+}
+.senses .ok {
+  color: var(--zen-accent);
+}
+.senses .warn {
+  color: var(--zen-warn);
+}
+.senses .dim {
+  color: var(--zen-muted);
+  opacity: 0.55;
 }
 .hear-tip {
   margin-top: 4px;

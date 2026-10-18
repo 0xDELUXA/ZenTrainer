@@ -176,6 +176,19 @@ def _has_vision(path: str) -> bool:
     return _senses(path)[0]
 
 
+def model_senses() -> dict[str, dict]:
+    """What each captioning model takes in: pictures (all), video ("clip": a timestamped clip, as
+    Gemma 4 does; "stills": VIDEO_FRAMES frames) and sound."""
+    import folder_paths
+
+    out = {}
+    for n in models():
+        p = folder_paths.get_full_path("text_encoders", n)
+        _sees, hears = _senses(p) if p else (True, False)
+        out[n] = {"image": True, "video": "clip" if hears else "stills", "audio": hears, "frames": VIDEO_FRAMES}
+    return out
+
+
 def hearing_models() -> list[str]:
     """The captioning models that also hear a video's soundtrack."""
     import folder_paths

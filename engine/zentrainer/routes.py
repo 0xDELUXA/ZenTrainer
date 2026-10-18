@@ -109,6 +109,7 @@ def register(server) -> None:
             "styles": [{"id": k, "label": v[0], "prompt": v[1]} for k, v in captioner.STYLES.items()],
             "models": await asyncio.to_thread(captioner.models),
             "hearing": await asyncio.to_thread(captioner.hearing_models),
+            "senses": await asyncio.to_thread(captioner.model_senses),
             "loras": await asyncio.to_thread(captioner.te_loras),
             "jobs": captioner.recent(request.query.get("dataset") or None),
         })
