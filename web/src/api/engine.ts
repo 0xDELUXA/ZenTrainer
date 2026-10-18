@@ -938,7 +938,7 @@ export function defaultSpec(): TrainSpec {
       attention: 'pytorch',
     },
     samples: {
-      every: 0,
+      every: 250, // with each save (save_every's default): each checkpoint gets samples, and a likeness
       prompts: [],
       negative: '',
       width: 1024,

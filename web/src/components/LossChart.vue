@@ -15,13 +15,23 @@ const props = withDefaults(
     smoothing?: number
     marks?: { step: number; kind: 'ckpt' | 'sample'; done: boolean }[]
     val?: ValidationRow[]
+    /** faces extra: each sampled step's mean likeness, drawn in a strip under the plot */
+    like?: { step: number; score: number }[]
     height?: number
   }>(),
-  { smoothing: 0.9, marks: () => [], val: () => [], height: 240 },
+  { smoothing: 0.9, marks: () => [], val: () => [], like: () => [], height: 240 },
 )
 
 const W = 720
 const H = computed(() => props.height)
+
+// the likeness strip: its own 0-1 scale (higher is better, unlike loss) on the plot's step axis,
+// with 0.5, where a face starts to read as the same person, marked
+const LH = 56
+const likeLo = computed(() => Math.min(0, ...props.like.map((r) => r.score)))
+const lyy = (v: number) => 6 + (1 - (v - likeLo.value) / (1 - likeLo.value || 1)) * (LH - 12)
+const likePath = computed(() => props.like.map((r, i) => `${i ? 'L' : 'M'}${x(r.step)},${lyy(r.score)}`).join(''))
+const likeAt = (step: number) => [...props.like].reverse().find((r) => r.step <= step) ?? null
 const pad = computed(() => ({ l: 44, r: lrShown.value ? 46 : 12, t: 10, b: 24 }))
 
 const points = computed(() => props.rows.filter((r) => r.loss != null) as (MetricRow & { loss: number })[])
@@ -105,6 +115,7 @@ const fmt = (v: number) => (v === 0 || Math.abs(v) >= 0.01 ? v.toFixed(4) : v.to
       <span class="legend">
         <span class="key"><svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" class="k-ema" /></svg> Training (EMA {{ smoothing }}, raw faint)</span>
         <span v-if="val.length" class="key"><svg width="18" height="8"><line x1="0" y1="4" x2="18" y2="4" class="k-val" /><circle cx="9" cy="4" r="3" class="k-val-dot" /></svg> Validation (fixed set)</span>
+        <span v-if="like.length" class="key"><svg width="18" height="8"><line x1="0" y1="4" x2="18" y2="4" class="k-like" /><circle cx="9" cy="4" r="3" class="k-like-dot" /></svg> Likeness (strip below)</span>
         <span v-if="lrShown" class="key muted"><svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" class="k-lr" /></svg> Learning rate (right axis)</span>
         <span v-if="marks.some((m) => m.kind === 'ckpt')" class="key muted"><svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" class="k-mark" /></svg> checkpoints</span>
       </span>
@@ -154,8 +165,39 @@ const fmt = (v: number) => (v === 0 || Math.abs(v) >= 0.01 ? v.toFixed(4) : v.to
           validation <b class="mono">{{ fmt(valAt(hovered.p.step)!.val_loss) }}</b>
           <span class="muted">@{{ valAt(hovered.p.step)!.step }}</span>
         </div>
+        <div v-if="likeAt(hovered.p.step)">
+          likeness <b class="mono">{{ likeAt(hovered.p.step)!.score.toFixed(2) }}</b>
+          <span class="muted">@{{ likeAt(hovered.p.step)!.step }}</span>
+        </div>
         <div v-if="hovered.p.lr != null" class="muted">lr <span class="mono">{{ fmtLr(hovered.p.lr) }}</span></div>
       </div>
+    </div>
+    <div v-if="points.length && like.length" class="like-strip" :style="{ height: `${LH}px` }">
+      <svg :viewBox="`0 0 ${W} ${LH}`" preserveAspectRatio="none">
+        <line class="like-frame" :x1="pad.l" :x2="W - pad.r" :y1="lyy(1)" :y2="lyy(1)" />
+        <line class="like-frame" :x1="pad.l" :x2="W - pad.r" :y1="lyy(0)" :y2="lyy(0)" />
+        <line class="like-ref" :x1="pad.l" :x2="W - pad.r" :y1="lyy(0.5)" :y2="lyy(0.5)" />
+        <line
+          v-for="m in marks.filter((m) => m.kind === 'ckpt')"
+          :key="m.step"
+          class="mark"
+          :class="{ done: m.done }"
+          :x1="x(m.step)"
+          :x2="x(m.step)"
+          :y1="0"
+          :y2="LH"
+        />
+        <path v-if="like.length > 1" class="like" :d="likePath" />
+        <circle v-for="r in like" :key="r.step" class="like-dot" :cx="x(r.step)" :cy="lyy(r.score)" r="3.5">
+          <title>step {{ r.step }}: likeness {{ r.score.toFixed(2) }}</title>
+        </circle>
+      </svg>
+      <div class="y-axis">
+        <span :style="{ top: `${(lyy(1) / LH) * 100}%` }">1</span>
+        <span :style="{ top: `${(lyy(0.5) / LH) * 100}%` }" title="About here and up, a face reads as the same person">0.5</span>
+        <span :style="{ top: `${(lyy(0) / LH) * 100}%` }">0</span>
+      </div>
+      <span class="like-last mono" :style="{ top: `${(lyy(like.at(-1)!.score) / LH) * 100}%`, left: `${(x(like.at(-1)!.step) / W) * 100}%` }">{{ like.at(-1)!.score.toFixed(2) }}</span>
     </div>
     <div v-if="points.length" class="x-axis">
       <span v-for="t in xTicks" :key="t" :style="{ left: `${(x(t) / W) * 100}%` }">{{ t }}</span>
@@ -291,6 +333,49 @@ figcaption .muted {
 }
 </style>
 <style scoped>
+/* likeness strip */
+.like-strip {
+  position: relative;
+  margin-top: 6px;
+}
+.like-strip svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.like-frame {
+  stroke: color-mix(in srgb, var(--zen-text) 10%, transparent);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.like-ref {
+  stroke: color-mix(in srgb, var(--zen-text) 28%, transparent);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke;
+}
+.like,
+.k-like {
+  fill: none;
+  stroke: var(--zen-ok);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.like-dot,
+.k-like-dot {
+  fill: var(--zen-ok);
+  stroke: var(--zen-surface);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.like-last {
+  position: absolute;
+  transform: translate(8px, -50%);
+  font-size: 10px;
+  color: var(--zen-text);
+  pointer-events: none;
+}
 .legend {
   display: flex;
   flex-wrap: wrap;

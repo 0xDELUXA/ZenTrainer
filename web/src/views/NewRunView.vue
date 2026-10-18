@@ -350,6 +350,8 @@ const warnings = computed(() => {
   const w: string[] = []
   if (!spec.dataset.trigger) w.push('No trigger word: the likeness has nothing specific to attach to.')
   if (!spec.samples.prompts.length) w.push('No sample prompts: you will only see the loss curves.')
+  else if (!spec.samples.every) w.push('Samples are off (Every 0): only Sample now renders them, so checkpoints get no samples or likeness. Set Every to the save interval.')
+  else if (spec.save_every && spec.save_every % spec.samples.every) w.push(`Samples every ${spec.samples.every} don't land on the saves every ${spec.save_every}: checkpoints get no samples or likeness to compare.`)
   else if (spec.dataset.trigger && !spec.samples.prompts.map(promptText).some((p) => p.includes('[trigger]') || p.includes(spec.dataset.trigger)))
     w.push("Sample prompts don't use [trigger].")
   if (opt.value?.id === 'Prodigy' && spec.optim.learning_rate < 0.5) w.push('Prodigy sets its own step size: use LR 1.0.')
@@ -813,7 +815,7 @@ async function start(position: 'next' | 'end' = 'next') {
             </button>
           </div>
           <div class="grid-2">
-            <ZenField label="Every" stack tip="Steps between samples; 0 = only Sample now">
+            <ZenField label="Every" stack tip="Steps between samples; 0 = off (only Sample now). The save interval puts samples, and a likeness score, on every checkpoint">
               <ZenNumber v-model="spec.samples.every" :min="0" :step="50" :precision="0" />
             </ZenField>
             <ZenField label="Baseline before training" stack tip="Render once with the untouched model"><div class="sw-row"><ZenSwitch v-model="spec.samples.baseline" /><span class="sw-state">{{ spec.samples.baseline ? 'On' : 'Off' }}</span></div></ZenField>

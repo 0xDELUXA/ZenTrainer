@@ -338,6 +338,13 @@ const statGroups = computed((): { title: string; items: Stat[] }[] => {
           tip: 'Loss on a fixed set: the same pictures at the same noise, every time, so it moves only when the LoRA does (the training loss jumps with each step’s random noise). The arrow: change since before training. It’s drawn from the training pictures, so it shows learning, not overfitting: judge that by the samples',
         },
         { k: 'Loss', v: l?.loss?.toFixed(4) ?? '–', tip: 'This step’s loss. Noisy: each step picks a random picture and noise level. The chart’s smoothed line is the trend' },
+        ...(likeLast.value
+          ? [{
+              k: 'Likeness',
+              v: `${likeLast.value.score.toFixed(2)} @ ${likeLast.value.step}`,
+              tip: `How much the samples' faces look like the dataset's (mean of the step's samples): 1 is identical, about 0.5 and up reads as the same person, near 0 a stranger. ${likeFirst.value && likeFirst.value.step !== likeLast.value.step ? `It was ${likeFirst.value.score.toFixed(2)} at step ${likeFirst.value.step}.` : ''}`,
+            }]
+          : []),
       ],
     },
   ]
@@ -374,6 +381,14 @@ const setup = computed((): { k: string; v: string; title?: string }[] => {
     ...(mem.length ? [{ k: 'Memory', v: mem.join(' · ') }] : []),
   ]
 })
+// faces extra: each sampled step's mean likeness (run samples and Sample now; manual tries left out)
+const likeSteps = computed(() => {
+  const by = new Map<number, number[]>()
+  for (const r of detail.value?.likeness ?? []) if (!r.manual && r.score != null) by.set(r.step, [...(by.get(r.step) ?? []), r.score])
+  return [...by].sort((a, b) => a[0] - b[0]).map(([step, xs]) => ({ step, score: xs.reduce((a, b) => a + b, 0) / xs.length }))
+})
+const likeLast = computed(() => likeSteps.value.at(-1) ?? null)
+const likeFirst = computed(() => likeSteps.value[0] ?? null)
 // validation loss at a checkpoint: the latest evaluation at or before its step
 const ckptVal = (stepAt: number) => {
   let v: number | undefined
@@ -675,7 +690,7 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
       <div class="layout">
         <div class="main">
           <section class="card">
-            <LossChart :rows="detail.metrics" :total="total" :marks="marks" :val="detail.validation" :height="200" />
+            <LossChart :rows="detail.metrics" :total="total" :marks="marks" :val="detail.validation" :like="likeSteps" :height="200" />
           </section>
           <section v-if="promptCount" ref="samplesCard" class="card">
             <!-- fixed header: image size (both views), the view switch and Sample now -->
