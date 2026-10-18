@@ -7,7 +7,7 @@ import { engine, type DatasetStats } from '@/api/engine'
 import { ZenTip } from '@nynxz/zenkit-ui'
 import HealthPentagon from './HealthPentagon.vue'
 
-const props = withDefaults(defineProps<{ name: string; set?: string }>(), { set: 'default' })
+const props = withDefaults(defineProps<{ name: string; set?: string; compact?: boolean }>(), { set: 'default', compact: false })
 const emit = defineEmits<{ loaded: [stats: DatasetStats] }>()
 const stats = ref<DatasetStats | null>(null)
 const busy = ref(false)
@@ -130,7 +130,25 @@ function spark(key: string) {
 </script>
 
 <template>
-  <section class="dstats card">
+  <!-- the side panel's version: the pentagon, then a row per measure -->
+  <section v-if="compact" class="dstats-compact">
+    <HealthPentagon v-if="stats" :scores="scores" :size="170" labels class="c-pent" />
+    <div v-else class="c-empty muted small">{{ busy ? 'Measuring…' : error || 'No stats yet' }}</div>
+    <div v-for="t in tiles" :key="t.key" class="c-row">
+      <span class="c-label">{{ t.label }} <ZenTip :text="`${t.sub}. ${t.tip}`" :label="`About ${t.label}`" /></span>
+      <span class="c-value">{{ t.value }}</span>
+      <span class="c-score mono">
+        <template v-if="scores[t.key] != null">{{ Math.round(scores[t.key]! * 100) }}</template>
+        <i v-if="delta(t.key) != null && Math.round(delta(t.key)! * 100) !== 0" :class="delta(t.key)! > 0 ? 'mdi mdi-arrow-up' : 'mdi mdi-arrow-down'" :title="`${Math.round(delta(t.key)! * 100)} since the last snapshot`" />
+      </span>
+    </div>
+    <div class="c-foot muted small">
+      {{ stats ? `${stats.history.length} snapshot${stats.history.length === 1 ? '' : 's'}` : '' }}
+      <button class="link" :disabled="busy" @click="load">{{ busy ? 'measuring…' : 'measure again' }}</button>
+    </div>
+  </section>
+
+  <section v-else class="dstats card">
     <div class="pent-col">
       <HealthPentagon v-if="stats" :scores="scores" :size="190" labels class="big-pent" />
       <div v-else class="pent-empty muted small">{{ busy ? 'Measuring…' : error || 'No stats yet' }}</div>
@@ -165,6 +183,53 @@ function spark(key: string) {
 </template>
 
 <style scoped>
+.dstats-compact {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.c-pent {
+  margin: 14px auto 10px;
+}
+.c-empty {
+  height: 170px;
+  display: grid;
+  place-items: center;
+}
+.c-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 44px;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 2px;
+  border-top: 1px solid color-mix(in srgb, var(--zen-border) 50%, transparent);
+  font-size: 12px;
+}
+.c-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--zen-muted);
+}
+.c-value {
+  color: var(--zen-text);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.c-score {
+  text-align: right;
+  color: var(--zen-text);
+  white-space: nowrap;
+}
+.c-score i {
+  font-size: 12px;
+  margin-left: 2px;
+}
+.c-foot {
+  margin-top: 6px;
+  display: flex;
+  justify-content: space-between;
+}
 .dstats {
   display: grid;
   grid-template-columns: 280px 1fr;

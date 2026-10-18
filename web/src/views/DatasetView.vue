@@ -2,7 +2,7 @@
 // One dataset. Grid (uniform cards, zoomable) or table (sortable, inline captions);
 // click any image for the lightbox with a caption editor beside it. Drop files anywhere
 // to upload: images, same-name .txt captions, and masks (<name>-masklabel.png).
-import { ZenButton, ZenCompare, ZenContextMenu, ZenEmpty, ZenInput, ZenLightbox, ZenSlider } from '@nynxz/zenkit-ui'
+import { ZenButton, ZenCombo, ZenCompare, ZenContextMenu, ZenEmpty, ZenInput, ZenLightbox, ZenSlider, ZenSwitch } from '@nynxz/zenkit-ui'
 import type { ContextMenuItem, LightboxItem } from '@nynxz/zenkit-ui'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -29,10 +29,10 @@ const view = ref<'grid' | 'list' | 'pairs'>(saved.view ?? 'grid')
 const zoom = ref<number>(saved.zoom ?? 200)
 const fit = ref<'cover' | 'contain'>(saved.fit ?? 'cover')
 const showMasks = ref<boolean>(saved.masks ?? false) // dim what each mask leaves out, on the grid
-const showStats = ref<boolean>(saved.stats ?? false) // the health panel above the pictures
-watch([view, zoom, fit, showMasks, showStats], () => {
+const sideOpen = ref<boolean>(saved.side ?? true) // the side panel: health, faces, auto-caption, bulk edit, display
+watch([view, zoom, fit, showMasks, sideOpen], () => {
   try {
-    localStorage.setItem(PREFS, JSON.stringify({ view: view.value, zoom: zoom.value, fit: fit.value, masks: showMasks.value, stats: showStats.value }))
+    localStorage.setItem(PREFS, JSON.stringify({ view: view.value, zoom: zoom.value, fit: fit.value, masks: showMasks.value, side: sideOpen.value }))
   } catch {
     // storage blocked
   }
@@ -53,6 +53,25 @@ function addSet() {
   if (!sets.value.includes(name)) sets.value = [...sets.value, name]
   activeSet.value = name
 }
+// the toolbar's caption set and filter menus: every entry always there, so nothing shifts
+const setItems = computed(() => [
+  ...sets.value.map((st) => ({ value: st, label: `${st} · ${items.value.filter((i) => i.captions?.[st]).length}/${items.value.length}` })),
+  { value: '__add__', label: '+ New caption set…' },
+])
+function pickSet(v: string) {
+  if (v === '__add__') addSet()
+  else activeSet.value = v
+}
+const filterItems = computed(() => [
+  { value: 'all', label: `All · ${items.value.length}` },
+  { value: 'uncaptioned', label: `Uncaptioned · ${counts.value.uncaptioned}` },
+  { value: 'masked', label: `Masked · ${counts.value.masked}` },
+  { value: 'unmasked', label: 'Unmasked' },
+  { value: 'muted', label: `Muted in “${activeSet.value}” · ${counts.value.muted}` },
+  { value: 'images', label: `Image issues · ${counts.value.imageIssues}` },
+  { value: 'faces', label: `Face issues · ${faces.value?.items ? counts.value.faceIssues : '–'}` },
+  ...(counts.value.pairs ? [{ value: 'pairs', label: `Edit pairs · ${counts.value.pairs}` }] : []),
+])
 const loading = ref(true)
 const error = ref<string | null>(null)
 const notice = ref<string | null>(null)
@@ -406,6 +425,7 @@ const lbItems = computed<LightboxItem[]>(() =>
     label: it.path,
     meta: it.width ? `${it.width}×${it.height} · ${kb(it.bytes)}` : kb(it.bytes),
     overlay: it.mask ? thumb({ path: it.mask } as DatasetItem, 1024) : undefined,
+    overlayMode: 'mask' as const, // the picture dims; what the mask trains shows at full strength
     kind: it.kind === 'video' ? ('video' as const) : undefined,
   })),
 )
@@ -418,133 +438,57 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
 </script>
 
 <template>
-  <div class="page wide">
-    <div class="page-head">
-      <div class="titles">
-        <RouterLink to="/datasets" class="crumb">Datasets</RouterLink>
-        <h1>{{ name }}</h1>
-        <p class="lede">
-          {{ items.length - counts.videos }} image{{ items.length - counts.videos === 1 ? '' : 's' }}<template v-if="counts.videos"> · {{ counts.videos }} video{{ counts.videos === 1 ? '' : 's' }}</template>
-          <template v-if="counts.uncaptioned"> · <span class="warn">{{ counts.uncaptioned }} uncaptioned</span></template>
-          <template v-if="counts.masked"> · {{ counts.masked }} masked</template>
-          <template v-if="counts.mismatched"> · <span class="warn" title="A mask with a different shape from its image is stretched over it and won't line up">{{ counts.mismatched }} mask{{ counts.mismatched === 1 ? '' : 's' }} don't fit</span></template>
-        </p>
-      </div>
-      <ZenButton icon="mdi mdi-upload" :disabled="uploading" @click="fileInput?.click()">Add files</ZenButton>
-      <ZenButton variant="primary" icon="mdi mdi-play" @click="router.push({ path: '/runs/new', query: { dataset: name } })"
-        >Train on this</ZenButton
-      >
+  <div class="page wide ds-page">
+    <header class="ds-head">
+      <RouterLink to="/datasets" class="crumb">Datasets</RouterLink>
+      <h1>{{ name }}</h1>
+      <span class="lede">
+        {{ items.length - counts.videos }} image{{ items.length - counts.videos === 1 ? '' : 's' }}<template v-if="counts.videos"> · {{ counts.videos }} video{{ counts.videos === 1 ? '' : 's' }}</template>
+        <template v-if="counts.uncaptioned"> · <span class="warn">{{ counts.uncaptioned }} uncaptioned</span></template>
+        <template v-if="counts.mismatched"> · <span class="warn" title="A mask with a different shape from its image is stretched over it and won't line up">{{ counts.mismatched }} mask{{ counts.mismatched === 1 ? '' : 's' }} don't fit</span></template>
+      </span>
+      <span class="spacer" />
+      <ZenButton size="sm" icon="mdi mdi-upload" :disabled="uploading" @click="fileInput?.click()">Add files</ZenButton>
+      <ZenButton size="sm" variant="primary" icon="mdi mdi-play" @click="router.push({ path: '/runs/new', query: { dataset: name } })">Train on this</ZenButton>
       <input ref="fileInput" type="file" multiple accept="image/*,video/*,.txt" hidden @change="upload([...(($event.target as HTMLInputElement).files ?? [])])" />
-    </div>
+    </header>
 
     <div v-if="error" class="card err mono">{{ error }}</div>
 
-    <!-- with a selection the same bar swaps to selection actions: same place, same height -->
-    <div class="toolbar card" :class="{ selecting: selected.size }">
-      <template v-if="selected.size">
-        <button class="chip-btn" :title="allShownSelected ? 'Deselect the shown images' : 'Select every shown image'" @click="toggleAll">
-          <i :class="allShownSelected ? 'mdi mdi-checkbox-marked' : 'mdi mdi-checkbox-multiple-blank-outline'" /> {{ allShownSelected ? 'Deselect shown' : 'Select shown' }}
-        </button>
-        <b class="sel-count">{{ selected.size }} selected</b>
-        <span class="spacer" />
-        <button class="chip-btn" :title="`Keep them, but don't train on them in the “${activeSet}” caption set`" @click="setMuted([...selected], true)">
-          <i class="mdi mdi-eye-off-outline" /> Mute
-        </button>
-        <button class="chip-btn" :title="`Train on them again in the “${activeSet}” caption set`" @click="setMuted([...selected], false)">
-          <i class="mdi mdi-eye-outline" /> Unmute
-        </button>
-        <button class="chip-btn danger" title="Delete the selected images with their captions and masks (asks first)" @click="removeMany([...selected])">
-          <i class="mdi mdi-trash-can-outline" /> Delete
-        </button>
-        <button class="chip-btn" title="Clear the selection (Esc)" @click="selected.clear()"><i class="mdi mdi-close" /> Done</button>
-      </template>
-      <template v-else>
+    <!-- one fixed-height row: nothing in it appears, disappears or wraps -->
+    <div class="ds-toolbar card">
       <div class="seg" role="tablist" aria-label="View">
         <button :class="{ on: layout === 'grid' }" title="Grid" @click="view = 'grid'"><i class="mdi mdi-view-grid-outline" /></button>
         <button :class="{ on: layout === 'list' }" title="Table" @click="view = 'list'"><i class="mdi mdi-view-list-outline" /></button>
-        <button v-if="counts.pairs" :class="{ on: layout === 'pairs' }" title="Edit pairs: inputs → result, with the instruction" @click="view = 'pairs'"><i class="mdi mdi-swap-horizontal" /></button>
+        <button :class="{ on: layout === 'pairs' }" :disabled="!counts.pairs" :title="counts.pairs ? 'Edit pairs: inputs → result, with the instruction' : 'Edit pairs: none in this dataset (a <name>_control picture beside an image makes one)'" @click="view = 'pairs'"><i class="mdi mdi-swap-horizontal" /></button>
       </div>
-      <template v-if="layout === 'grid' || layout === 'pairs'">
-        <label class="zoom" title="Card size">
-          <i class="mdi mdi-image-size-select-small" />
-          <ZenSlider v-model="zoom" :min="120" :max="420" :step="10" />
-          <i class="mdi mdi-image-size-select-large" />
-        </label>
-        <button class="chip-btn" :title="fit === 'cover' ? 'Showing crops; click to show whole images' : 'Showing whole images; click to crop'" @click="fit = fit === 'cover' ? 'contain' : 'cover'">
-          <i :class="fit === 'cover' ? 'mdi mdi-crop' : 'mdi mdi-fit-to-screen-outline'" /> {{ fit === 'cover' ? 'Crop' : 'Fit' }}
-        </button>
-        <button v-if="counts.masked" class="chip-btn" :class="{ on: showMasks }" title="Dim what each mask leaves out: the bright part trains at full weight" @click="showMasks = !showMasks">
-          <i class="mdi mdi-layers-outline" /> Masks
-        </button>
-      </template>
-      <div class="seg">
-        <button :class="{ on: filter === 'all' }" @click="filter = 'all'">All</button>
-        <button :class="{ on: filter === 'uncaptioned' }" @click="filter = 'uncaptioned'">Uncaptioned {{ counts.uncaptioned }}</button>
-        <button :class="{ on: filter === 'masked' }" @click="filter = 'masked'">Masked {{ counts.masked }}</button>
-        <button :class="{ on: filter === 'unmasked' }" @click="filter = 'unmasked'">Unmasked</button>
-        <button v-if="counts.pairs" :class="{ on: filter === 'pairs' }" title="Edit pairs: images with a <name>_control input picture" @click="filter = 'pairs'">Pairs {{ counts.pairs }}</button>
-        <button v-if="counts.muted" :class="{ on: filter === 'muted' }" :title="`Kept, but not trained on in the “${activeSet}” caption set`" @click="filter = 'muted'">Muted {{ counts.muted }}</button>
-        <button v-if="counts.imageIssues" :class="{ on: filter === 'images' }" title="Pictures the stats flagged: dark, blown out, flat, blurry, letterbox bars, greyscale, small, near-duplicate, similar to another" @click="filter = 'images'">Image issues {{ counts.imageIssues }}</button>
-        <button v-if="faces?.items" :class="{ on: filter === 'faces' }" title="Pictures whose face needs a look: none found, several people, or not like the others" @click="filter = 'faces'">Face issues {{ counts.faceIssues }}</button>
+      <label class="zoom" title="Card size" :class="{ off: layout === 'list' }">
+        <i class="mdi mdi-image-size-select-small" />
+        <ZenSlider v-model="zoom" :min="120" :max="420" :step="10" :disabled="layout === 'list'" />
+      </label>
+      <div class="tb-field" title="Caption set: the captions shown and edited, and which pictures are muted">
+        <i class="mdi mdi-text-box-multiple-outline" />
+        <ZenCombo :model-value="activeSet" :items="setItems" :sorted="false" :searchable="false" size="sm" @update:model-value="pickSet(String($event))" />
+      </div>
+      <div class="tb-field" title="Show only some of the pictures">
+        <i class="mdi mdi-filter-variant" />
+        <ZenCombo v-model="filter" :items="filterItems" :sorted="false" :searchable="false" size="sm" />
       </div>
       <div class="search"><ZenInput v-model="query" placeholder="Search captions or names" size="sm" /></div>
-      <span class="spacer" />
-      <button class="chip-btn" :class="{ on: showStats }" title="The dataset's health: captions, consistency, resolution, near-duplicates, faces; and how each changed over time" @click="showStats = !showStats">
-        <i class="mdi mdi-chart-box-outline" /> Stats
+      <button class="icon-btn" :class="{ on: sideOpen }" :title="sideOpen ? 'Hide the side panel' : 'Show the side panel: health, faces, auto-caption, bulk edit, display'" @click="sideOpen = !sideOpen">
+        <i class="mdi mdi-dock-right" />
       </button>
-      <button
-        class="chip-btn"
-        :class="{ on: facesSetting }"
-        :disabled="facesBusy"
-        :title="faces && !faces.available ? faces.hint : facesSetting ? `Faces on for this dataset: ${faces?.with_face ?? '…'} of ${faces?.total ?? '…'} have a face (${faces?.pack ?? 'buffalo_l'}); in the stats and runs' likeness. Click to turn off` : 'Turn faces on for this dataset: every picture\'s face checked on open, a Faces score in the stats, and likeness for its runs (faces extra, CPU)'"
-        @click="toggleFaces"
-      >
-        <i :class="facesBusy ? 'mdi mdi-loading mdi-spin' : facesSetting ? 'mdi mdi-face-recognition' : 'mdi mdi-face-man-outline'" />
-        {{ facesBusy ? 'Checking faces…' : facesSetting && faces?.items ? `Faces ${faces.with_face}/${faces.total}${faces.one_identity === false ? ' · mixed people' : ''}` : facesSetting ? 'Faces on' : 'Faces off' }}
-      </button>
-      <button class="chip-btn" :class="{ on: capOpen }" @click="capOpen = !capOpen"><i class="mdi mdi-creation-outline" /> Auto-caption</button>
-      <button class="chip-btn" :class="{ on: bulkOpen }" @click="bulkOpen = !bulkOpen"><i class="mdi mdi-text-box-edit-outline" /> Bulk</button>
-      </template>
     </div>
 
-    <div class="sets">
-      <span class="eyebrow">Caption set</span>
-      <button v-for="st in sets" :key="st" class="set-tab" :class="{ on: activeSet === st }" @click="activeSet = st">
-        {{ st }}
-        <span class="muted small">{{ items.filter((i) => i.captions?.[st]).length }}/{{ items.length }}</span>
-      </button>
-      <button class="set-tab add" title="Add a caption set" @click="addSet"><i class="mdi mdi-plus" /></button>
-    </div>
-
-    <CaptionPanel v-if="capOpen" :dataset="name" :items="items" :sets="sets" :selected="[...selected]" @changed="onCaptioned" @review="review" />
-
+    <div class="ds-body" :class="{ 'with-side': sideOpen }">
+      <main class="ds-main">
     <div v-if="reviewing" class="reviewing">
       <i class="mdi mdi-filter-outline" />
       <span class="small">Showing the {{ reviewing.paths.size }} image{{ reviewing.paths.size === 1 ? '' : 's' }} a caption job wrote into <b>“{{ reviewing.job.set_name }}”</b></span>
       <button class="chip-btn" @click="reviewing = null"><i class="mdi mdi-close" /> Show all</button>
     </div>
 
-    <div v-if="bulkOpen" class="bulk card">
-      <span class="muted small">On the “{{ activeSet }}” set:</span>
-      <ZenInput v-model="findText" placeholder="find (for replace)" size="sm" />
-      <ZenInput v-model="bulkText" placeholder="trigger word / text" size="sm" />
-      <ZenButton size="sm" title="Put the text at the start of every caption" @click="bulk('prefix')">Prefix all</ZenButton>
-      <ZenButton size="sm" title="Append the text to every caption" @click="bulk('suffix')">Suffix all</ZenButton>
-      <ZenButton size="sm" :disabled="!findText" title="Replace 'find' with the text everywhere" @click="bulk('replace')">Replace</ZenButton>
-    </div>
-
-
     <div v-if="notice" class="notice">{{ notice }}</div>
-
-    <DatasetStats
-      v-if="showStats && items.length"
-      :key="`${name}:${activeSet}`"
-      ref="statsPanel"
-      :name="name"
-      :set="activeSet"
-      class="stats-panel"
-      @loaded="(s) => (imageFlags = s.current.flags ?? {})"
-    />
 
     <ZenEmpty v-if="!loading && !items.length" title="Empty dataset" icon="mdi mdi-image-plus-outline">
       Drop images, videos, same-name .txt captions and masks (<span class="mono">name-masklabel.png</span>) anywhere on this page.
@@ -560,8 +504,16 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
         @contextmenu="onItemMenu(it, i, $event)"
       >
         <button class="thumb" :title="it.path" :data-peek="full(it)" @click="onItemClick(it, i, $event)">
-          <img :src="thumb(it, thumbSize)" loading="lazy" :alt="cap(it)" :style="{ objectFit: fit }" />
-          <img v-if="showMasks && it.mask" :src="thumb({ path: it.mask }, thumbSize)" loading="lazy" alt="" class="mask-ov" :style="{ objectFit: fit }" />
+          <img :src="thumb(it, thumbSize)" loading="lazy" :alt="cap(it)" :class="{ 'mask-dim': showMasks && it.mask }" :style="{ objectFit: fit }" />
+          <!-- the mask view: the picture dims, and only what the mask trains shows at full strength -->
+          <img
+            v-if="showMasks && it.mask"
+            :src="thumb(it, thumbSize)"
+            loading="lazy"
+            alt=""
+            class="mask-lit"
+            :style="{ objectFit: fit, maskImage: `url(${thumb({ path: it.mask }, thumbSize)})`, WebkitMaskImage: `url(${thumb({ path: it.mask }, thumbSize)})`, maskSize: fit, WebkitMaskSize: fit }"
+          />
           <!-- an edit pair: its input picture in the corner (the big one is the target) -->
           <img v-if="it.controls?.length" :src="thumb({ path: it.controls[0]! }, 256)" loading="lazy" alt="" class="control-inset" :title="`Input: ${it.controls.join(', ')}`" />
           <span class="badges">
@@ -688,6 +640,86 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
         </span>
       </div>
     </div>
+
+      </main>
+
+      <aside v-if="sideOpen" class="ds-side">
+        <section class="side-sec">
+          <header class="side-head"><span>Health</span><span class="muted small">“{{ activeSet }}”</span></header>
+          <DatasetStats
+            v-if="items.length"
+            :key="`${name}:${activeSet}`"
+            ref="statsPanel"
+            :name="name"
+            :set="activeSet"
+            compact
+            @loaded="(s) => (imageFlags = s.current.flags ?? {})"
+          />
+        </section>
+        <section class="side-sec">
+          <header class="side-head">
+            <span>Faces</span>
+            <ZenSwitch :model-value="facesSetting" :disabled="facesBusy" @update:model-value="toggleFaces" />
+          </header>
+          <p class="side-note">
+            <template v-if="faces && !faces.available">{{ faces.hint }}</template>
+            <template v-else-if="facesBusy">Checking faces…</template>
+            <template v-else-if="facesSetting && faces?.items">
+              {{ faces.with_face }}/{{ faces.total }} with a face{{ faces.one_identity === false ? ' · mixed people' : ` · alike ${faces.identity?.toFixed(2) ?? '–'}` }}{{ counts.faceIssues ? ` · ${counts.faceIssues} to look at` : '' }}
+            </template>
+            <template v-else>Off. On: faces checked on open, a Faces score, and likeness for this dataset's runs.</template>
+          </p>
+        </section>
+        <section class="side-sec">
+          <header class="side-head clickable" @click="capOpen = !capOpen">
+            <span>Auto-caption</span><i :class="capOpen ? 'mdi mdi-chevron-up' : 'mdi mdi-chevron-down'" />
+          </header>
+          <CaptionPanel v-if="capOpen" :dataset="name" :items="items" :sets="sets" :selected="[...selected]" class="side-caption" @changed="onCaptioned" @review="review" />
+        </section>
+        <section class="side-sec">
+          <header class="side-head clickable" @click="bulkOpen = !bulkOpen">
+            <span>Bulk edit</span><i :class="bulkOpen ? 'mdi mdi-chevron-up' : 'mdi mdi-chevron-down'" />
+          </header>
+          <div v-if="bulkOpen" class="side-bulk">
+            <span class="muted small">Every caption in “{{ activeSet }}”:</span>
+            <ZenInput v-model="bulkText" placeholder="trigger word / text" size="sm" />
+            <div class="side-row">
+              <ZenButton size="sm" title="Put the text at the start of every caption" @click="bulk('prefix')">Prefix</ZenButton>
+              <ZenButton size="sm" title="Append the text to every caption" @click="bulk('suffix')">Suffix</ZenButton>
+            </div>
+            <ZenInput v-model="findText" placeholder="find (to replace with the text)" size="sm" />
+            <ZenButton size="sm" :disabled="!findText" title="Replace 'find' with the text everywhere" @click="bulk('replace')">Replace</ZenButton>
+          </div>
+        </section>
+        <section class="side-sec">
+          <header class="side-head"><span>Display</span></header>
+          <div class="side-row">
+            <span class="small">Crop to the card</span><span class="spacer" />
+            <ZenSwitch :model-value="fit === 'cover'" @update:model-value="fit = $event ? 'cover' : 'contain'" />
+          </div>
+          <div class="side-row" :title="counts.masked ? 'Shows what each mask trains: the rest dims' : 'No masks in this dataset'">
+            <span class="small">Show masks</span><span class="spacer" />
+            <ZenSwitch :model-value="showMasks" :disabled="!counts.masked" @update:model-value="showMasks = $event" />
+          </div>
+        </section>
+      </aside>
+    </div>
+
+    <!-- selecting doesn't move anything: the actions float over the bottom of the page -->
+    <Transition name="selbar">
+      <div v-if="selected.size" class="sel-bar">
+        <b>{{ selected.size }} selected</b>
+        <button class="chip-btn" :title="allShownSelected ? 'Deselect the shown images' : 'Select every shown image'" @click="toggleAll">
+          <i :class="allShownSelected ? 'mdi mdi-checkbox-marked' : 'mdi mdi-checkbox-multiple-blank-outline'" /> {{ allShownSelected ? 'Deselect shown' : 'Select shown' }}
+        </button>
+        <span class="sel-sep" />
+        <button class="chip-btn" :title="`Keep them, but don't train on them in “${activeSet}”`" @click="setMuted([...selected], true)"><i class="mdi mdi-eye-off-outline" /> Mute</button>
+        <button class="chip-btn" :title="`Train on them again in “${activeSet}”`" @click="setMuted([...selected], false)"><i class="mdi mdi-eye-outline" /> Unmute</button>
+        <button class="chip-btn danger" title="Delete the selected images with their captions and masks (asks first)" @click="removeMany([...selected])"><i class="mdi mdi-trash-can-outline" /> Delete</button>
+        <span class="sel-sep" />
+        <button class="chip-btn" title="Clear the selection (Esc)" @click="selected.clear()"><i class="mdi mdi-close" /></button>
+      </div>
+    </Transition>
 
     <ZenContextMenu ref="menu" :items="menuItems" />
 
@@ -1449,5 +1481,208 @@ dd {
   .c-cap {
     grid-column: 2 / -1;
   }
+}
+
+/* ---- page layout: a slim header, one fixed toolbar, the pictures and a side panel ---- */
+.ds-page {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ds-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+}
+.ds-head .crumb {
+  color: var(--zen-muted);
+  font-size: 14px;
+}
+.crumb-sep {
+  color: var(--zen-muted);
+  font-size: 14px;
+}
+.ds-head h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+.ds-head .lede {
+  margin: 0 0 0 6px;
+  font-size: 13px;
+  color: var(--zen-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ds-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 46px;
+  padding: 0 8px;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+.ds-toolbar .zoom {
+  width: 150px;
+  flex: none;
+}
+.ds-toolbar .zoom.off {
+  opacity: 0.35;
+}
+.tb-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  width: 190px;
+  color: var(--zen-muted);
+}
+.tb-field :deep(.zen-combo) {
+  flex: 1;
+  min-width: 0;
+}
+.ds-toolbar .search {
+  flex: 1;
+  min-width: 120px;
+}
+.icon-btn {
+  flex: none;
+  width: 32px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--zen-muted);
+  font-size: 18px;
+  cursor: pointer;
+}
+.icon-btn:hover {
+  color: var(--zen-text);
+  background: var(--zen-surface-2);
+}
+.icon-btn.on {
+  color: var(--zen-accent);
+}
+.ds-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.ds-body.with-side {
+  grid-template-columns: minmax(0, 1fr) 320px;
+}
+@media (max-width: 1100px) {
+  .ds-body.with-side {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.ds-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ds-side {
+  position: sticky;
+  top: 58px;
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.side-sec {
+  padding: 10px 12px;
+  border: 1px solid var(--zen-border);
+  border-radius: var(--r-lg, 12px);
+  background: var(--zen-surface);
+}
+.side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.side-head.clickable {
+  cursor: pointer;
+}
+.side-head.clickable i {
+  color: var(--zen-muted);
+}
+.side-note {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--zen-muted);
+}
+.side-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.side-bulk {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.side-caption {
+  margin-top: 8px;
+  border: none !important;
+  padding: 0 !important;
+  background: none !important;
+}
+/* the selection's actions float over the page bottom: selecting moves nothing */
+.sel-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--zen-border);
+  background: var(--zen-surface);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  font-size: 13px;
+}
+.sel-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--zen-border);
+}
+.selbar-enter-active,
+.selbar-leave-active {
+  transition: opacity var(--zen-dur-fast), transform var(--zen-dur-fast);
+}
+.selbar-enter-from,
+.selbar-leave-to {
+  opacity: 0;
+  transform: translate(-50%, 8px);
+}
+/* the mask view */
+.thumb img.mask-dim {
+  filter: grayscale(0.85) brightness(0.32);
+}
+.thumb img.mask-lit {
+  mask-mode: luminance;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  pointer-events: none;
 }
 </style>
