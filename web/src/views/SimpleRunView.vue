@@ -2,10 +2,10 @@
 // Simple mode's view of a run: what it's doing in plain words, a big progress bar with the time
 // left, and the samples as they come (before, then each one after). No loss chart, no knobs;
 // the full run page is one click away.
-import { ZenButton } from '@nynxz/zenkit-ui'
+import { ZenButton, ZenLightbox, type LightboxItem } from '@nynxz/zenkit-ui'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { onComfyMessage } from '@/api/comfy'
-import { ACTIVE, EVENTS, engine, type RunDetail, type SampleRow } from '@/api/engine'
+import { ACTIVE, EVENTS, engine, promptText, type CheckpointRow, type RunDetail, type SampleRow } from '@/api/engine'
 import { eta } from '@/recipes'
 
 const props = defineProps<{ id: string }>()
@@ -29,6 +29,7 @@ onMounted(() => {
     if (!d.value || m.data.run_id !== props.id) return
     if (m.type === EVENTS.metrics) d.value.metrics.push(m.data as never)
     else if (m.type === EVENTS.sample) d.value.samples.push(m.data as unknown as SampleRow)
+    else if (m.type === EVENTS.checkpoint) d.value.checkpoints.push(m.data as unknown as CheckpointRow)
     else if (m.type === EVENTS.status) {
       d.value.run.status = m.data.status as never
       d.value.run.message = (m.data.message as string) ?? undefined
@@ -82,7 +83,45 @@ const strip = computed(() => (d.value?.samples ?? []).filter((x) => x.index === 
 const pick = ref<number | null>(null)
 const big = computed(() => (pick.value != null ? strip.value[pick.value] : strip.value.at(-1)) ?? null)
 const finalLora = computed(() => [...(d.value?.checkpoints ?? [])].reverse().find((c) => c.final)?.lora_name ?? null)
-const tryLink = computed(() => (finalLora.value ? `/apps/text-to-image?run=${props.id}&lora=${encodeURIComponent(finalLora.value)}` : null))
+const tryLink = computed(() => (finalLora.value ? tryFor(finalLora.value) : null))
+const tryFor = (lora: string) => `/apps/text-to-image?run=${props.id}&lora=${encodeURIComponent(lora)}`
+
+// ---- every saved checkpoint with its samples: pick the one that looks best ------------------
+// rows newest first, one column per sample prompt (the same prompt lines up down the page)
+const prompts = computed(() => (d.value?.spec.samples.prompts ?? []).map(promptText))
+const cols = computed(() => Math.max(1, prompts.value.length))
+const rows = computed(() => {
+  const r = d.value
+  if (!r) return []
+  const steps = [...new Set(r.samples.map((x) => x.step))].sort((a, b) => a - b)
+  const at = (step: number) => {
+    // the samples taken at this checkpoint, or the latest ones before it
+    const s = [...steps].reverse().find((x) => x <= step)
+    return Array.from({ length: cols.value }, (_, i) => r.samples.find((x) => x.step === s && x.index === i) ?? null)
+  }
+  const ck = [...r.checkpoints].sort((a, b) => b.step - a.step)
+  const out = ck.map((c, n) => ({ key: `c${c.step}`, label: c.final ? 'Final' : `Step ${c.step}`, step: c.step, ckpt: c as CheckpointRow | null, recommended: n === 0, samples: at(c.step) }))
+  if (steps[0] === 0) out.push({ key: 'base', label: 'Before training', step: 0, ckpt: null, recommended: false, samples: at(0) })
+  return out
+})
+const download = (c: CheckpointRow) => {
+  const m = c.path.replace(/\\/g, '/').match(/\/output\/(.+)\/([^/]+)$/)
+  return m ? `/view?${new URLSearchParams({ filename: m[2]!, subfolder: m[1]!, type: 'output' })}` : null
+}
+const mb = (b?: number | null) => (b ? `${(b / 1e6).toFixed(0)} MB` : '')
+
+// full screen: ←/→ across prompts, ↑/↓ the same prompt at other checkpoints
+const lb = ref<number | null>(null)
+const lbItems = computed<LightboxItem[]>(() =>
+  rows.value.flatMap((r) =>
+    r.samples.map((x, i) =>
+      x
+        ? { src: viewUrl(x), kind: isVideo(x) ? ('video' as const) : ('image' as const), label: `${r.label} · ${i + 1}`, meta: x.prompt }
+        : { src: '', label: `${r.label} · ${i + 1}`, meta: 'no sample' },
+    ),
+  ),
+)
+const open = (row: number, col: number) => (lb.value = row * cols.value + col)
 </script>
 
 <template>
@@ -109,7 +148,39 @@ const tryLink = computed(() => (finalLora.value ? `/apps/text-to-image?run=${pro
       </div>
     </div>
 
-    <section v-if="d" class="card previews">
+    <section v-if="d && rows.length > 1" class="card picks">
+      <div class="picks-head">
+        <div class="eyebrow">Checkpoints</div>
+        <span class="muted small">{{ ACTIVE.includes(d.run.status) ? 'New ones appear as it trains.' : 'Compare them and keep the one you like.' }}</span>
+      </div>
+      <div class="ptable" :style="{ '--cols': cols }">
+        <div class="phead">
+          <span />
+          <span v-for="(p, i) in prompts" :key="i" class="pp ellipsis" :title="p">{{ i + 1 }}. {{ p }}</span>
+        </div>
+        <div v-for="(r, ri) in rows" :key="r.key" class="prow" :class="{ rec: r.recommended }">
+          <div class="pinfo">
+            <b>{{ r.label }}</b>
+            <span v-if="r.recommended" class="rec-tag small">Recommended</span>
+            <div v-if="r.ckpt" class="pacts">
+              <a v-if="download(r.ckpt)" :href="download(r.ckpt)!" :download="r.ckpt.lora_name.split('/').pop()" class="mini" title="Download this LoRA"><i class="mdi mdi-download" /> {{ mb(r.ckpt.size) }}</a>
+              <RouterLink :to="tryFor(r.ckpt.lora_name)" class="mini" title="Generate with this checkpoint"><i class="mdi mdi-creation-outline" /> Try</RouterLink>
+              <RouterLink :to="`/runs/new?from=${id}&init=${encodeURIComponent(r.ckpt.lora_name)}`" class="mini" title="A new run that continues from this checkpoint"><i class="mdi mdi-plus" /> Train more</RouterLink>
+            </div>
+          </div>
+          <button v-for="(x, ci) in r.samples" :key="ci" class="pcell" :disabled="!x" @click="open(ri, ci)">
+            <template v-if="x">
+              <video v-if="isVideo(x)" :src="viewUrl(x)" muted loop playsinline preload="metadata" @mouseenter="($event.target as HTMLVideoElement).play()" @mouseleave="($event.target as HTMLVideoElement).pause()" />
+              <img v-else :src="viewUrl(x)" loading="lazy" alt="" />
+            </template>
+            <span v-else class="none small muted">No sample</span>
+          </button>
+        </div>
+      </div>
+      <ZenLightbox v-if="lb != null" v-model:index="lb" :items="lbItems" :grid="cols" :searchable="false" @close="lb = null" />
+    </section>
+
+    <section v-if="d && (!done || rows.length <= 1)" class="card previews">
       <div class="eyebrow">Previews</div>
       <div v-if="big" class="stage">
         <video v-if="isVideo(big)" :key="big.filename" :src="viewUrl(big)" autoplay loop muted playsinline controls />
@@ -245,6 +316,96 @@ const tryLink = computed(() => (finalLora.value ? `/apps/text-to-image?run=${pro
   object-fit: cover;
   border-radius: var(--r-sm);
   display: block;
+}
+.picks {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.picks-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.ptable {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.phead,
+.prow {
+  display: grid;
+  grid-template-columns: 170px repeat(var(--cols), minmax(120px, 180px));
+  gap: 8px;
+  align-items: center;
+}
+.pp {
+  font-size: 11px;
+  color: var(--zen-muted);
+}
+.prow {
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--zen-border) 60%, transparent);
+  border-radius: var(--r-md);
+}
+.prow.rec {
+  border-color: color-mix(in srgb, var(--zen-accent) 60%, transparent);
+  background: color-mix(in srgb, var(--zen-accent) 5%, transparent);
+}
+.pinfo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+.rec-tag {
+  color: var(--zen-accent);
+}
+.pacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.mini {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: var(--r-sm);
+  border: 1px solid color-mix(in srgb, var(--zen-border) 70%, transparent);
+  color: var(--zen-muted);
+}
+.mini:hover {
+  color: var(--zen-text);
+  border-color: var(--zen-accent);
+}
+.pcell {
+  aspect-ratio: 1;
+  border: none;
+  padding: 0;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--zen-surface-2);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.pcell:disabled {
+  cursor: default;
+  border: 1px dashed color-mix(in srgb, var(--zen-border) 80%, transparent);
+  background: none;
+}
+.pcell img,
+.pcell video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .small {
   font-size: 12px;

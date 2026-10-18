@@ -86,6 +86,7 @@ async function removeItem(it: DatasetItem) {
 }
 
 const count = computed(() => items.value.length)
+const uncaptioned = computed(() => items.value.filter((i) => !i.caption).length)
 const enough = computed(() => !!r.value && count.value >= r.value.photos.min)
 
 // ---- the plan: files, downloads, time --------------------------------------------------------
@@ -177,7 +178,14 @@ async function train() {
     phase.value = 'starting'
     const base = defaultSpec()
     base.output.keep_states = settings.keepStates
-    const spec = buildSpec(x, p.value, base, { name: name.value.trim(), trigger: trigger.value, dataset: dsName.value, photos: count.value })
+    await loadItems()
+    const spec = buildSpec(x, p.value, base, {
+      name: name.value.trim(),
+      trigger: trigger.value,
+      dataset: dsName.value,
+      photos: count.value,
+      captions: items.value.map((i) => i.caption),
+    })
     const run = await engine.start(spec)
     router.push(`/simple/run/${run.run_id}`)
   } catch (e) {
@@ -312,14 +320,17 @@ void leaving
           <div class="num">3</div>
           <div class="sbody">
             <h2>Train it</h2>
-            <ul class="checks small">
-              <li v-if="p && !p.downloads.length && !p.adapter"><i class="mdi mdi-check-circle-outline ok" /> Models are installed</li>
-              <li v-else-if="p"><i class="mdi mdi-download-outline" /> Downloads {{ fmtBytes(downloadBytes) }} of models first</li>
-              <li v-else><i class="mdi mdi-loading mdi-spin" /> Checking models…</li>
-              <li><i class="mdi mdi-text-box-outline" /> Describes each photo for you</li>
-              <li v-if="estimate"><i class="mdi mdi-timer-outline" /> Takes {{ estimate }}</li>
-              <li v-for="q in p?.problems ?? []" :key="q" class="err"><i class="mdi mdi-alert-circle-outline" /> {{ q }}</li>
-            </ul>
+            <!-- one strip: what it needs, what it'll do, how long -->
+            <div class="strip-sum">
+              <span v-if="!p"><i class="mdi mdi-loading mdi-spin" /> Checking models</span>
+              <span v-else-if="!p.downloads.length && !p.adapter" class="ok"><i class="mdi mdi-check-circle-outline" /> Models ready</span>
+              <span v-else><i class="mdi mdi-download-outline" /> {{ fmtBytes(downloadBytes) }} to download</span>
+              <span :class="count && !enough ? 'warn' : count ? '' : 'muted'"><i class="mdi mdi-image-multiple-outline" /> {{ count }} {{ r.kind === 'style' ? 'images' : 'photos' }}</span>
+              <span :class="count && !uncaptioned ? 'ok' : ''"><i class="mdi mdi-text-box-outline" /> {{ !count ? 'Describes each one' : uncaptioned ? `${uncaptioned} to describe` : 'All described' }}</span>
+              <span><i class="mdi mdi-stairs" /> {{ steps.toLocaleString() }} steps</span>
+              <span v-if="estimate"><i class="mdi mdi-timer-outline" /> {{ estimate }}</span>
+            </div>
+            <div v-for="q in p?.problems ?? []" :key="q" class="err small"><i class="mdi mdi-alert-circle-outline" /> {{ q }}</div>
 
             <div v-if="phase !== 'idle'" class="doing">
               <template v-if="phase === 'downloading'">
@@ -628,6 +639,30 @@ void leaving
 }
 .count.warn,
 .warn {
+  color: var(--zen-warn);
+}
+.strip-sum {
+  display: flex;
+  flex-wrap: wrap;
+  border: 1px solid color-mix(in srgb, var(--zen-border) 70%, transparent);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.strip-sum > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  font-size: 12px;
+  border-right: 1px solid color-mix(in srgb, var(--zen-border) 70%, transparent);
+}
+.strip-sum > span:last-child {
+  border-right: none;
+}
+.strip-sum .ok i {
+  color: var(--zen-ok);
+}
+.strip-sum .warn {
   color: var(--zen-warn);
 }
 .checks {

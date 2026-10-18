@@ -252,7 +252,12 @@ function merge(target: Record<string, unknown>, src: Record<string, unknown>) {
 }
 
 /** The full run spec: defaults, the recipe's settings, these files, this dataset and name. */
-export function buildSpec(r: Recipe, p: Plan, base: TrainSpec, o: { name: string; trigger: string; dataset: string; photos: number }): TrainSpec {
+export function buildSpec(
+  r: Recipe,
+  p: Plan,
+  base: TrainSpec,
+  o: { name: string; trigger: string; dataset: string; photos: number; captions?: string[] },
+): TrainSpec {
   const spec = structuredClone(base)
   merge(spec as unknown as Record<string, unknown>, r.spec as Record<string, unknown>)
   spec.name = o.name
@@ -270,9 +275,13 @@ export function buildSpec(r: Recipe, p: Plan, base: TrainSpec, o: { name: string
   spec.dataset.trigger_prepend = true
   spec.dataset.caption_set = 'default'
   spec.optim.steps = stepsFor(r, o.photos)
-  spec.save_every = Math.max(250, Math.round(spec.optim.steps / 4 / 50) * 50)
-  spec.samples.prompts = r.samples
-  spec.samples.every = Math.max(100, Math.round(spec.optim.steps / 6 / 50) * 50)
+  // about 8 checkpoints, each with samples, to pick the best from
+  spec.save_every = Math.max(100, Math.round(spec.optim.steps / 8 / 50) * 50)
+  spec.samples.every = spec.save_every
+  // the recipe's first prompt (somewhere new), plus two of the dataset's own captions: the
+  // closest check that it learned what's in the photos
+  spec.samples.prompts = [r.samples[0]!, ...captionPrompts(o.captions ?? [], o.trigger, r.kind)].slice(0, 3)
+  if (spec.samples.prompts.length < 2) spec.samples.prompts = r.samples
   spec.samples.baseline = true
   spec.samples.model_name = p.sampleModel
   if (!p.sampleModel && r.spec.samples?.model_name) {
@@ -282,4 +291,17 @@ export function buildSpec(r: Recipe, p: Plan, base: TrainSpec, o: { name: string
   }
   spec.validation.every = 0
   return spec
+}
+
+/** Two captions as sample prompts: shortish ones, spread through the set, with the trigger. */
+export function captionPrompts(captions: string[], trigger: string, kind: Recipe['kind']): string[] {
+  const usable = captions.map((c) => c.trim()).filter((c) => c.length > 20)
+  if (!usable.length) return []
+  const pick = [usable[Math.floor(usable.length / 3)]!, usable[Math.floor((usable.length * 2) / 3)]!]
+  return [...new Set(pick)].map((c) => {
+    const short = c.length > 300 ? `${c.slice(0, 300).replace(/[^.,;]*$/, '').replace(/[,;\s]+$/, '')}` : c
+    const has = trigger && short.toLowerCase().includes(trigger.toLowerCase())
+    void kind
+    return has ? short : `[trigger], ${short}`
+  })
 }
