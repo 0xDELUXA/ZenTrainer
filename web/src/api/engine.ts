@@ -474,9 +474,9 @@ export interface ValidationRow {
 
 export interface Health {
   version: string
+  /** the engine's code on disk is newer than what's running: restart to load it */
+  stale?: boolean
   capabilities: {
-    /** what the running engine build supports (manual_samples, segment, merge_loras, ...) */
-    features?: string[]
     optimizers?: OptimizerInfo[]
     train_attention?: string[]
     infer_attention?: string[]

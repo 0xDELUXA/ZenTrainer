@@ -10,6 +10,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { activeRuns, latest, lossTrail } from '@/runs'
 import { activeCaptions, startCaptionSync } from '@/captions'
 import { settings } from '@/settings'
+import { comfyBehind, engineStale, restartEngine, restarting, startStatusSync } from '@/status'
 import { activeDownloads, fmtBytes, startDownloadSync } from '@/downloads'
 import { disks, gb, memLatest, startSystemSync } from '@/system'
 import { drawerOpen, toggleDrawer, unseenErrors } from '@/logs'
@@ -95,6 +96,14 @@ const cap = computed(() => {
   return { job: cur, pct: total ? cur.done / total : 0, meta, more: list.length - 1 }
 })
 
+// ---- housekeeping: restart to load an update, or ComfyUI has one -----------------------
+const trainingNow = computed(() => activeRuns.value.some((r) => r.status === 'training' || r.status === 'loading'))
+async function onRestart() {
+  if (trainingNow.value) return
+  if (!confirm('Restart ComfyUI to load the updated engine? It takes about a minute.')) return
+  await restartEngine().catch((e) => alert(String((e as Error).message ?? e)))
+}
+
 // ---- folding & keys ------------------------------------------------------------------
 function onKey(e: KeyboardEvent) {
   const t = e.target as HTMLElement
@@ -107,6 +116,7 @@ onMounted(() => {
   startSystemSync()
   startDownloadSync()
   startCaptionSync()
+  startStatusSync()
   addEventListener('keydown', onKey)
 })
 onUnmounted(() => {
@@ -203,6 +213,21 @@ onUnmounted(() => {
         </span>
       </span>
     </div>
+
+    <button
+      v-if="engineStale"
+      class="row mem status-row"
+      :disabled="trainingNow || restarting"
+      :title="trainingNow ? 'Updated engine code is waiting: restart once nothing is training' : 'The engine’s code changed since it started: restart ComfyUI to load it'"
+      @click="onRestart"
+    >
+      <span class="ic"><i :class="restarting ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-restart'" /></span>
+      <span class="lbl status-lbl">{{ restarting ? 'Restarting…' : trainingNow ? 'Update waiting (after the run)' : 'Restart to load updates' }}</span>
+    </button>
+    <RouterLink v-else-if="comfyBehind" to="/settings" class="row mem status-row" :title="`ComfyUI is ${comfyBehind} commits behind upstream`" @click="emit('navigate')">
+      <span class="ic"><i class="mdi mdi-arrow-up-circle-outline" /></span>
+      <span class="lbl status-lbl">ComfyUI update available</span>
+    </RouterLink>
 
     <RouterLink v-if="meters.length" to="/system" class="row mem" :class="{ active: isActive('/system') }" title="System memory" @click="emit('navigate')">
       <span class="ic"><i class="mdi mdi-memory" /></span>
@@ -553,6 +578,22 @@ nav {
   gap: 5px;
   padding: 6px 10px 6px 0;
   font-size: 11px;
+}
+.status-row {
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
+  color: var(--zen-accent);
+}
+.status-row:disabled {
+  cursor: default;
+  color: var(--zen-muted);
+}
+.status-lbl {
+  font-size: 12px;
 }
 .mem-row {
   display: flex;

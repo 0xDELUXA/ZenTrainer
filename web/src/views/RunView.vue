@@ -234,13 +234,6 @@ const tryPrompt = ref('')
 const trySize = ref('')
 const tryFrames = ref<number | null>(null)
 const tryBase = ref(true)
-// the server may predate manual samples (not restarted since): its "sample" would render the
-// run's own prompts instead, so Render waits for an engine that knows
-const canManual = ref(true)
-onMounted(async () => {
-  const h = await engine.health().catch(() => null)
-  canManual.value = !!h?.capabilities.features?.includes('manual_samples')
-})
 async function renderTry() {
   if (!tryPrompt.value.trim()) return
   const [w, h] = trySize.value ? trySize.value.split('x').map(Number) : [undefined, undefined]
@@ -571,7 +564,7 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
                   <ZenCombo v-model="trySize" :items="trySizes" :sorted="false" :searchable="false" size="sm" />
                   <ZenNumber v-if="(detail.spec.samples.frames ?? 1) > 1" :model-value="tryFrames ?? detail.spec.samples.frames ?? 1" :min="1" :max="361" :step="17" :precision="0" size="sm" title="Frames" @update:model-value="tryFrames = $event" />
                   <label class="base-sw small" title="Also render the same prompt and seed without the LoRA, to compare"><ZenSwitch v-model="tryBase" size="sm" /> Compare with base</label>
-                  <ZenButton size="sm" variant="primary" icon="mdi mdi-creation-outline" :disabled="!canManual || !!busy || status !== 'training' || !tryPrompt.trim() || !!sampling" :title="!canManual ? 'The engine needs a restart for this (it would render the run’s own prompts)' : status !== 'training' ? 'Only while it trains' : 'Ctrl+Enter'" @click="renderTry">Render</ZenButton>
+                  <ZenButton size="sm" variant="primary" icon="mdi mdi-creation-outline" :disabled="!!busy || status !== 'training' || !tryPrompt.trim() || !!sampling" :title="status !== 'training' ? 'Only while it trains' : 'Ctrl+Enter'" @click="renderTry">Render</ZenButton>
                 </div>
               </div>
               <div v-if="liveManual" class="mlive">
@@ -585,7 +578,6 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
                   <div class="muted mcap">{{ liveManual.prompt }}</div>
                 </div>
               </div>
-              <div v-if="!canManual" class="small warn-line"><i class="mdi mdi-restart" /> The running engine is older than this page: Render works after ComfyUI restarts (when nothing is training).</div>
               <div v-if="!manualGroups.length && !liveManual" class="muted small empty-manual">Prompts you try here render with the LoRA as it is now, at the step it's on. They don't join the run's samples.</div>
               <div class="mtiles">
                 <div v-for="(g, gi) in manualGroups" :key="g.index" class="mtile" :class="{ pair: g.base && shownStep(g) }">
@@ -608,7 +600,7 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
                     <span class="spacer" />
                     <button
                       class="again"
-                      :disabled="!canManual || !!busy || status !== 'training' || !!sampling || g.steps.some((x) => x.step === step)"
+                      :disabled="!!busy || status !== 'training' || !!sampling || g.steps.some((x) => x.step === step)"
                       :title="g.steps.some((x) => x.step === step) ? 'Already rendered at this step' : 'The same prompt and seed with the LoRA as it is now'"
                       @click="again(g)"
                     >
@@ -1126,9 +1118,6 @@ dd {
 }
 .mmedia :deep(.zen-compare img) {
   object-fit: contain;
-}
-.warn-line {
-  color: var(--zen-warn);
 }
 .mlive {
   display: grid;

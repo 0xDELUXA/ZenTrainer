@@ -39,7 +39,7 @@ def register(server) -> None:
 
     @routes.get("/zentrainer/api/health")
     async def health(_request):
-        return web.json_response({"version": __version__, "capabilities": _capabilities()})
+        return web.json_response({"version": __version__, "capabilities": _capabilities(), "stale": _code_stale()})
 
     @routes.get("/zentrainer/api/themes")
     async def themes(_request):
@@ -1134,13 +1134,20 @@ def _loopback(server) -> str:
     return f"http://{host}:{server.port}"
 
 
+_LOADED_AT = time.time()
+
+
+def _code_stale() -> bool:
+    """The engine's code on disk is newer than what this process loaded (an update or an edit):
+    a restart picks it up. The sidebar offers one."""
+    root = Path(__file__).resolve().parent
+    return any(p.stat().st_mtime > _LOADED_AT for p in root.rglob("*.py") if "__pycache__" not in p.parts)
+
+
 def _capabilities() -> dict:
     from .harness import optim
 
-    # what this engine build can do: the web app may be newer than a server not yet restarted,
-    # and greys out what the running engine doesn't know rather than calling it wrongly
-    caps: dict = {"optimizers": optim.catalog(),
-                  "features": ["manual_samples", "segment", "merge_loras", "split_videos", "baseline_reuse"]}
+    caps: dict = {"optimizers": optim.catalog()}
     try:
         from comfy.ldm.modules.attention import REGISTERED_ATTENTION_FUNCTIONS
 
