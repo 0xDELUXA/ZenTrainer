@@ -75,13 +75,15 @@ export const RECIPES: Recipe[] = [
       text_encoders: ['qwen3vl_4b_int8_convrot.safetensors', 'qwen3vl_4b_fp8_scaled.safetensors'],
       vae: ['qwen_image_vae.safetensors'],
     },
-    steps: { perPhoto: 40, min: 800, max: 1500 },
-    secPerStep: 1.1,
+    // validated: Automagic v3 at 1e-4 on 37 photos reached likeness 0.53 at 1500 steps and was
+    // still climbing, so ~46 a photo (1700 for that set)
+    steps: { perPhoto: 46, min: 1000, max: 2000 },
+    secPerStep: 1.45,
     caption: { prompt: NL, subject: true },
     spec: {
       dataset: { resolution: 1024 },
       network: { rank: 16 },
-      optim: { optimizer: 'AdamW', learning_rate: 1e-4, scheduler: 'constant' },
+      optim: { optimizer: 'Automagic3', learning_rate: 1e-4, scheduler: 'constant' },
       objective: { timesteps: 'uniform', shift: 0 },
       samples: { steps: 8, cfg: 1, sampler: 'euler', scheduler: 'simple', model_name: 'krea2_turbo_int8_convrot.safetensors' },
     },
