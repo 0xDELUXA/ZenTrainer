@@ -64,7 +64,9 @@ onMounted(() => {
     } else if (m.type === EVENTS.checkpoint) {
       d.checkpoints.push(m.data as unknown as CheckpointRow)
     } else if (m.type === EVENTS.sample) {
-      d.samples.push(m.data as unknown as SampleRow)
+      const row = m.data as unknown as SampleRow
+      d.samples.push(row)
+      if (row.manual && !row.base) queuedTries.value = queuedTries.value.slice(1) // its render landed
     } else if (m.type === EVENTS.validation) {
       d.validation.push(m.data as unknown as ValidationRow)
     } else if (m.type === EVENTS.sampleProgress) {
@@ -201,7 +203,22 @@ async function again(g: { index: number; base: SampleRow | null; steps: SampleRo
   if (!x) return
   sampleView.value = 'manual'
   delete pickedStep.value[g.index]
-  await send('sample', { prompt: x.prompt, width: x.width, height: x.height, frames: x.frames, seed: x.seed, base: false, index: g.index })
+  await queueTry({ prompt: x.prompt, width: x.width, height: x.height, frames: x.frames, seed: x.seed, base: false, index: g.index }, x.prompt, g.index)
+}
+
+// manual tries waiting their turn: the engine runs sample commands one after another at step
+// boundaries, so any number can be queued; each leaves this list when its render lands
+const queuedTries = ref<{ id: number; prompt: string; again?: number }[]>([])
+let tryIds = 0
+async function queueTry(args: Record<string, unknown>, prompt: string, again?: number) {
+  const id = ++tryIds
+  queuedTries.value = [...queuedTries.value, { id, prompt, again }]
+  try {
+    await engine.control(props.id, 'sample', args)
+  } catch (e) {
+    queuedTries.value = queuedTries.value.filter((q) => q.id !== id)
+    error.value = String((e as Error).message ?? e)
+  }
 }
 const steps = computed(() => [...new Set(runSamples.value.map((x) => x.step))].sort((a, b) => a - b))
 const prompts = computed(() => {
@@ -235,10 +252,13 @@ const trySize = ref('')
 const tryFrames = ref<number | null>(null)
 const tryBase = ref(true)
 async function renderTry() {
-  if (!tryPrompt.value.trim()) return
+  // one try per line: several prompts queue at once
+  const lines = tryPrompt.value.split('\n').map((l) => l.trim()).filter(Boolean)
+  if (!lines.length) return
   const [w, h] = trySize.value ? trySize.value.split('x').map(Number) : [undefined, undefined]
-  await send('sample', { prompt: tryPrompt.value.trim(), width: w, height: h, frames: tryFrames.value ?? undefined, base: tryBase.value })
-  if (sampling.value) sampling.value = { ...sampling.value, manual: true }
+  tryPrompt.value = ''
+  for (const prompt of lines)
+    await queueTry({ prompt, width: w, height: h, frames: tryFrames.value ?? undefined, base: tryBase.value }, prompt)
 }
 const trySizes = computed(() => {
   const sp = detail.value?.spec.samples
@@ -565,12 +585,12 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
             </header>
             <div v-if="sampleView === 'manual'" class="manual">
               <div class="try">
-                <textarea v-model="tryPrompt" v-autosize rows="1" class="try-in" placeholder="Try a prompt at this step, e.g. [trigger] reading a book in a cafe" @keydown.ctrl.enter="renderTry" />
+                <textarea v-model="tryPrompt" v-autosize rows="1" class="try-in" placeholder="Try a prompt at this step, e.g. [trigger] reading a book in a cafe (one per line for several)" @keydown.ctrl.enter="renderTry" />
                 <div class="try-opts">
                   <ZenCombo v-model="trySize" :items="trySizes" :sorted="false" :searchable="false" size="sm" />
                   <ZenNumber v-if="(detail.spec.samples.frames ?? 1) > 1" :model-value="tryFrames ?? detail.spec.samples.frames ?? 1" :min="1" :max="361" :step="17" :precision="0" size="sm" title="Frames" @update:model-value="tryFrames = $event" />
                   <label class="base-sw small" title="Also render the same prompt and seed without the LoRA, to compare"><ZenSwitch v-model="tryBase" size="sm" /> Compare with base</label>
-                  <ZenButton size="sm" variant="primary" icon="mdi mdi-creation-outline" :disabled="!!busy || status !== 'training' || !tryPrompt.trim() || !!sampling" :title="status !== 'training' ? 'Only while it trains' : 'Ctrl+Enter'" @click="renderTry">Render</ZenButton>
+                  <ZenButton size="sm" variant="primary" icon="mdi mdi-creation-outline" :disabled="status !== 'training' || !tryPrompt.trim()" :title="status !== 'training' ? 'Only while it trains' : 'Queues it (Ctrl+Enter). One prompt per line queues several'" @click="renderTry">Render</ZenButton>
                 </div>
               </div>
               <div v-if="liveManual" class="mlive">
@@ -586,6 +606,13 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
               </div>
               <div v-if="!manualGroups.length && !liveManual" class="muted small empty-manual">Prompts you try here render with the LoRA as it is now, at the step it's on. They don't join the run's samples.</div>
               <div class="mtiles">
+                <div v-for="(q, qi) in queuedTries" :key="q.id" class="mtile">
+                  <div class="mmedia queued">
+                    <i :class="qi === 0 && liveManual ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-clock-outline'" />
+                    <span class="small muted">{{ qi === 0 && liveManual ? 'Rendering' : qi === 0 ? 'Next' : `Queued · ${qi} ahead` }}</span>
+                  </div>
+                  <span class="mcap">{{ q.again != null ? 'Again: ' : '' }}{{ q.prompt }}</span>
+                </div>
                 <div v-for="(g, gi) in manualGroups" :key="g.index" class="mtile" :class="{ pair: g.base && shownStep(g) }">
                   <!-- with a base render: images as a before/after slider, videos side by side -->
                   <div v-if="g.base && shownStep(g) && !isVideo(g.base)" class="mmedia" :style="shapeOf(g.base)" @click="openManual(gi, shownStep(g))">
@@ -606,7 +633,7 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
                     <span class="spacer" />
                     <button
                       class="again"
-                      :disabled="!!busy || status !== 'training' || !!sampling || g.steps.some((x) => x.step === step)"
+                      :disabled="status !== 'training' || g.steps.some((x) => x.step === step) || queuedTries.some((q) => q.again === g.index)"
                       :title="g.steps.some((x) => x.step === step) ? 'Already rendered at this step' : 'The same prompt and seed with the LoRA as it is now'"
                       @click="again(g)"
                     >
@@ -1131,6 +1158,18 @@ dd {
   padding: 8px;
   border-radius: var(--r-md);
   border: 1px solid color-mix(in srgb, var(--zen-accent) 50%, transparent);
+}
+.mmedia.queued {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px dashed color-mix(in srgb, var(--zen-border) 90%, transparent);
+  background: none;
+  color: var(--zen-muted);
+  font-size: 20px;
+  cursor: default;
 }
 .mmedia.live {
   display: grid;
