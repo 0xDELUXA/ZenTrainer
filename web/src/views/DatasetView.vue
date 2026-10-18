@@ -10,6 +10,7 @@ import { engine, thumbUrl, viewUrl, type CaptionJob, type DatasetFaces, type Dat
 import { reducedMotion } from '@/settings'
 import { activeCaptions } from '@/captions'
 import CaptionPanel from '@/components/CaptionPanel.vue'
+import StickyBar from '@/components/StickyBar.vue'
 import DatasetStats from '@/components/DatasetStats.vue'
 import { vAutosize } from '@/autosize'
 
@@ -34,16 +35,6 @@ const sideOpen = ref<boolean>(saved.side ?? true) // the side panel: health, fac
 // The side panel stays pinned without a scrollbar of its own: under the sticky toolbar when it fits
 // the window, or, when it's taller, scrolling with the page until its bottom reaches the window's
 // bottom and staying there (a negative sticky top), so it never scrolls out of sight
-// stuck: the toolbar has scrolled up against the top (a sentinel just above it left the view),
-// so it casts a shadow over the pictures passing under it
-const tbSentinel = ref<HTMLElement | null>(null)
-const tbStuck = ref(false)
-const tbObs = new IntersectionObserver(([e]) => (tbStuck.value = !!e && !e.isIntersecting))
-watch(tbSentinel, (el, old) => {
-  if (old) tbObs.unobserve(old)
-  if (el) tbObs.observe(el)
-})
-onUnmounted(() => tbObs.disconnect())
 const sideEl = ref<HTMLElement | null>(null)
 const sideTop = ref(58)
 const PIN = 66 // the sticky toolbar (10px down, 46px tall) + a 10px gap
@@ -533,8 +524,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
     <div v-if="error" class="card err mono">{{ error }}</div>
 
     <!-- one fixed-height row: nothing in it appears, disappears or wraps -->
-    <div ref="tbSentinel" class="tb-sentinel" aria-hidden="true" />
-    <div class="ds-toolbar-wrap" :class="{ stuck: tbStuck }">
+    <StickyBar>
     <div class="ds-toolbar card">
       <div class="seg" role="tablist" aria-label="View">
         <button :class="{ on: layout === 'grid' }" title="Grid" @click="view = 'grid'"><i class="mdi mdi-view-grid-outline" /></button>
@@ -558,7 +548,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
         <i class="mdi mdi-dock-right" />
       </button>
     </div>
-    </div>
+    </StickyBar>
 
     <div class="ds-body" :class="{ 'with-side': sideOpen }">
       <main class="ds-main">
@@ -1633,31 +1623,11 @@ dd {
   padding: 0 8px;
   flex-wrap: nowrap;
   overflow: hidden;
-  /* opaque, so the grid doesn't show through once it's stuck */
-  background: color-mix(in srgb, var(--zen-surface) 70%, var(--zen-bg));
 }
 /* what sticks: the toolbar on a strip of the page's background from 10px above it down to its
    middle: nothing peeks over the top, and the strip's edge hides behind the toolbar, so below it
    pictures just pass under the bar (no line anywhere). The negative margin cancels the padding,
    so at rest the page lays out as if the strip weren't there */
-.tb-sentinel {
-  height: 1px;
-  margin-bottom: -11px; /* itself + the page's 10px gap: takes no room */
-}
-.ds-toolbar-wrap.stuck .ds-toolbar {
-  box-shadow: 0 10px 22px -6px rgba(0, 0, 0, 0.75);
-}
-.ds-toolbar {
-  transition: box-shadow 0.2s ease;
-}
-.ds-toolbar-wrap {
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  margin-top: -10px;
-  padding-top: 10px;
-  background: linear-gradient(to bottom, var(--zen-bg) calc(10px + 23px), transparent 0);
-}
 .ds-toolbar .zoom {
   width: 150px;
   flex: none;

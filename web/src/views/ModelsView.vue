@@ -9,6 +9,7 @@ import FileState from '@/components/FileState.vue'
 import StarButton from '@/components/StarButton.vue'
 import { isStarred, starred, starredFirst } from '@/favorites'
 import { finished, fmtAdded, fmtBytes, hfToken, isNew, startDownloadSync, targets } from '@/downloads'
+import StickyBar from '@/components/StickyBar.vue'
 
 const families = ref<ModelFamily[]>([])
 const loaded = ref(false)
@@ -80,6 +81,7 @@ onMounted(() => {
       </div>
     </div>
 
+    <StickyBar>
     <div class="toolbar card">
       <div class="seg">
         <button :class="{ on: filter === 'all' }" @click="filter = 'all'">All {{ families.length }}</button>
@@ -94,6 +96,7 @@ onMounted(() => {
       </div>
       <div class="search"><ZenInput v-model="query" placeholder="Search models" size="sm" /></div>
     </div>
+    </StickyBar>
 
     <div v-if="error" class="card err mono">{{ error }}</div>
     <ZenEmpty v-if="loaded && !shown.length" title="No models match" icon="mdi mdi-cube-outline" />
