@@ -2,7 +2,7 @@
 // One dataset. Grid (uniform cards, zoomable) or table (sortable, inline captions);
 // click any image for the lightbox with a caption editor beside it. Drop files anywhere
 // to upload: images, same-name .txt captions, and masks (<name>-masklabel.png).
-import { ZenButton, ZenEmpty, ZenInput, ZenLightbox, ZenSlider } from '@nynxz/zenkit-ui'
+import { ZenButton, ZenCompare, ZenEmpty, ZenInput, ZenLightbox, ZenSlider } from '@nynxz/zenkit-ui'
 import type { LightboxItem } from '@nynxz/zenkit-ui'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -24,7 +24,7 @@ const saved = (() => {
     return {}
   }
 })()
-const view = ref<'grid' | 'list'>(saved.view ?? 'grid')
+const view = ref<'grid' | 'list' | 'pairs'>(saved.view ?? 'grid')
 const zoom = ref<number>(saved.zoom ?? 200)
 const fit = ref<'cover' | 'contain'>(saved.fit ?? 'cover')
 const showMasks = ref<boolean>(saved.masks ?? false) // dim what each mask leaves out, on the grid
@@ -262,6 +262,14 @@ onUnmounted(() => {
   removeEventListener('keydown', onEsc)
 })
 
+// ---- edit pairs -----------------------------------------------------------------------------
+const isVideoPath = (p: string) => /\.(mp4|webm|mov|mkv)$/i.test(p)
+// an input file sits beside its result: same folder, so /view takes the result's subfolder
+const ctrlView = (it: DatasetItem, p: string) =>
+  `${viewUrl({ filename: p.split('/').at(-1)!, subfolder: it.subfolder, type: 'input' })}&v=${bust.value}`
+const aspect = (it: DatasetItem) => (it.width && it.height ? `${it.width} / ${it.height}` : '1')
+const isSimplePair = (it: DatasetItem) => it.controls?.length === 1 && it.kind !== 'video' && !isVideoPath(it.controls[0]!)
+
 // ---- lightbox -----------------------------------------------------------------------------
 const lightbox = ref<number | null>(null)
 const lbItems = computed<LightboxItem[]>(() =>
@@ -321,8 +329,9 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
       <div class="seg" role="tablist" aria-label="View">
         <button :class="{ on: view === 'grid' }" title="Grid" @click="view = 'grid'"><i class="mdi mdi-view-grid-outline" /></button>
         <button :class="{ on: view === 'list' }" title="Table" @click="view = 'list'"><i class="mdi mdi-view-list-outline" /></button>
+        <button v-if="counts.pairs" :class="{ on: view === 'pairs' }" title="Edit pairs: inputs → result, with the instruction" @click="view = 'pairs'"><i class="mdi mdi-swap-horizontal" /></button>
       </div>
-      <template v-if="view === 'grid'">
+      <template v-if="view === 'grid' || view === 'pairs'">
         <label class="zoom" title="Card size">
           <i class="mdi mdi-image-size-select-small" />
           <ZenSlider v-model="zoom" :min="120" :max="420" :step="10" />
@@ -414,6 +423,52 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
       </article>
     </div>
 
+    <!-- edit pairs: every input, then the result, the instruction beside them -->
+    <div v-else-if="view === 'pairs'" class="pairs" :style="{ '--ph': `${zoom}px` }">
+      <article v-for="(it, i) in shown" :key="it.path" class="pair card" :class="{ sel: selected.has(it.path), dirty: drafts[k(it)] != null }">
+        <label class="check" :class="{ on: selected.has(it.path) }" @click.prevent="toggleSelect(it, i, $event)">
+          <i :class="selected.has(it.path) ? 'mdi mdi-checkbox-marked' : 'mdi mdi-checkbox-blank-outline'" />
+        </label>
+        <div class="pair-media">
+          <!-- one picture in, one out, same shape: drag across to compare -->
+          <div v-if="isSimplePair(it)" class="pane compare" :style="{ aspectRatio: aspect(it) }">
+            <ZenCompare :before="thumb({ path: it.controls![0]! }, 768)" :after="thumb(it, 768)" before-label="Input" after-label="Result" />
+          </div>
+          <template v-else>
+            <button v-for="(c, n) in it.controls ?? []" :key="c" class="pane" :title="c" @click="lightbox = i">
+              <video v-if="isVideoPath(c)" :src="ctrlView(it, c)" muted loop playsinline preload="metadata" @mouseenter="($event.target as HTMLVideoElement).play()" @mouseleave="($event.target as HTMLVideoElement).pause()" />
+              <img v-else :src="thumb({ path: c }, 512)" loading="lazy" alt="" />
+              <span class="pane-tag">{{ (it.controls?.length ?? 0) > 1 ? `Input ${n + 1}` : 'Input' }}</span>
+            </button>
+            <i v-if="it.controls?.length" class="mdi mdi-arrow-right pair-arrow" />
+            <button class="pane result" :title="it.path" @click="lightbox = i">
+              <video v-if="it.kind === 'video'" :src="ctrlView(it, it.path)" muted loop playsinline preload="metadata" @mouseenter="($event.target as HTMLVideoElement).play()" @mouseleave="($event.target as HTMLVideoElement).pause()" />
+              <img v-else :src="thumb(it, 512)" loading="lazy" alt="" />
+              <span class="pane-tag">{{ it.controls?.length ? 'Result' : 'No input' }}</span>
+            </button>
+          </template>
+        </div>
+        <div class="pair-text">
+          <textarea
+            v-autosize
+            class="cap-edit"
+            :class="{ empty: !cap(it) && drafts[k(it)] == null }"
+            :value="drafts[k(it)] ?? cap(it)"
+            placeholder="The instruction: what to change"
+            rows="2"
+            @input="drafts[k(it)] = ($event.target as HTMLTextAreaElement).value"
+            @blur="save(it)"
+            @keydown.ctrl.enter="($event.target as HTMLTextAreaElement).blur()"
+          />
+          <span class="card-meta mono">
+            {{ it.path.split('/').at(-1) }}<span v-if="it.width"> · {{ it.width }}×{{ it.height }}</span>
+            <span v-if="(it.controls?.length ?? 0) > 1"> · {{ it.controls!.length }} inputs</span>
+            <span v-if="saving[k(it)]"> · saving…</span>
+          </span>
+        </div>
+      </article>
+    </div>
+
     <!-- table -->
     <div v-else class="table card">
       <div class="tr th">
@@ -453,7 +508,16 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
     <ZenLightbox v-if="lightbox != null && lbItems.length" v-model:index="lightbox" :items="lbItems" :searchable="false" @close="lightbox = null">
       <template #side="{ index }">
         <div v-if="shown[index]" class="side">
-          <div class="eyebrow">Caption</div>
+          <template v-if="shown[index].controls?.length">
+            <div class="eyebrow">{{ shown[index].controls!.length > 1 ? 'Inputs' : 'Input' }}</div>
+            <div class="side-inputs">
+              <template v-for="c in shown[index].controls" :key="c">
+                <video v-if="isVideoPath(c)" :src="ctrlView(shown[index], c)" muted loop autoplay playsinline :title="c" />
+                <img v-else :src="thumb({ path: c }, 384)" alt="" :title="c" />
+              </template>
+            </div>
+          </template>
+          <div class="eyebrow">{{ shown[index].controls?.length ? 'Instruction' : 'Caption' }}</div>
           <textarea
             v-autosize
             class="side-cap"
@@ -762,6 +826,92 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
   inset: 0;
   width: 100%;
   height: 100%;
+  display: block;
+}
+.pairs {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pair {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(220px, 1fr);
+  gap: 14px;
+  padding: 10px;
+  align-items: start;
+}
+.pair.sel {
+  border-color: var(--zen-accent);
+}
+.pair .check {
+  top: 16px;
+  left: 16px;
+  z-index: 2;
+}
+.pair-media {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--ph);
+  overflow-x: auto;
+}
+.pane {
+  position: relative;
+  height: 100%;
+  flex: none;
+  padding: 0;
+  border: none;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--zen-surface-2);
+  cursor: pointer;
+}
+.pane img,
+.pane video {
+  height: 100%;
+  width: auto;
+  display: block;
+}
+.pane.compare {
+  cursor: ew-resize;
+}
+.pane.compare :deep(.zen-compare) {
+  width: 100%;
+  height: 100%;
+}
+.pane-tag {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  pointer-events: none;
+}
+.pair-arrow {
+  color: var(--zen-muted);
+  font-size: 18px;
+  flex: none;
+}
+.pair-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.side-inputs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.side-inputs img,
+.side-inputs video {
+  width: 100%;
+  border-radius: var(--r-sm);
   display: block;
 }
 .control-inset {
