@@ -141,6 +141,10 @@ class MemorySpec:
     # cheapest place to trade memory for speed.
     checkpoint_skip: int = 0
     offloading: bool = False
+    # TREAD token routing on video steps (MiniMax H3): this share of a clip's tokens skips the
+    # middle blocks (2 to n-3) and rejoins unchanged. 0.5 roughly halves those blocks' work;
+    # stills, samples and validation always run whole. 0 = off.
+    tread: float = 0.0
     # With offloading: VRAM kept free for activations, the LoRA and its optimizer (GB);
     # the rest holds as much of the model as fits. 0 = auto: 8 GB, more for long video clips.
     vram_headroom: float = 0.0
@@ -302,6 +306,8 @@ class TrainSpec:
                 raise SpecError("samples.prompts holds prompts (text) or {prompt, width, height, frames, seed}")
         if self.network.blocks and not re.fullmatch(r"\s*\d*\s*-?\s*\d*\s*", self.network.blocks):
             raise SpecError("network.blocks is a range like 20-49, 20- or 10")
+        if not 0.0 <= self.memory.tread < 1.0:
+            raise SpecError("memory.tread is a share of the video tokens, from 0 (off) to below 1")
         if not 0.0 <= self.objective.uniform_mix <= 1.0:
             raise SpecError("objective.uniform_mix is a share between 0 and 1")
         if self.optim.lora_plus < 0:

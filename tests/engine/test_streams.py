@@ -273,3 +273,36 @@ def test_preview_adapter_only_while_sampling():
     assert torch.all(a(w) == 1)  # training: the training adapter only
     sw.on = False
     assert torch.all(a(w) == 5)  # sampling: half the turbo, no training adapter
+
+
+def test_tread_routes_video_tokens_around_the_middle_blocks():
+    import types as _t
+
+    from zentrainer.harness.tread import patches
+
+    n_blocks, N, C = 10, 40, 3
+    layout = _t.SimpleNamespace(segments=[(0, 6, "text"), (6, 34, "video"), (34, 40, "audio")])
+    seen = []
+
+    def block(i):
+        def run(args):  # each block adds its index and records the length it saw
+            seen.append((i, args["img"].shape[0], len(args["mod_segments"]), args["rope_freqs"].shape[1]))
+            return {"img": args["img"] + i}
+        return run
+
+    rep = patches(n_blocks, 0.5, torch.Generator().manual_seed(0), start=2, end=7)
+    h = torch.zeros(N, C)
+    segs = [(0, 6, 1), (6, 34, 0), (34, 40, 2)]
+    rope = torch.zeros(1, N, 1, 2, 2, 2)
+    for i in range(n_blocks):
+        args = {"img": h, "mod_segments": segs, "rope_freqs": rope, "layout": layout, "t_emb": None}
+        h = rep[("double_block", i)](args, {"original_block": block(i)})["img"] if ("double_block", i) in rep else block(i)(args)["img"]
+    lengths = {i: n for i, n, _, _ in seen}
+    assert lengths[0] == lengths[1] == N and lengths[7] == lengths[9] == N  # whole outside the window
+    assert all(lengths[i] == N - 14 for i in range(2, 7))  # half the 28 video tokens routed
+    assert all(r == n for _, n, _, r in seen)  # rope follows the tokens
+    text_total = sum(range(n_blocks))
+    assert torch.all(h[:6] == text_total) and torch.all(h[34:] == text_total)  # text/audio saw every block
+    routed = h[6:34, 0]
+    assert ((routed == text_total) | (routed == text_total - sum(range(2, 7)))).all()  # video: all, or skipped 2-6
+    assert int((routed != text_total).sum()) == 14

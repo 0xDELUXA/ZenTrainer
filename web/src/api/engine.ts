@@ -85,6 +85,8 @@ export interface TrainSpec {
     checkpoint_depth: number
     /** the last N blocks keep their activations: faster, more VRAM */
     checkpoint_skip: number
+    /** TREAD: share of a video clip's tokens routed around the middle blocks (0 = off) */
+    tread?: number
     offloading: boolean
     quantized_backward: boolean
     bypass_mode: boolean

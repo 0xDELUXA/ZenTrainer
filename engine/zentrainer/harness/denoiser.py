@@ -37,7 +37,7 @@ class Denoiser:
                                              latent_shapes=latent_shapes)
         return conds["positive"][0]
 
-    def __call__(self, x_t: torch.Tensor, sigma: torch.Tensor, conds: list[dict]) -> torch.Tensor:
+    def __call__(self, x_t: torch.Tensor, sigma: torch.Tensor, conds: list[dict], extra: dict | None = None) -> torch.Tensor:
         """x_t (B, C, ...), sigma (B,), one prepared cond per sample. Returns x0 predictions."""
         import comfy.patcher_extension
         import comfy.samplers
@@ -52,6 +52,8 @@ class Denoiser:
         to = comfy.patcher_extension.merge_nested_dicts(to, self.patcher.model_options.get("transformer_options", {}),
                                                         copy_dict1=False)
         to = comfy.patcher_extension.merge_nested_dicts(to, self.transformer_options, copy_dict1=False)
+        if extra:  # this call only (e.g. TREAD's block replacements for one training step)
+            to = comfy.patcher_extension.merge_nested_dicts(to, extra, copy_dict1=True)
         to["cond_or_uncond"] = [0] * len(conds)
         to["uuids"] = [c["uuid"] for c in conds]
         to["sigmas"] = sigma

@@ -421,7 +421,8 @@ class Trainer:
             # the input needs grad only for ComfyUI's per-layer offload checkpoint (see memory.py);
             # otherwise it stays grad-free so the backward ends at the first trained layer
             with torch.autocast(self.device.type, dtype=self.train_dtype, enabled=self.train_dtype != torch.float32):
-                x0_pred = self.denoiser(x_t.requires_grad_(getattr(self, "_input_grad", True)), sigma, conds)
+                x0_pred = self.denoiser(x_t.requires_grad_(getattr(self, "_input_grad", True)), sigma, conds,
+                                        self._tread(idx))
             loss = self.objective.loss(x_t.detach(), x0, x0_pred, sigma, weight).mean()
             lap("forward")
             scaled = loss / acc
@@ -448,6 +449,20 @@ class Trainer:
         lap("optimizer")
         self.last_phases = {k: round(v, 4) for k, v in ph.items()}
         self.last_loss = total_loss / acc
+
+    def _tread(self, idx: list[int]) -> dict | None:
+        """TREAD's block replacements for this step: only on a video clip, only for models whose
+        blocks take the replace hook with a sequence layout (MiniMax H3)."""
+        share = self.spec.memory.tread
+        if share <= 0 or any(self.dataset.samples[i].latent.ndim != 4 or self.dataset.samples[i].latent.shape[1] < 2 for i in idx):
+            return None
+        dm = self.models.patcher.model.diffusion_model
+        if "minimax" not in type(dm).__module__.lower() or not hasattr(dm, "blocks"):
+            return None
+        from .tread import patches
+
+        p = patches(len(dm.blocks), share, self.generator)
+        return {"patches_replace": {"dit": p}} if p else None
 
     def batch(self, idx: list[int]) -> tuple[torch.Tensor, torch.Tensor | None, list | None]:
         """The model-ready x0 for these samples, its loss weights (masks; for a multi-stream
