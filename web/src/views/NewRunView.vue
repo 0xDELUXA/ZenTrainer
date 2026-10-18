@@ -886,7 +886,7 @@ async function start(position: 'next' | 'end' = 'next') {
             <ZenField label="Training dtype" stack><ZenCombo v-model="spec.memory.training_dtype" :items="items(['bf16', 'fp16', 'fp32'])" :searchable="false" :sorted="false" /></ZenField>
             <ZenField label="Attention" stack tip="Only backends with a backward pass"><ZenCombo v-model="spec.memory.attention" :items="items(trainAttention)" :searchable="false" /></ZenField>
             <ZenField label="Gradient checkpointing" stack tip="Recompute each block in backward"><div class="sw-row"><ZenSwitch v-model="spec.memory.gradient_checkpointing" /><span class="sw-state">{{ spec.memory.gradient_checkpointing ? 'On' : 'Off' }}</span></div></ZenField>
-            <ZenField v-if="spec.memory.gradient_checkpointing" label="Keep last blocks" stack tip="The last N blocks skip checkpointing: they keep their activations (more VRAM) and skip the recompute (faster)">
+            <ZenField v-if="spec.memory.gradient_checkpointing" label="Keep last blocks" stack tip="checkpoint_skip: the last N blocks skip checkpointing: they keep their activations (more VRAM) and skip the recompute (faster). Spare VRAM spent on speed">
               <ZenNumber v-model="spec.memory.checkpoint_skip" :min="0" :max="64" :step="1" :precision="0" />
             </ZenField>
             <ZenField label="Offload weights" stack tip="Stream weights from RAM"><div class="sw-row"><ZenSwitch v-model="spec.memory.offloading" /><span class="sw-state">{{ spec.memory.offloading ? 'On' : 'Off' }}</span></div></ZenField>
@@ -903,6 +903,9 @@ async function start(position: 'next' | 'end' = 'next') {
             </ZenField>
             <ZenField label="Compile blocks" stack tip="torch.compile on the model's repeated transformer block: the small operations around the big matmuls (norms, modulation, activations, the LoRA add) fuse into fewer kernels. The first steps and the first sample are slower while it compiles">
               <div class="sw-row"><ZenSwitch :model-value="!!spec.memory.compile_blocks" @update:model-value="spec.memory.compile_blocks = $event" /><span class="sw-state">{{ spec.memory.compile_blocks ? 'On' : 'Off' }}</span></div>
+            </ZenField>
+            <ZenField label="int8 forward" stack tip="int8 ConvRot bases (MiniMax H3, Krea 2 int8): the frozen layers run ComfyUI's int8 kernel forward, activations quantized, instead of rebuilding a bf16 weight for each matmul. Off is slower: for comparing quality">
+              <div class="sw-row"><ZenSwitch :model-value="spec.memory.int8_forward !== false" @update:model-value="spec.memory.int8_forward = $event" /><span class="sw-state">{{ spec.memory.int8_forward !== false ? 'On' : 'Off' }}</span></div>
             </ZenField>
             <ZenField label="int8 backward (W8A8)" stack tip="int8 ConvRot bases (MiniMax H3, Krea 2 int8): the gradient is quantized to int8 too, so each frozen layer's input gradient runs on int8 tensor cores (about 2× the bf16 backward on an RTX 5090). Rounded stochastically so it stays unbiased; noisier per step than 16-bit">
               <div class="sw-row"><ZenSwitch :model-value="!!spec.memory.w8a8_backward" @update:model-value="spec.memory.w8a8_backward = $event" /><span class="sw-state">{{ spec.memory.w8a8_backward ? 'On' : 'Off' }}</span></div>

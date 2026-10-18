@@ -98,6 +98,8 @@ export interface TrainSpec {
     fused_int8_backward?: boolean
     w8a8_backward?: boolean
     compile_blocks?: boolean
+    /** int8 bases: frozen layers run the int8 kernel forward (engine default on) */
+    int8_forward?: boolean
     tread_steps?: number
     offloading: boolean
     quantized_backward: boolean
