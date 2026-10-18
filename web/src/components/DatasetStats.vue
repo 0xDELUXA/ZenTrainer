@@ -7,7 +7,7 @@ import { engine, type DatasetStats } from '@/api/engine'
 import { ZenTip } from '@nynxz/zenkit-ui'
 import HealthPentagon from './HealthPentagon.vue'
 
-const props = defineProps<{ name: string }>()
+const props = withDefaults(defineProps<{ name: string; set?: string }>(), { set: 'default' })
 const emit = defineEmits<{ loaded: [stats: DatasetStats] }>()
 const stats = ref<DatasetStats | null>(null)
 const busy = ref(false)
@@ -17,7 +17,7 @@ async function load() {
   busy.value = true
   error.value = ''
   try {
-    stats.value = await engine.datasetStats(props.name)
+    stats.value = await engine.datasetStats(props.name, props.set)
     emit('loaded', stats.value)
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)

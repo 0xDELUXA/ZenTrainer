@@ -115,6 +115,9 @@ def items(name: str, caption_ext: str = ".txt") -> dict:
     from PIL import Image
 
     d, r = folder(name), root()
+    from .harness.data import muted as _muted
+
+    mutes = _muted(d)
     rows = []
     for it in scan(d, caption_ext, warn=False):
         clip = video.probe(it.path) if video.is_video(it.path) else None
@@ -138,6 +141,7 @@ def items(name: str, caption_ext: str = ".txt") -> dict:
             "mask": str(it.mask.relative_to(d)) if it.mask else None,
             "captions": it.captions,
             "controls": [str(c.relative_to(d)) for c in it.controls],  # edit pairs: the input picture(s)
+            "muted": sorted(s for s, paths in mutes.items() if str(it.path.relative_to(d)) in paths),
         })
         if video.is_video(it.path):
             rows[-1].update(kind="video", fps=round(clip.fps, 3) if clip else None,
@@ -149,6 +153,29 @@ def items(name: str, caption_ext: str = ".txt") -> dict:
             rows[-1]["mask_mismatch"] = bool(w and h and abs(mw / mh - w / h) > 0.02)
     sets = sorted({s for r in rows for s in r["captions"]} | {"default"}, key=lambda s: (s != "default", s))
     return {"folder": name, "items": rows, "sets": sets, "settings": get_settings(name)}
+
+
+def set_muted(name: str, set_name: str, paths: list[str], on: bool) -> dict[str, list[str]]:
+    """Mute (or unmute) pictures in a caption set: kept, captions and all, but not trained on in it.
+    Stored in the dataset folder (.zentrainer.json) so the curation travels with the dataset."""
+    from .harness.data import MUTES_FILE, muted as _muted
+
+    d = folder(name)
+    set_name = _set(set_name)
+    for p in paths:  # only pictures inside this dataset
+        if not (d / p).resolve().is_relative_to(d.resolve()):
+            raise DatasetError(f"{p} isn't in this dataset")
+    mutes = _muted(d)
+    cur = mutes.setdefault(set_name, set())
+    cur.update(paths) if on else cur.difference_update(paths)
+    f = d / MUTES_FILE
+    try:
+        data = json.loads(f.read_text())
+    except (OSError, ValueError):
+        data = {}
+    data["muted"] = {s: sorted(v) for s, v in mutes.items() if v}
+    f.write_text(json.dumps(data, indent=2))
+    return data["muted"]
 
 
 # ---- per-dataset settings (kept beside ZenTrainer's other state, not in the dataset folder) ------

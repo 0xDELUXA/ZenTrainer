@@ -80,7 +80,7 @@ async function load() {
 onMounted(load)
 
 // ---- filter / sort / select -------------------------------------------------------------------
-type Filter = 'all' | 'uncaptioned' | 'masked' | 'unmasked' | 'pairs' | 'faces' | 'images'
+type Filter = 'all' | 'uncaptioned' | 'masked' | 'unmasked' | 'pairs' | 'faces' | 'images' | 'muted'
 const filter = ref<Filter>('all')
 const query = ref('')
 const sortKey = ref<'name' | 'size' | 'res' | 'caption'>('name')
@@ -107,7 +107,29 @@ const counts = computed(() => ({
   pairs: items.value.filter((i) => i.controls?.length).length,
   faceIssues: items.value.filter((i) => faceIssue(i)).length,
   imageIssues: items.value.filter((i) => imageFlags.value[i.path]?.length).length,
+  muted: items.value.filter((i) => isMuted(i)).length,
 }))
+
+// ---- muting: kept, captions and all, but not trained on in the active caption set ----------------
+const isMuted = (it: DatasetItem) => !!it.muted?.includes(activeSet.value)
+async function setMuted(paths: string[], on: boolean) {
+  if (!paths.length) return
+  try {
+    await engine.datasetMuted(props.name, activeSet.value, paths, on)
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+    return
+  }
+  const want = new Set(paths)
+  for (const it of items.value) {
+    if (!want.has(it.path)) continue
+    const s = new Set(it.muted ?? [])
+    if (on) s.add(activeSet.value)
+    else s.delete(activeSet.value)
+    it.muted = [...s]
+  }
+  statsPanel.value?.load()
+}
 // the stats panel's per-picture flags (dark, blurry, bars, small, near-duplicate...)
 const imageFlags = ref<Record<string, string[]>>({})
 
@@ -166,7 +188,8 @@ const shown = computed(() => {
         (f === 'unmasked' && !it.mask) ||
         (f === 'pairs' && it.controls?.length) ||
         (f === 'faces' && faceIssue(it)) ||
-        (f === 'images' && imageFlags.value[it.path]?.length)) &&
+        (f === 'images' && imageFlags.value[it.path]?.length) ||
+        (f === 'muted' && isMuted(it))) &&
       (!q || cap(it).toLowerCase().includes(q) || it.path.toLowerCase().includes(q)),
   )
   const key = (it: DatasetItem): string | number =>
@@ -385,6 +408,12 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
         </button>
         <b class="sel-count">{{ selected.size }} selected</b>
         <span class="spacer" />
+        <button class="chip-btn" :title="`Keep them, but don't train on them in the “${activeSet}” caption set`" @click="setMuted([...selected], true)">
+          <i class="mdi mdi-eye-off-outline" /> Mute
+        </button>
+        <button class="chip-btn" :title="`Train on them again in the “${activeSet}” caption set`" @click="setMuted([...selected], false)">
+          <i class="mdi mdi-eye-outline" /> Unmute
+        </button>
         <button class="chip-btn danger" title="Delete the selected images with their captions and masks (asks first)" @click="removeMany([...selected])">
           <i class="mdi mdi-trash-can-outline" /> Delete
         </button>
@@ -415,6 +444,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
         <button :class="{ on: filter === 'masked' }" @click="filter = 'masked'">Masked {{ counts.masked }}</button>
         <button :class="{ on: filter === 'unmasked' }" @click="filter = 'unmasked'">Unmasked</button>
         <button v-if="counts.pairs" :class="{ on: filter === 'pairs' }" title="Edit pairs: images with a <name>_control input picture" @click="filter = 'pairs'">Pairs {{ counts.pairs }}</button>
+        <button v-if="counts.muted" :class="{ on: filter === 'muted' }" :title="`Kept, but not trained on in the “${activeSet}” caption set`" @click="filter = 'muted'">Muted {{ counts.muted }}</button>
         <button v-if="counts.imageIssues" :class="{ on: filter === 'images' }" title="Pictures the stats flagged: dark, blown out, flat, blurry, letterbox bars, greyscale, small, near-duplicate" @click="filter = 'images'">Image issues {{ counts.imageIssues }}</button>
         <button v-if="faces?.items" :class="{ on: filter === 'faces' }" title="Pictures whose face needs a look: none found, several people, or not like the others" @click="filter = 'faces'">Face issues {{ counts.faceIssues }}</button>
       </div>
@@ -467,7 +497,15 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
 
     <div v-if="notice" class="notice">{{ notice }}</div>
 
-    <DatasetStats v-if="showStats && items.length" :key="name" ref="statsPanel" :name="name" class="stats-panel" @loaded="(s) => (imageFlags = s.current.flags ?? {})" />
+    <DatasetStats
+      v-if="showStats && items.length"
+      :key="`${name}:${activeSet}`"
+      ref="statsPanel"
+      :name="name"
+      :set="activeSet"
+      class="stats-panel"
+      @loaded="(s) => (imageFlags = s.current.flags ?? {})"
+    />
 
     <ZenEmpty v-if="!loading && !items.length" title="Empty dataset" icon="mdi mdi-image-plus-outline">
       Drop images, videos, same-name .txt captions and masks (<span class="mono">name-masklabel.png</span>) anywhere on this page.
@@ -479,7 +517,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
         v-for="(it, i) in shown"
         :key="it.path"
         class="card-item"
-        :class="{ sel: selected.has(it.path) }"
+        :class="{ sel: selected.has(it.path), muted: isMuted(it) }"
       >
         <button class="thumb" :title="it.path" :data-peek="full(it)" @click="lightbox = i">
           <img :src="thumb(it, thumbSize)" loading="lazy" :alt="cap(it)" :style="{ objectFit: fit }" />
@@ -499,6 +537,14 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
             </span>
             <span v-if="!cap(it)" class="badge warn" title="No caption"><i class="mdi mdi-text-box-remove-outline" /></span>
           </span>
+        </button>
+        <button
+          class="mute-btn"
+          :class="{ on: isMuted(it) }"
+          :title="isMuted(it) ? `Muted in “${activeSet}”: click to train on it again` : `Mute in “${activeSet}”: kept, but not trained on`"
+          @click.stop="setMuted([it.path], !isMuted(it))"
+        >
+          <i :class="isMuted(it) ? 'mdi mdi-eye-off' : 'mdi mdi-eye-outline'" />
         </button>
         <label class="check" :class="{ on: selected.has(it.path) }" @click.prevent="toggleSelect(it, i, $event)">
           <i :class="selected.has(it.path) ? 'mdi mdi-checkbox-marked' : 'mdi mdi-checkbox-blank-outline'" />
@@ -1026,6 +1072,35 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
   width: 100%;
   border-radius: var(--r-sm);
   display: block;
+}
+.card-item.muted .thumb img:not(.control-inset):not(.mask-ov) {
+  opacity: 0.35;
+  filter: grayscale(0.6);
+}
+.mute-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: var(--r-sm);
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--zen-dur-fast);
+}
+.card-item:hover .mute-btn,
+.mute-btn.on,
+.mute-btn:focus-visible {
+  opacity: 1;
+}
+.mute-btn.on {
+  color: var(--zen-warn);
 }
 .stats-panel {
   margin-bottom: 12px;

@@ -234,14 +234,36 @@ def build(spec: DatasetSpec, clip, vae, root: Path, cache_dir: Path, encoder_id:
         return _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae, h3)
 
 
+MUTES_FILE = ".zentrainer.json"  # in the dataset folder: {"muted": {set: [relative paths]}}; travels with it
+
+
+def muted(root: Path) -> dict[str, set[str]]:
+    """The pictures muted in each caption set (kept, captions and all, but not trained on in that set)."""
+    try:
+        data = json.loads((root / MUTES_FILE).read_text())
+    except (OSError, ValueError):
+        return {}
+    return {s: set(v) for s, v in (data.get("muted") or {}).items()}
+
+
 def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=None, h3: bool = False) -> Dataset:
     items = scan(root, spec.caption_ext)
     if not items:
         raise FileNotFoundError(f"no images found in {root}")
+    mutes = muted(root)
+    if mutes:  # a picture trains from the sets it isn't muted in; muted in all of them, it sits out
+        used = spec.caption_mix or [spec.caption_set]
+        before = len(items)
+        items = [it for it in items if any(str(it.path.relative_to(root)) not in mutes.get(s, ()) for s in used)]
+        if len(items) < before:
+            logging.info("[ZenTrainer] %d muted picture(s) sit out (caption set %s)", before - len(items), ", ".join(used))
+        if not items:
+            raise FileNotFoundError(f"every picture in {root} is muted in {', '.join(used)}")
     variants: list[list[str]] = []
     for it in items:  # pick each image's caption(s), trigger applied, before the cache key
+        rel = str(it.path.relative_to(root))
         if spec.caption_mix:
-            texts = [it.captions[s] for s in spec.caption_mix if it.captions.get(s)]
+            texts = [it.captions[s] for s in spec.caption_mix if it.captions.get(s) and rel not in mutes.get(s, ())]
         else:
             texts = [it.captions.get(spec.caption_set, "")] if it.captions.get(spec.caption_set) else []
         texts = texts or [it.captions.get("default", "")]

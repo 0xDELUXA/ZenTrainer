@@ -551,3 +551,25 @@ def test_stochastic_rounding_is_unbiased():
     dst = torch.empty(20000, dtype=torch.bfloat16)
     _stochastic_copy(dst, src)
     assert abs(dst.float().mean().item() - (1.0 + 1e-3)) < 2e-4  # nearest rounding would give exactly 1.0
+
+
+def test_muting_per_caption_set(tmp_path, monkeypatch):
+    from PIL import Image
+
+    from zentrainer import datasets
+    from zentrainer.harness.data import muted
+
+    monkeypatch.setattr(datasets, "root", lambda: tmp_path.resolve())
+    datasets.create("cats")
+    d = datasets.folder("cats")
+    for n in ("a", "b", "c"):
+        Image.new("RGB", (8, 8)).save(d / f"{n}.png")
+    datasets.set_muted("cats", "default", ["b.png"], True)
+    datasets.set_muted("cats", "tags", ["c.png"], True)
+    assert muted(d) == {"default": {"b.png"}, "tags": {"c.png"}}
+    rows = {r["path"]: r["muted"] for r in datasets.items("cats")["items"]}
+    assert rows == {"a.png": [], "b.png": ["default"], "c.png": ["tags"]}
+    datasets.set_muted("cats", "default", ["b.png"], False)
+    assert muted(d) == {"tags": {"c.png"}}
+    with pytest.raises(datasets.DatasetError):
+        datasets.set_muted("cats", "default", ["../x.png"], True)

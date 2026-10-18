@@ -158,18 +158,20 @@ def image_flags(looks: dict[str, dict | None], sides: dict[str, int]) -> dict[st
     return out
 
 
-def compute(name: str) -> dict:
-    """The dataset's metrics and 0-1 scores, now."""
+def compute(name: str, set_name: str = "default") -> dict:
+    """The dataset's metrics and 0-1 scores, now, for one caption set: its captions, and without
+    the pictures muted in it."""
     from PIL import Image
 
     from . import datasets, faces
     from .harness import video
-    from .harness.data import scan
+    from .harness.data import muted, scan
 
     root = datasets.folder(name)
-    items = scan(root, warn=False)
+    off = muted(root).get(set_name, set())
+    items = [it for it in scan(root, warn=False) if str(it.path.relative_to(root)) not in off]
     n = len(items)
-    caps = [it.caption.strip() for it in items]
+    caps = [(it.captions.get(set_name) or "").strip() for it in items]
     captioned = [c for c in caps if c]
     words = [len(c.split()) for c in captioned]
     sets = Counter(s for it in items for s, t in it.captions.items() if t.strip())
@@ -220,6 +222,7 @@ def compute(name: str) -> dict:
         "greyscale": count("greyscale"),
         "saturation_median": round(st.median(lk["sat"] for lk in lv), 3) if lv else 0,
         "image_issues": sum(1 for f in flags.values() if set(f) - {"near-duplicate"}),
+        "muted": len(off),
         "masked": sum(1 for it in items if it.mask),
         "pairs": sum(1 for it in items if it.controls),
     }
@@ -269,39 +272,48 @@ def _cached_faces(name: str) -> dict | None:
     return faces.dataset_faces(name) if datasets.get_settings(name).get("faces") else None
 
 
-def _fingerprint(name: str) -> str:
+def _fingerprint(name: str, set_name: str) -> str:
+    """What the dataset is, for this set: its files, the set's captions, masks, pairs, mutes."""
     from . import datasets
-    from .harness.data import scan
+    from .harness.data import muted, scan
 
-    h = hashlib.sha256()
-    for it in scan(datasets.folder(name), warn=False):
+    root = datasets.folder(name)
+    h = hashlib.sha256(json.dumps(sorted(muted(root).get(set_name, ()))).encode())
+    for it in scan(root, warn=False):
         s = it.path.stat()
-        h.update(f"{it.path.name}|{s.st_mtime_ns}|{s.st_size}|{it.caption}|{bool(it.mask)}|{len(it.controls)}".encode())
+        h.update(f"{it.path.name}|{s.st_mtime_ns}|{s.st_size}|{it.captions.get(set_name, '')}|{bool(it.mask)}|{len(it.controls)}".encode())
     return h.hexdigest()[:20]
 
 
-def history(name: str) -> list[dict]:
+def _history_file(name: str, set_name: str) -> Path:
+    return _store_dir() / (f"{_key(name)}.jsonl" if set_name == "default" else f"{_key(name)}.{_key(set_name)}.jsonl")
+
+
+def history(name: str, set_name: str = "default") -> list[dict]:
     try:
-        return [json.loads(line) for line in (_store_dir() / f"{_key(name)}.jsonl").read_text().splitlines() if line]
+        return [json.loads(line) for line in _history_file(name, set_name).read_text().splitlines() if line]
     except OSError:
         return []
 
 
-def snapshot(name: str) -> dict:
-    """Compute now; append to the history when the dataset changed since the last snapshot (or the
-    face report was added). Returns {"current", "history"}."""
-    now = compute(name)
-    fp = _fingerprint(name) + ("|faces" if "faces" in now["scores"] else "")
-    past = history(name)
-    if not past or past[-1].get("fingerprint") != fp or "quality" not in past[-1].get("scores", {}):
-        row = {"at": time.time(), "fingerprint": fp, "metrics": now["metrics"], "scores": now["scores"]}
-        with open(_store_dir() / f"{_key(name)}.jsonl", "a") as f:
-            f.write(json.dumps(row) + "\n")
+def snapshot(name: str, set_name: str = "default") -> dict:
+    """Compute now. A new snapshot only when the dataset changed since the last one; otherwise the
+    latest is refreshed in place (faces turned on, measured again), so the history is a record of
+    edits. Returns {"current", "history"}."""
+    now = compute(name, set_name)
+    fp = _fingerprint(name, set_name)
+    past = history(name, set_name)
+    row = {"at": time.time(), "fingerprint": fp, "metrics": now["metrics"], "scores": now["scores"]}
+    if past and past[-1].get("fingerprint", "").split("|")[0] == fp:
+        row["at"] = past[-1]["at"]
+        past[-1] = row
+    else:
         past.append(row)
+    _history_file(name, set_name).write_text("".join(json.dumps(r) + "\n" for r in past))
     return {"current": now, "history": past[-60:]}
 
 
 def latest_scores(name: str) -> dict | None:
-    """The last snapshot's scores, cheap (for the datasets list); None before a first look."""
+    """The default set's last snapshot's scores, cheap (for the datasets list); None before a first look."""
     past = history(name)
     return past[-1]["scores"] if past else None

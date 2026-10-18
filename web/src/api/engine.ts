@@ -315,6 +315,8 @@ export interface DatasetItem {
   /** the mask's shape differs from the image's: stretched over it, it won't line up */
   mask_mismatch?: boolean
   captions: Record<string, string>
+  /** caption sets it's muted in: kept, but not trained on in those sets */
+  muted?: string[]
   /** edit pairs: the input picture(s), dataset-relative */
   controls?: string[]
   kind?: 'video'
@@ -729,7 +731,13 @@ export const engine = {
       method: 'POST',
       body: JSON.stringify({ link, family, file }),
     }),
-  datasetStats: (name: string) => call<DatasetStats>(`/datasets/${encodeURIComponent(name)}/stats`),
+  datasetStats: (name: string, set = 'default') =>
+    call<DatasetStats>(`/datasets/${encodeURIComponent(name)}/stats?set=${encodeURIComponent(set)}`),
+  datasetMuted: (name: string, set: string, paths: string[], muted: boolean) =>
+    call<{ muted: Record<string, string[]> }>(`/datasets/${encodeURIComponent(name)}/muted`, {
+      method: 'PUT',
+      body: JSON.stringify({ set, paths, muted }),
+    }),
   datasetFaces: (name: string) => call<DatasetFaces>(`/datasets/${encodeURIComponent(name)}/faces`),
   addCaptionLora: (link: string, file?: string, id?: string) =>
     call<{ download?: ModelDownload; name?: string; choices?: { file: string; size: number | null }[]; repo?: string }>('/caption/loras', {

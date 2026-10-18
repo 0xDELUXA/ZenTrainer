@@ -107,6 +107,18 @@ def register(server) -> None:
         return await _ds(lambda: {"changed": datasets.bulk(name, b.get("op", ""), b.get("text", ""), b.get("find", ""),
                                                            set_name=str(b.get("set") or "default"))})
 
+    @routes.put("/zentrainer/api/datasets/{name}/muted")
+    async def dataset_muted(request):
+        """{"set", "paths", "muted": bool}: mute or unmute pictures in a caption set."""
+        b = await request.json()
+        try:
+            return web.json_response({"muted": datasets.set_muted(request.match_info["name"], str(b.get("set") or "default"),
+                                                                  [str(p) for p in b.get("paths") or []], bool(b.get("muted", True)))})
+        except FileNotFoundError:
+            return _bad("dataset not found", 404)
+        except datasets.DatasetError as e:
+            return _bad(str(e))
+
     @routes.put("/zentrainer/api/datasets/{name}/settings")
     async def dataset_settings(request):
         """{"faces": bool}: this dataset's settings (faces: face report on open, in the stats, likeness)."""
@@ -122,7 +134,8 @@ def register(server) -> None:
         from . import dataset_stats
 
         try:
-            return web.json_response(await asyncio.to_thread(dataset_stats.snapshot, request.match_info["name"]))
+            return web.json_response(await asyncio.to_thread(dataset_stats.snapshot, request.match_info["name"],
+                                                             request.query.get("set") or "default"))
         except FileNotFoundError:
             return _bad("dataset not found", 404)
 
