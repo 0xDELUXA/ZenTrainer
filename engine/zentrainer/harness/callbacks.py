@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import torch
@@ -238,7 +239,8 @@ class Samples(Callback):
                 for i, (pos, neg) in enumerate(self._conds):
                     progress(i, 0, s.steps)
                     channels = model.model.latent_format.latent_channels
-                    latent = torch.zeros([1, channels, s.height // comp, s.width // comp])
+                    t_lat = _latent_frames(vae, s.frames)
+                    latent = torch.zeros([1, channels] + ([t_lat] if t_lat else []) + [s.height // comp, s.width // comp])
                     latent = comfy.sample.fix_empty_latent_channels(model, latent)
                     noise = comfy.sample.prepare_noise(latent, s.seed + i)
                     def cb(step, x0, _x, total, _i=i):
@@ -250,10 +252,16 @@ class Samples(Callback):
                         out = comfy.sample.sample(model, noise, s.steps, s.cfg, s.sampler, s.scheduler,
                                                   pos, neg, latent, seed=s.seed + i, disable_pbar=True, callback=cb)
                     img = vae.decode(first_stream(out))
-                    img = img.reshape(-1, *img.shape[-3:])[0]
-                    name = f"step{t.step:06d}_{i:02d}.png"
-                    Image.fromarray((img.clamp(0, 1).cpu().numpy() * 255).astype("uint8")).save(
-                        os.path.join(out_dir, name))
+                    img = img.reshape(-1, *img.shape[-3:])  # (frames, H, W, 3)
+                    if t_lat:
+                        from . import video
+
+                        name = f"step{t.step:06d}_{i:02d}.mp4"
+                        video.write(Path(out_dir) / name, img, s.fps, _sound(t, out))
+                    else:
+                        name = f"step{t.step:06d}_{i:02d}.png"
+                        Image.fromarray((img[0].clamp(0, 1).cpu().numpy() * 255).astype("uint8")).save(
+                            os.path.join(out_dir, name))
                     row = {
                         "run_id": t.run_id, "step": t.step, "index": i, "prompt": self.prompts[i],
                         "filename": name, "subfolder": f"zentrainer/samples/{t.run_id}", "type": "output",
@@ -393,3 +401,27 @@ def _preview_url(previewer, x0) -> str | None:
 
 def write_metadata(spec_dict: dict, step: int) -> dict[str, str]:
     return {"zentrainer.spec": json.dumps(spec_dict), "zentrainer.step": str(step)}
+
+
+def _latent_frames(vae, frames: int) -> int:
+    """Latent frames for a `frames`-long sample from a video VAE, 0 for a still (or an image VAE)."""
+    down = getattr(vae, "downscale_ratio", None)
+    if frames <= 1 or not (isinstance(down, tuple) and callable(down[0])):
+        return 0
+    return int(down[0](frames))
+
+
+def _sound(t, out):
+    """A joint audio-video sample's soundtrack ((channels, samples), rate), when the run has the
+    model's audio VAE; else None (the sample is saved silent)."""
+    avae = getattr(t.models, "audio_vae", None)
+    if avae is None or not getattr(out, "is_nested", False):
+        return None
+    streams = out.unbind()
+    if len(streams) < 2:
+        return None
+    wave = avae.decode(streams[-1]).movedim(-1, 1)[:1]  # (1, channels, samples)
+    std = torch.std(wave, dim=[1, 2], keepdim=True) * 5.0  # as ComfyUI's VAEDecodeAudio levels it
+    wave = wave / std.clamp(min=1.0)
+    rate = getattr(avae, "audio_sample_rate_output", getattr(avae, "audio_sample_rate", 44100))
+    return wave[0].float().cpu(), int(rate)

@@ -244,10 +244,17 @@ def clean(text: str) -> str:
     return text.strip().strip('"').strip()
 
 
-def instruction(job: CaptionJob) -> str:
+VIDEO_FRAMES = 4  # frames a video clip is shown as
+VIDEO_NOTE = (f"These are {VIDEO_FRAMES} frames, in order, from one short video clip. Describe the clip as a whole, "
+              "not each frame: also how it moves (subject and camera) and how it is edited (cuts, split screens, "
+              "overlays, text, effects), if it is. Treat \"image\" in what follows as the clip.\n")
+
+
+def instruction(job: CaptionJob, is_video: bool = False) -> str:
+    text = (VIDEO_NOTE if is_video else "") + job.prompt
     if not job.subject:
-        return job.prompt
-    return (f"{job.prompt}\nRefer to the main subject as \"{job.subject}\" (exactly that, not a description "
+        return text
+    return (f"{text}\nRefer to the main subject as \"{job.subject}\" (exactly that, not a description "
             f"of who they are).")
 
 
@@ -310,13 +317,14 @@ def run(job: CaptionJob) -> None:
             clip = nodes.CLIPLoader().load_clip(job.clip_name, ctype)[0]
             if not hasattr(clip, "generate"):
                 raise RuntimeError(f"{job.clip_name} can't generate text; pick a vision-language model (Qwen-VL, Gemma)")
-            prompt = instruction(job)
+            from .harness import video
             pbar = comfy.utils.ProgressBar(len(items))
             for it in items:
                 if job.status != "running":  # cancelled
                     break
-                image = _picture(it.path)  # (1, H, W, 3) in [0, 1]
-                tokens = clip.tokenize(prompt, image=image, min_length=1)
+                is_video = video.is_video(it.path)
+                image = _picture(it.path)  # (1 or VIDEO_FRAMES, H, W, 3) in [0, 1]
+                tokens = clip.tokenize(instruction(job, is_video), image=image, min_length=1)
                 ids = clip.generate(tokens, do_sample=False, max_length=job.max_length)
                 text = clean(clip.decode(ids))
                 rel = str(it.path.relative_to(root))
@@ -346,16 +354,24 @@ def run(job: CaptionJob) -> None:
 
 
 def _picture(path: Path):
-    """What the model looks at: the image, or a video's middle frame; at most 1024 px a side,
-    in multiples of 28 (the vision encoder's patch grid)."""
+    """What the model looks at: the image at most 1024 px a side, or VIDEO_FRAMES frames spread
+    over a video at most 640 px (several pictures cost tokens); sides in multiples of 28 (the
+    vision encoder's patch grid)."""
     import numpy as np
     import torch
     from PIL import Image
 
     from .harness import video
 
-    im = video.poster(path, 0.5) if video.is_video(path) else Image.open(path)
-    with im:
+    if video.is_video(path):
+        p = video.probe(path)
+        n = max(p.frames, 1) if p else 1
+        idx = sorted({min(n - 1, round((n - 1) * (i + 0.5) / VIDEO_FRAMES)) for i in range(VIDEO_FRAMES)})
+        w, h = (p.width, p.height) if p else (640, 640)
+        scale = min(1.0, 640 / max(w, h))
+        size = (max(28, round(w * scale / 28) * 28), max(28, round(h * scale / 28) * 28))
+        return video.read(path, idx, size)
+    with Image.open(path) as im:
         w, h = im.size
         scale = min(1.0, 1024 / max(w, h))
         size = (max(28, round(w * scale / 28) * 28), max(28, round(h * scale / 28) * 28))

@@ -218,8 +218,11 @@ class Trainer:
         root = Path(folder_paths.get_input_directory()) / s.dataset.folder
         cache = Path(folder_paths.get_user_directory()) / "zentrainer" / "cache"
         self.encoder_id, self.cache_dir = encoder_id, cache
+        if s.dataset.video_audio and self.models.audio_vae is None:
+            raise ValueError("training on video sound needs the model's audio VAE: set Model -> Audio VAE")
         self.dataset = data.build(s.dataset, _Lazy(lambda: self.models.clip), self.models.vae, root, cache, encoder_id,
-                                  progress=lambda i, n, msg: self._status("loading", message=f"{msg} ({i}/{n})"))
+                                  progress=lambda i, n, msg: self._status("loading", message=f"{msg} ({i}/{n})"),
+                                  audio_vae=self.models.audio_vae)
         self.batches = data.Batches(self.dataset, s.optim.batch_size, s.seed)
 
         if s.memory.training_dtype != "fp32":
@@ -406,7 +409,8 @@ class Trainer:
         model = self.models.patcher.model
         latent = torch.stack([self.dataset.samples[i].latent for i in idx]).to(self.device, torch.float32)
         weight = self._mask_weight(idx, latent) if self.spec.dataset.masked_loss else None
-        packed = self.streams.pack(latent, weight)
+        audio = [self.dataset.samples[i].audio for i in idx]
+        packed = self.streams.pack(latent, weight, audio if any(a is not None for a in audio) else None)
         if packed is None:
             return model.process_latent_in(latent), weight, None
         model.latent_shapes = packed.shapes  # how the sampler leaves it: process_latent_in reads it

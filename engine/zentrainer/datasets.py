@@ -202,6 +202,26 @@ def save_upload(name: str, filename: str, data: bytes) -> str:
     return str(target.relative_to(d))
 
 
+def split_videos(name: str, seconds: float = 3.0, count: int = 20, longer_than: float = 20.0) -> dict:
+    """Cut every video in the dataset longer than `longer_than` s into short clips (see
+    harness/video.split) beside it; the originals move to _long/, which training ignores."""
+    d = folder(name)
+    clips, moved = 0, []
+    for it in scan(d, warn=False):
+        if not video.is_video(it.path):
+            continue
+        p = video.probe(it.path)
+        if p is None or p.duration <= longer_than:
+            continue
+        stem = re.sub(r"[^A-Za-z0-9]+", "_", it.path.stem).strip("_")[:48] or "clip"
+        clips += len(video.split(it.path, it.path.parent, seconds, count, stem=stem))
+        keep = d / "_long" / it.path.relative_to(d)
+        keep.parent.mkdir(parents=True, exist_ok=True)
+        it.path.rename(keep)
+        moved.append(str(keep.relative_to(d)))
+    return {"clips": clips, "moved": moved}
+
+
 def thumbnail(name: str, rel: str, size: int, cache: Path) -> Path:
     """A cached JPEG thumbnail (longest side `size`) of an image, a video (a frame a little way
     in, past fades from black) or a mask in the dataset."""

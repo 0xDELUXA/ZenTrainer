@@ -125,3 +125,109 @@ def poster(path: Path, at: float = 0.0):
             if i >= target:
                 return frame.to_image()
     return None
+
+
+def split(src: Path, out_dir: Path, seconds: float, count: int, fps: float = 24.0, short_side: int = 768,
+          stem: str | None = None) -> list[Path]:
+    """Cut a long video into `count` clips of `seconds` each, spread evenly over it (or every
+    whole clip when `count` is 0), re-encoded small: `fps`, the short side at most
+    `short_side`, the soundtrack kept as AAC (joint audio-video models can train on it). Clips land in `out_dir` as <stem>_<n>.mp4; existing ones are kept.
+    Uses ffmpeg (seeks, so a clip costs a few seconds whatever the source length)."""
+    import shutil
+    import subprocess
+
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        raise RuntimeError("splitting videos needs ffmpeg on the PATH")
+    p = probe(src)
+    if p is None or not p.duration:
+        raise ValueError(f"can't read {src.name}")
+    whole = int(p.duration // seconds)
+    if whole < 1:
+        return []
+    n = whole if count <= 0 else min(count, whole)
+    span = p.duration - seconds
+    starts = [span * i / max(n - 1, 1) for i in range(n)] if n > 1 else [0.0]
+    stem = stem or src.stem
+    out_dir.mkdir(parents=True, exist_ok=True)
+    scale = f"scale='if(lt(iw,ih),min({short_side},iw),-2)':'if(lt(iw,ih),-2,min({short_side},ih))'"
+    made = []
+    for i, t in enumerate(starts):
+        dst = out_dir / f"{stem}_{i:03d}.mp4"
+        if not dst.exists():
+            tmp = dst.with_suffix(".part.mp4")
+            subprocess.run([ffmpeg, "-v", "error", "-y", "-ss", f"{t:.3f}", "-i", str(src), "-t", f"{seconds:.3f}",
+                            "-vf", f"{scale},fps={fps}", "-c:a", "aac", "-b:a", "192k", "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
+                            "-pix_fmt", "yuv420p", str(tmp)], check=True)
+            tmp.replace(dst)
+        made.append(dst)
+    return made
+
+
+def write(path: Path, frames: torch.Tensor, fps: float, sound: tuple[torch.Tensor, int] | None = None) -> None:
+    """(T, H, W, 3) in [0, 1] to an H.264 .mp4 (sides rounded down to even, as yuv420 needs),
+    with `sound` ((channels, samples) in [-1, 1], rate) as AAC when given."""
+    import av
+    import numpy as np
+
+    arr = (frames.clamp(0, 1).cpu().float().numpy() * 255).astype(np.uint8)
+    h, w = arr.shape[1] // 2 * 2, arr.shape[2] // 2 * 2
+    tmp = path.with_suffix(".part.mp4")
+    with av.open(str(tmp), "w") as c:
+        s = c.add_stream("libx264", rate=round(fps))
+        s.width, s.height, s.pix_fmt = w, h, "yuv420p"
+        s.options = {"crf": "18", "preset": "veryfast"}
+        a = None
+        if sound is not None:
+            wave, sr = sound
+            wave = wave.clamp(-1, 1).numpy().astype(np.float32)
+            a = c.add_stream("aac", rate=sr)
+            a.layout = "stereo" if wave.shape[0] >= 2 else "mono"
+        for f in arr:
+            for pkt in s.encode(av.VideoFrame.from_ndarray(np.ascontiguousarray(f[:h, :w]), format="rgb24")):
+                c.mux(pkt)
+        for pkt in s.encode():
+            c.mux(pkt)
+        if a is not None:
+            wave = wave[:2]
+            for i in range(0, wave.shape[1], 1024):
+                frame = av.AudioFrame.from_ndarray(np.ascontiguousarray(wave[:, i:i + 1024]), format="fltp", layout=a.layout.name)
+                frame.sample_rate = sr
+                for pkt in a.encode(frame):
+                    c.mux(pkt)
+            for pkt in a.encode():
+                c.mux(pkt)
+    tmp.replace(path)
+
+
+def read_audio(path: Path, t0: float, t1: float) -> tuple[torch.Tensor, int] | None:
+    """The audio from t0 to t1 s as ((channels, samples) float32 in [-1, 1], sample rate); None
+    when the video has no audio track."""
+    import av
+    import numpy as np
+
+    with av.open(str(path)) as c:
+        if not c.streams.audio:
+            return None
+        s = c.streams.audio[0]
+        sr = s.codec_context.sample_rate
+        layout = "stereo" if (s.codec_context.channels or 1) >= 2 else "mono"
+        rs = av.AudioResampler(format="fltp", layout=layout, rate=sr)
+        c.seek(max(0, int((t0 - 0.5) / s.time_base)), stream=s, any_frame=False, backward=True)
+        chunks, start = [], None
+        for frame in c.decode(s):
+            if frame.pts is not None and frame.pts * s.time_base > t1:
+                break
+            for f in rs.resample(frame):
+                if start is None:
+                    start = float(f.pts * f.time_base) if f.pts is not None else t0
+                chunks.append(f.to_ndarray())
+        if not chunks:
+            return None
+    wave = np.concatenate(chunks, axis=1)
+    a = max(0, int(round((t0 - start) * sr)))
+    n = int(round((t1 - t0) * sr))
+    wave = wave[:, a:a + n]
+    if wave.shape[1] < n:
+        wave = np.pad(wave, ((0, 0), (0, n - wave.shape[1])))
+    return torch.from_numpy(np.ascontiguousarray(wave, dtype=np.float32)), sr

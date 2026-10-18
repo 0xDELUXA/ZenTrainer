@@ -24,6 +24,9 @@ class ModelSpec:
     clip_name: str | None = None
     clip_type: str | None = None
     vae_name: str | None = None
+    # Joint audio-video models (MiniMax H3): their audio VAE, needed to train on a video's sound
+    # (dataset.video_audio) and to put sound in video samples.
+    audio_vae_name: str | None = None
 
 
 @dataclass
@@ -61,6 +64,9 @@ class DatasetSpec:
     video_mode: str = "uniform"
     video_clips: int = 1
     video_resolution: int = 512
+    # Train on each clip's soundtrack too (joint audio-video models with model.audio_vae_name):
+    # the audio stream joins the loss instead of being left out, so cuts can learn the beat.
+    video_audio: bool = False
 
 
 @dataclass
@@ -136,6 +142,10 @@ class SampleSpec:
     negative: str = ""
     width: int = 1024
     height: int = 1024
+    # Video models: frames per sample (1 = a still). Snapped to a length the VAE decodes,
+    # saved as an .mp4 at `fps`.
+    frames: int = 1
+    fps: float = 24.0
     steps: int = 20
     cfg: float = 5.0
     sampler: str = "euler"
@@ -248,6 +258,8 @@ class TrainSpec:
             _choice("network.targets", self.network.targets, ("attn", "attn_mlp", "all"))
         if self.optim.steps < 1:
             raise SpecError("optim.steps must be >= 1")
+        if self.samples.frames < 1 or self.samples.fps <= 0:
+            raise SpecError("samples.frames must be >= 1 and samples.fps > 0")
         if self.save_every < 0 or self.samples.every < 0:
             raise SpecError("save_every and samples.every must be >= 0 (0 = off)")
         if self.validation.every < 0 or self.validation.images < 1 or self.validation.timesteps < 1:

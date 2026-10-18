@@ -84,6 +84,9 @@ export interface TrainSpec {
     negative: string
     width: number
     height: number
+    /** video models: frames per sample (1 = a still) */
+    frames?: number
+    fps?: number
     steps: number
     cfg: number
     sampler: string

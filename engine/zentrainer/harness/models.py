@@ -20,6 +20,7 @@ class Models:
     _clip: Any  # comfy.sd.CLIP, or None until first used (see `clip`)
     vae: Any  # comfy.sd.VAE
     _clip_loader: Any = None
+    audio_vae: Any = None  # comfy.sd.VAE for a joint audio-video model's sound, when the spec names one
 
     @property
     def clip(self):
@@ -61,4 +62,5 @@ def load(spec: ModelSpec) -> Models:
     path = folder_paths.get_full_path_or_raise("diffusion_models", spec.unet_name)
     patcher = comfy.sd.load_diffusion_model(path, model_options=opts, disable_dynamic=True)
     vae = nodes.VAELoader().load_vae(spec.vae_name)[0]
-    return Models(patcher, None, vae, lambda: nodes.CLIPLoader().load_clip(spec.clip_name, spec.clip_type)[0])
+    audio_vae = nodes.VAELoader().load_vae(spec.audio_vae_name)[0] if spec.audio_vae_name else None
+    return Models(patcher, None, vae, lambda: nodes.CLIPLoader().load_clip(spec.clip_name, spec.clip_type)[0], audio_vae)

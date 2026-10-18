@@ -88,6 +88,14 @@ def register(server) -> None:
         return await _ds(lambda: {"changed": datasets.bulk(name, b.get("op", ""), b.get("text", ""), b.get("find", ""),
                                                            set_name=str(b.get("set") or "default"))})
 
+    @routes.post("/zentrainer/api/datasets/{name}/split")
+    async def split_videos(request):
+        """Cut long videos into short clips: {seconds?, count? (per video, 0 = all), longer_than?}."""
+        name = request.match_info["name"]
+        b = await request.json() if request.can_read_body else {}
+        return await _ds(lambda: datasets.split_videos(name, float(b.get("seconds") or 3.0), int(b.get("count", 20)),
+                                                       float(b.get("longer_than") or 20.0)))
+
     @routes.get("/zentrainer/api/caption")
     async def caption_info(request):
         """Styles, models, and the recent jobs (?dataset= for one dataset's)."""

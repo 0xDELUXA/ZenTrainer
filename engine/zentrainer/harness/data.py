@@ -50,6 +50,7 @@ class Sample:
     caption: int  # index into Dataset.conditionings
     mask: torch.Tensor | None = None  # (h, w) in [0, 1] at latent resolution
     variants: list[int] = field(default_factory=list)  # caption choices when mixing sets
+    audio: torch.Tensor | None = None  # (C, 2, Ta): a clip's soundtrack latent (joint audio-video models)
 
 
 @dataclass
@@ -173,6 +174,8 @@ def cache_key(items: list[Item], spec: DatasetSpec, encoder_id: str) -> str:
     if any(is_video(it.path) for it in items):  # only then: image datasets keep their caches
         h.update(json.dumps([spec.video_frames, spec.video_fps, spec.video_mode, spec.video_clips,
                              spec.video_resolution]).encode())
+        if spec.video_audio:
+            h.update(b"audio")
     for it in items:
         st = it.path.stat()
         h.update(f"{it.path}|{st.st_mtime_ns}|{st.st_size}|{it.caption}".encode())
@@ -182,15 +185,16 @@ def cache_key(items: list[Item], spec: DatasetSpec, encoder_id: str) -> str:
     return h.hexdigest()[:20]
 
 
-def build(spec: DatasetSpec, clip, vae, root: Path, cache_dir: Path, encoder_id: str, progress=None) -> Dataset:
+def build(spec: DatasetSpec, clip, vae, root: Path, cache_dir: Path, encoder_id: str, progress=None,
+          audio_vae=None) -> Dataset:
     # The harness runs outside ComfyUI's inference_mode, where the frozen VAE/text
     # encoder parameters still require grad: encode under no_grad, or every cached
     # latent drags an autograd graph (and a VAE backward) into training.
     with torch.no_grad():
-        return _build(spec, clip, vae, root, cache_dir, encoder_id, progress)
+        return _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae)
 
 
-def _build(spec, clip, vae, root, cache_dir, encoder_id, progress) -> Dataset:
+def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=None) -> Dataset:
     items = scan(root, spec.caption_ext)
     if not items:
         raise FileNotFoundError(f"no images found in {root}")
@@ -238,7 +242,10 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress) -> Dataset:
             size = pick_bucket(p.width, p.height, video_sizes)
             for k, frames in enumerate(windows):
                 latent = _encode(vae, video.read(it.path, frames, size), it.path)
-                samples.append(Sample(latent, idx[0], None, idx))
+                sound = None
+                if spec.video_audio and audio_vae is not None:
+                    sound = _encode_audio(audio_vae, it.path, frames[0] / p.fps, (frames[-1] + 1) / p.fps)
+                samples.append(Sample(latent, idx[0], None, idx, sound))
                 owners.append(n)
                 if progress:
                     progress(n + 1, len(items) + len(captions), f"encoding {it.path.name} ({k + 1}/{len(windows)})")
@@ -283,6 +290,23 @@ def _encode(vae, pixels: torch.Tensor, path: Path) -> torch.Tensor:
 
 # The cache holds only tensors, lists, dicts and strings. Pickling our own classes
 # would tie the file to a module path, and ComfyUI imports custom nodes by path.
+def _encode_audio(audio_vae, path: Path, t0: float, t1: float) -> torch.Tensor | None:
+    """The soundtrack from t0 to t1 s as the audio VAE's latent (C, 2, Ta); None for a silent video."""
+    import comfy.audio
+
+    got = video.read_audio(path, t0, t1)
+    if got is None:
+        return None
+    wave, sr = got  # (channels, samples)
+    if wave.shape[0] == 1:
+        wave = wave.repeat(2, 1)
+    vae_sr = getattr(audio_vae, "audio_sample_rate", 32000)
+    wave = wave[None, :2]
+    if sr != vae_sr:
+        wave = comfy.audio.resample(wave, sr, vae_sr)
+    return audio_vae.encode(wave.movedim(1, -1))[0].float().cpu()  # (C, 2, Ta)
+
+
 def _to_plain(ds: Dataset) -> dict:
     return {
         "version": 3,
@@ -294,13 +318,15 @@ def _to_plain(ds: Dataset) -> dict:
         "captions": ds.captions,
         "empty_caption": ds.empty_caption,
         "owners": ds.owners,
+        "audio": [s.audio for s in ds.samples],
     }
 
 
 def _from_plain(d: dict) -> Dataset:
     masks = d.get("masks") or [None] * len(d["latents"])
     variants = d.get("variants") or [[c] for c in d["caption_idx"]]
-    samples = [Sample(lat, c, m, v) for lat, c, m, v in zip(d["latents"], d["caption_idx"], masks, variants)]
+    audio = d.get("audio") or [None] * len(d["latents"])
+    samples = [Sample(lat, c, m, v, a) for lat, c, m, v, a in zip(d["latents"], d["caption_idx"], masks, variants, audio)]
     owners = d.get("owners") or list(range(len(samples)))  # before videos: one sample per item
     return Dataset(samples, d["conditionings"], d["captions"], d["empty_caption"], owners=owners)
 

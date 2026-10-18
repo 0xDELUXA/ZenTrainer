@@ -283,8 +283,10 @@ watch([() => steps.value.length, sampleView], async () => {
 })
 
 const lb = ref<{ items: LightboxItem[]; index: number; grid?: number } | null>(null)
+const isVideo = (x: SampleRow) => /\.(mp4|webm)$/i.test(x.filename)
 const sampleItem = (x: SampleRow): LightboxItem => ({
   src: viewUrl(x),
+  kind: isVideo(x) ? 'video' : 'image',
   label: `${x.index + 1} · ${x.step === 0 ? 'baseline' : `step ${x.step}`}${x.model ? ` · ${x.model}` : ''}`,
   meta: x.prompt,
 })
@@ -445,7 +447,8 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
                     <span class="tile-badge mono">{{ sampling?.s_step }}/{{ sampling?.s_total }}</span>
                   </template>
                   <button v-else-if="latestFor(i - 1)" class="tile-btn" :class="{ stale: sampling && sampling.phase === 'sampling' && (sampling.index ?? 0) < i - 1 }" @click="openLatest(i - 1)">
-                    <img :src="viewUrl(latestFor(i - 1)!)" alt="" />
+                    <video v-if="isVideo(latestFor(i - 1)!)" :src="viewUrl(latestFor(i - 1)!)" autoplay muted loop playsinline />
+                    <img v-else :src="viewUrl(latestFor(i - 1)!)" alt="" />
                   </button>
                   <div v-else class="tile-empty"><i class="mdi mdi-image-outline" /></div>
                   <span class="tile-num mono">{{ i }}</span>
@@ -471,7 +474,17 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
                   <div class="mrow">
                     <div v-for="s in steps" :key="s" class="mcell">
                       <button v-if="cell(index, s)" @click="openGrid(index, s)">
-                        <img :src="viewUrl(cell(index, s)!)" loading="lazy" :alt="prompt" />
+                        <video
+                          v-if="isVideo(cell(index, s)!)"
+                          :src="viewUrl(cell(index, s)!)"
+                          muted
+                          loop
+                          playsinline
+                          preload="metadata"
+                          @mouseenter="($event.target as HTMLVideoElement).play()"
+                          @mouseleave="($event.target as HTMLVideoElement).pause()"
+                        />
+                        <img v-else :src="viewUrl(cell(index, s)!)" loading="lazy" :alt="prompt" />
                       </button>
                     </div>
                   </div>
@@ -777,7 +790,8 @@ dd {
 .tile.live {
   box-shadow: 0 0 0 2px var(--zen-accent);
 }
-.tile img {
+.tile img,
+.tile video {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -985,7 +999,8 @@ dd {
   background: var(--zen-surface-2);
   overflow: hidden;
 }
-.mcell img {
+.mcell img,
+.mcell video {
   width: var(--t);
   height: var(--t);
   object-fit: cover;

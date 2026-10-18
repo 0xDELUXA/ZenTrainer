@@ -73,3 +73,20 @@ def test_read_and_probe_a_real_clip(tmp_path):
     assert frames.shape == (3, 32, 32, 3)
     assert frames[0].mean() < frames[1].mean() < frames[2].mean()  # brightness rises with the index
     assert data.scan(tmp_path, warn=False)[0].path == path
+
+
+def test_write_and_read_back_sound(tmp_path):
+    pytest.importorskip("av")
+    t = torch.linspace(0, 1, 32000)
+    wave = torch.stack([torch.sin(2 * math.pi * 440 * t), torch.sin(2 * math.pi * 220 * t)]) * 0.5
+    frames = torch.rand(24, 32, 48, 3)
+    path = tmp_path / "s.mp4"
+    video.write(path, frames, 24, (wave, 32000))
+    p = video.probe(path)
+    assert (p.width, p.height) == (48, 32) and p.frames == 24
+    got = video.read_audio(path, 0.25, 0.75)
+    assert got is not None
+    a, sr = got
+    assert sr == 32000 and a.shape == (2, 16000)
+    assert a.abs().max() > 0.2  # the tone is there, not silence
+    assert video.read_audio(tmp_path / "s.mp4", 0, 0.1)[0].shape[1] == 3200

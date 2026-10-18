@@ -136,3 +136,16 @@ def test_training_adapter_is_switchable_and_not_saved():
     only = _Assisted(None, _Frozen(10.0), sw)  # a layer only the training adapter touches
     sw.on = False
     assert only(w).tolist() == [0.0, 0.0] and only.h(w, w) == 0
+
+
+def test_pack_trains_a_real_soundtrack(monkeypatch):
+    _comfy_utils(monkeypatch)
+    s = Streams(types.SimpleNamespace(latent_format=_AV()))
+    lat = torch.ones(2, 4, 2, 3, 3)
+    sound = torch.full((3, 2, 7), 0.5)  # longer than the stream (5): cropped
+    p = s.pack(lat, None, [sound, None])
+    n, m = 4 * 2 * 3 * 3, 3 * 2 * 5
+    assert p.x0.shape == (2, 1, n + m)
+    assert torch.all(p.x0[0, 0, n:] == 0.5) and torch.all(p.x0[1, 0, n:] == 0)
+    assert torch.all(p.weight[0, 0, n:] == 1) and torch.all(p.weight[1, 0, n:] == 0)  # only heard audio counts
+    assert torch.all(p.weight[:, 0, :n] == 1)
