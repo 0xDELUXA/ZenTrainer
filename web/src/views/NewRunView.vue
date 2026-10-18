@@ -888,12 +888,15 @@ async function start(position: 'next' | 'end' = 'next') {
             </ZenField>
             <ZenField label="Offload weights" stack tip="Stream weights from RAM"><div class="sw-row"><ZenSwitch v-model="spec.memory.offloading" /><span class="sw-state">{{ spec.memory.offloading ? 'On' : 'Off' }}</span></div></ZenField>
             <ZenField label="Quantized backward" stack tip="FP8 matmuls in backward (fp8 bases)"><div class="sw-row"><ZenSwitch v-model="spec.memory.quantized_backward" /><span class="sw-state">{{ spec.memory.quantized_backward ? 'On' : 'Off' }}</span></div></ZenField>
-            <ZenField label="TREAD (video)" stack tip="On video steps this share of the clip's tokens skips the middle blocks and rejoins unchanged: those blocks do about half the work at 50%. Stills, samples and validation run whole. MiniMax H3">
+            <ZenField label="TREAD (video)" stack tip="On video steps this share of the clip's tokens skips the middle blocks and rejoins unchanged: those blocks do about half the work at 50%. Stills, samples and validation run whole. Best with some stills in the dataset: they anchor the LoRA. MiniMax H3">
               <div class="sw-row">
                 <ZenSwitch :model-value="(spec.memory.tread ?? 0) > 0" @update:model-value="spec.memory.tread = $event ? 0.5 : 0" />
                 <ZenNumber v-if="(spec.memory.tread ?? 0) > 0" :model-value="Math.round((spec.memory.tread ?? 0.5) * 100)" :min="10" :max="90" :step="5" :precision="0" @update:model-value="spec.memory.tread = $event / 100" />
                 <span v-else class="sw-state">Off</span>
               </div>
+            </ZenField>
+            <ZenField v-if="(spec.memory.tread ?? 0) > 0" label="Share of steps routed" stack tip="TREAD on only this share of clip steps; the rest run whole. Routing every step of a dataset with no stills lets the LoRA learn to make up for the routing (measured on H3: over-sharpened samples). Whole steps keep it working on the model it'll actually be used on">
+              <ZenNumber :model-value="Math.round((spec.memory.tread_steps ?? 1) * 100)" :min="0" :max="100" :step="10" :precision="0" @update:model-value="spec.memory.tread_steps = $event / 100" />
             </ZenField>
             <ZenField label="Compile blocks" stack tip="torch.compile on the model's repeated transformer block: the small operations around the big matmuls (norms, modulation, activations, the LoRA add) fuse into fewer kernels. The first steps and the first sample are slower while it compiles">
               <div class="sw-row"><ZenSwitch :model-value="!!spec.memory.compile_blocks" @update:model-value="spec.memory.compile_blocks = $event" /><span class="sw-state">{{ spec.memory.compile_blocks ? 'On' : 'Off' }}</span></div>

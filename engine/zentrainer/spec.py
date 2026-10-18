@@ -164,6 +164,11 @@ class MemorySpec:
     # middle blocks (2 to n-3) and rejoins unchanged. 0.5 roughly halves those blocks' work;
     # stills, samples and validation always run whole. 0 = off.
     tread: float = 0.0
+    # Share of clip steps that route (the rest run whole). Fizgig's recipe routes every clip but
+    # runs stills in full, and stills anchor the LoRA; a dataset of clips only routes every step,
+    # and the LoRA learns to make up for the routing: measured on H3 (all clips, 0.5): loss 0.22
+    # routed vs 0.15 whole on the same LoRA, and over-sharpened samples. Below 1 keeps whole steps.
+    tread_steps: float = 1.0
     # int8 ConvRot bases (MiniMax H3, Krea 2 int8): the backward computes each frozen layer's
     # input gradient with a fused Triton kernel instead of rebuilding its bf16 weight (Fizgig's,
     # by @mabseyuk). Saves a transient weight per layer; faster at large token counts.
@@ -344,6 +349,8 @@ class TrainSpec:
             raise SpecError("objective.uniform_mix is a share between 0 and 1")
         if self.dataset.edit_method not in ("", "index", "offset", "index_timestep_zero", "negative_index", "uxo"):
             raise SpecError("dataset.edit_method is one of index, offset, index_timestep_zero (or empty for the model's own)")
+        if not 0.0 <= self.memory.tread_steps <= 1.0:
+            raise SpecError("memory.tread_steps is a share between 0 and 1")
         if self.dataset.keyframes not in ("", "first", "first_last"):
             raise SpecError("dataset.keyframes is first, first_last or empty")
         if self.dataset.edit_template and "{}" not in self.dataset.edit_template:

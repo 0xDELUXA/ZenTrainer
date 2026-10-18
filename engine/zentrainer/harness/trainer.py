@@ -267,6 +267,13 @@ class Trainer:
             self.edit_method = None if self.h3 else method(patcher.model, s.dataset.edit_method)
             logging.info("[ZenTrainer] edit training: %d of %d images have an input picture (references: %s)",
                          pairs, len(self.dataset.samples), self.edit_method or "the model's own")
+        if s.memory.tread > 0 and s.memory.tread_steps >= 1.0 and self.dataset.samples and all(
+                sm.latent.ndim == 4 and sm.latent.shape[1] > 1 for sm in self.dataset.samples):
+            msg = ("TREAD routes every step: this dataset is all clips, with no stills run whole to anchor the "
+                   "LoRA, so it can learn to make up for the routing (over-sharpened samples). Consider "
+                   "'Share of steps routed' around 0.5, or adding stills")
+            logging.warning("[ZenTrainer] %s", msg)
+            self._status("loading", message=msg)
         self.batches = data.Batches(self.dataset, s.optim.batch_size, s.seed)
 
         if s.memory.training_dtype != "fp32":
@@ -543,6 +550,8 @@ class Trainer:
         share = self.spec.memory.tread
         if share <= 0 or any(self.dataset.samples[i].latent.ndim != 4 or self.dataset.samples[i].latent.shape[1] < 2 for i in idx):
             return None
+        if self.spec.memory.tread_steps < 1.0 and torch.rand((), generator=self.generator).item() >= self.spec.memory.tread_steps:
+            return None  # a whole step: keeps the LoRA working on the unrouted model it'll be used on
         dm = self.models.patcher.model.diffusion_model
         if "minimax" not in type(dm).__module__.lower() or not hasattr(dm, "blocks"):
             return None

@@ -97,6 +97,7 @@ export interface TrainSpec {
     fused_int8_backward?: boolean
     w8a8_backward?: boolean
     compile_blocks?: boolean
+    tread_steps?: number
     offloading: boolean
     quantized_backward: boolean
     bypass_mode: boolean
