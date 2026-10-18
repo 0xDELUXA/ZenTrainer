@@ -14,7 +14,8 @@ import { settings } from '@/settings'
 const props = defineProps<{ id?: string }>()
 const router = useRouter()
 const r = computed<Recipe | null>(() => (props.id ? findRecipe(props.id) : null))
-const asset = (p: string) => `${import.meta.env.BASE_URL}${p.replace(/^\//, '')}`
+// "/templates/..." is ComfyUI's own (template thumbnails, maker logos); else our web/public
+const asset = (p: string) => (p.startsWith('/') ? p : `${import.meta.env.BASE_URL}${p}`)
 
 // ---- the gallery ---------------------------------------------------------------------------
 const kinds = [
@@ -226,7 +227,10 @@ void leaving
           </div>
           <div class="rbody">
             <div class="rtop">
+              <img v-if="x.logo" class="logo" :src="asset(x.logo)" alt="" />
+              <span v-else class="ric"><i :class="x.cover.icon" /></span>
               <span class="chip">{{ x.model }}</span>
+              <span v-if="!x.validated" class="draft" title="Not trained and checked end to end yet: settings from similar runs">draft</span>
               <span class="kind-tag">{{ x.kind === 'character' ? 'Character' : x.kind === 'style' ? 'Style' : 'Video' }}</span>
             </div>
             <b>{{ x.title.split(' · ')[1] ?? x.title }}</b>
@@ -447,6 +451,20 @@ void leaving
 .chip {
   font-size: 12px;
   font-weight: 600;
+}
+.logo {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: #fff;
+}
+.draft {
+  font-size: 10px;
+  padding: 0 6px;
+  border-radius: 999px;
+  color: var(--zen-warn);
+  border: 1px dashed color-mix(in srgb, var(--zen-warn) 60%, transparent);
 }
 .kind-tag {
   margin-left: auto;

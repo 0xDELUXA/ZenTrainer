@@ -20,6 +20,8 @@ export interface Recipe {
   photos: { min: number; ideal: string; tips: string[] }
   /** the card's accent and icon */
   cover: { from: string; to: string; icon: string }
+  /** the maker's logo: ComfyUI's template packages ship them and serve /templates/logo/<file> */
+  logo?: string
   /** the card's picture, as ComfyUI's template thumbnails: one image, two that crossfade on hover
    *  ("dissolve"), or a before/after the pointer slides across ("slider"); paths in web/public */
   thumb?: { src: string; after?: string; mode?: 'slider' | 'dissolve'; before_label?: string; after_label?: string }
@@ -36,6 +38,8 @@ export interface Recipe {
   samples: string[]
   /** a hint shown on the card */
   note?: string
+  /** the recipe has been trained end to end and its samples checked (else it's a draft) */
+  validated?: boolean
 }
 
 const NL = 'Describe this image for training an image model: the subject, their appearance, clothing and pose, the setting, lighting and photographic or artistic style. One detailed paragraph. Start directly with the description; no preamble.'
@@ -63,6 +67,9 @@ export const RECIPES: Recipe[] = [
     blurb: 'A person or character, photoreal. Previews on Krea 2 Turbo in 8 steps.',
     photos: character(),
     cover: { from: '#f97316', to: '#7c2d12', icon: 'mdi mdi-account-star-outline' },
+    logo: '/templates/logo/krea.jpg',
+    // placeholder: the Krea 2 template's thumbnail, until a validated run gives us before/after
+    thumb: { src: '/templates/image_krea2_turbo_t2i-1.webp' },
     files: {
       diffusion_models: ['krea2_raw_int8_convrot.safetensors', 'krea2_raw_bf16.safetensors'],
       text_encoders: ['qwen3vl_4b_int8_convrot.safetensors', 'qwen3vl_4b_fp8_scaled.safetensors'],
@@ -89,6 +96,8 @@ export const RECIPES: Recipe[] = [
     blurb: 'A look: an art style, a film stock, a mood. Apply it to anything with the trigger word.',
     photos: style,
     cover: { from: '#a855f7', to: '#1e1b4b', icon: 'mdi mdi-palette-outline' },
+    logo: '/templates/logo/krea.jpg',
+    thumb: { src: '/templates/image_krea2_turbo_int8_image_style_reference-1.webp' },
     files: {
       diffusion_models: ['krea2_raw_int8_convrot.safetensors', 'krea2_raw_bf16.safetensors'],
       text_encoders: ['qwen3vl_4b_int8_convrot.safetensors', 'qwen3vl_4b_fp8_scaled.safetensors'],
@@ -141,6 +150,8 @@ export const RECIPES: Recipe[] = [
     blurb: 'A person for the H3 video model, trained from photos. Use it in image or video prompts.',
     photos: character(),
     cover: { from: '#0ea5e9', to: '#0c4a6e', icon: 'mdi mdi-movie-star-outline' },
+    logo: '/templates/logo/minimax.png',
+    thumb: { src: '/templates/video_minimax_h3_t2v-1.webp' },
     files: {
       diffusion_models: ['minimax_h3_fl2va_pruned_int8_convrot.safetensors'],
       text_encoders: ['qwen3vl_32b_minimax_h3_int8_convrot.safetensors', 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'],
