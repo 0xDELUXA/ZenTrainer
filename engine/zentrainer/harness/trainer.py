@@ -282,7 +282,7 @@ class Trainer:
         from . import int8_backward
 
         # weight-only int8 layers that need a gradient: int8 forward instead of a dequantized bf16 one
-        n8 = int8_backward.install(patcher.model)
+        n8 = int8_backward.install(patcher.model) if s.memory.int8_forward else 0
         if n8:
             logging.info("[ZenTrainer] int8 training path on %d layers", n8)
         self.device = patcher.load_device

@@ -180,6 +180,9 @@ class MemorySpec:
     # torch.compile the repeated transformer block: fuses the elementwise work around the matmuls.
     # The first steps (and the first sample) take longer while it compiles.
     compile_blocks: bool = False
+    # int8 bases: trained layers run ComfyUI's int8 kernel forward (activations quantized) instead
+    # of a dequantized bf16 matmul. Off = the bf16 forward (slower; for comparing quality).
+    int8_forward: bool = True
     # With offloading: VRAM kept free for activations, the LoRA and its optimizer (GB);
     # the rest holds as much of the model as fits. 0 = auto: 8 GB, more for long video clips.
     vram_headroom: float = 0.0
