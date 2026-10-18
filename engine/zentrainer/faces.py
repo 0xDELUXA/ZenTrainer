@@ -21,7 +21,8 @@ from pathlib import Path
 import numpy as np
 
 PACK = "buffalo_l"  # ArcFace R50 (WebFace600K) + RetinaFace; "antelopev2" is the stronger R100
-OUTLIER = 0.35  # cosine to the dataset's average face below this: probably not the same person
+OUTLIER = 0.3  # cosine to the other pictures' average face below this: probably not the same person
+ONE_IDENTITY = 0.35  # the set's median below this: its faces aren't one person (likeness means little)
 _app = None
 _lock = threading.RLock()  # detect() holds it while _get() builds the app
 
@@ -132,29 +133,46 @@ def dataset_faces(name: str, progress=None) -> dict:
             progress(k + 1, len(items))
     cache = {k: v for k, v in cache.items() if k in rows}
     cache_file.write_text(json.dumps(cache))
-    c = _centroid([np.asarray(r["emb"], np.float32) for r in rows.values() if r["emb"]])
+    likes = _leave_one_out({rel: np.asarray(r["emb"], np.float32) for rel, r in rows.items() if r["emb"]})
     out = {}
     for rel, r in rows.items():
-        like = float(np.dot(np.asarray(r["emb"], np.float32), c)) if (r["emb"] and c is not None) else None
+        like = likes.get(rel)
         out[rel] = {"faces": r["faces"], "share": round(r["share"], 4),
                     "likeness": round(like, 4) if like is not None else None,
                     "outlier": like is not None and like < OUTLIER}
-    return {"items": out, "with_face": sum(1 for r in rows.values() if r["emb"]), "total": len(rows), "pack": PACK}
+    vals = sorted(likes.values())
+    median = vals[len(vals) // 2] if vals else None
+    return {"items": out, "with_face": sum(1 for r in rows.values() if r["emb"]), "total": len(rows), "pack": PACK,
+            "identity": round(median, 4) if median is not None else None,
+            "one_identity": median is not None and median >= ONE_IDENTITY}
+
+
+def _leave_one_out(embs: dict[str, np.ndarray]) -> dict[str, float]:
+    """Each face against the average of the OTHER faces. Against an average that includes it, a face
+    always looks alike (with 4 different people, each is a quarter of the average: ~0.5 regardless)."""
+    if len(embs) < 2:
+        return {}
+    keys = list(embs)
+    e = np.stack([embs[k] for k in keys])
+    total = e.sum(0)
+    out = {}
+    for i, k in enumerate(keys):
+        others = total - e[i]
+        out[k] = float(np.dot(e[i], others / (np.linalg.norm(others) + 1e-9)))
+    return out
 
 
 def _centroid(embs: list[np.ndarray]) -> np.ndarray | None:
-    """The dataset's average face: a unit mean, refined once without the pictures furthest from it
-    (other people, a bad detection), so a few strays don't pull it."""
+    """The dataset's average face for scoring samples, without the strays (faces that don't look like
+    the rest, each judged against the others), so a few don't pull it."""
     if not embs:
         return None
-    e = np.stack(embs)
-    c = e.mean(0)
-    c /= np.linalg.norm(c) + 1e-9
-    keep = e[(e @ c) >= OUTLIER]
-    if len(keep) >= max(2, len(e) // 2):
-        c = keep.mean(0)
-        c /= np.linalg.norm(c) + 1e-9
-    return c
+    loo = _leave_one_out({str(i): e for i, e in enumerate(embs)})
+    keep = [e for i, e in enumerate(embs) if loo.get(str(i), 1.0) >= OUTLIER] if loo else embs
+    if len(keep) < max(1, len(embs) // 2):
+        keep = embs
+    c = np.stack(keep).mean(0)
+    return c / (np.linalg.norm(c) + 1e-9)
 
 
 def dataset_centroid(name: str) -> np.ndarray | None:
@@ -197,7 +215,12 @@ class LikenessWorker:
         import folder_paths
 
         try:
-            self.centroid = dataset_centroid(self.dataset)
+            report = dataset_faces(self.dataset)
+            if report.get("one_identity"):
+                self.centroid = dataset_centroid(self.dataset)
+            else:
+                logging.info("[ZenTrainer] likeness off: the dataset's faces aren't one person (median %s)",
+                             report.get("identity"))
         except Exception:
             logging.warning("[ZenTrainer] likeness: couldn't read the dataset's faces", exc_info=True)
         if self.centroid is None:

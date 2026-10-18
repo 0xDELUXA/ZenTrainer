@@ -74,8 +74,8 @@ const tiles = computed<Tile[]>(() => {
     out.push({
       key: 'faces',
       label: 'Faces',
-      value: `${v.face_issues} issue${v.face_issues === 1 ? '' : 's'}`,
-      sub: `${v.face_coverage}/${v.pictures} with a face · likeness median ${v.face_likeness_median ?? '–'}, lowest ${v.face_likeness_min ?? '–'}`,
+      value: v.face_one_identity ? `alike ${v.face_likeness_median ?? '–'}` : 'mixed people',
+      sub: `${v.face_one_identity ? 'faces agree (each vs the others; one person ≳ 0.5)' : `faces don't agree (median ${v.face_likeness_median ?? '–'}): likeness for runs is off`} · ${v.face_issues} issue${v.face_issues === 1 ? '' : 's'} · ${v.face_coverage}/${v.pictures} with a face`,
     })
   else
     out.push({

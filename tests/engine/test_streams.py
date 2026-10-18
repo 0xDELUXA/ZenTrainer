@@ -493,3 +493,17 @@ def test_image_flags_rules():
     assert "dark" in flags["b"] and "near-duplicate" in flags["b"] and "near-duplicate" in flags["a"]
     assert "blurry" in flags["c"] and "small" in flags["c"]
     assert "bars" in flags["d"] and "greyscale" in flags["d"]
+
+
+def test_face_likeness_leaves_each_face_out():
+    import numpy as np
+
+    from zentrainer.faces import _leave_one_out
+
+    rng = np.random.default_rng(0)
+    unit = lambda v: v / np.linalg.norm(v)  # noqa: E731
+    strangers = {str(i): unit(rng.normal(size=512)).astype(np.float32) for i in range(4)}
+    assert max(_leave_one_out(strangers).values()) < 0.2  # four different people don't look alike
+    me = unit(rng.normal(size=512))
+    same = {str(i): unit(me + 0.6 * unit(rng.normal(size=512))).astype(np.float32) for i in range(4)}
+    assert min(_leave_one_out(same).values()) > 0.5  # one person's photos do

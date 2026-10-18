@@ -252,6 +252,9 @@ export interface DatasetFaces {
   with_face?: number
   total?: number
   pack?: string
+  /** median of each face against the others' average; one person ≳ 0.5, strangers ≲ 0.2 */
+  identity?: number | null
+  one_identity?: boolean
 }
 
 export interface DatasetInfo {

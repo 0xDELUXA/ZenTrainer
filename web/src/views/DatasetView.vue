@@ -431,7 +431,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
         @click="toggleFaces"
       >
         <i :class="facesBusy ? 'mdi mdi-loading mdi-spin' : facesSetting ? 'mdi mdi-face-recognition' : 'mdi mdi-face-man-outline'" />
-        {{ facesBusy ? 'Checking faces…' : facesSetting && faces?.items ? `Faces ${faces.with_face}/${faces.total}` : facesSetting ? 'Faces on' : 'Faces off' }}
+        {{ facesBusy ? 'Checking faces…' : facesSetting && faces?.items ? `Faces ${faces.with_face}/${faces.total}${faces.one_identity === false ? ' · mixed people' : ''}` : facesSetting ? 'Faces on' : 'Faces off' }}
       </button>
       <button class="chip-btn" :class="{ on: capOpen }" @click="capOpen = !capOpen"><i class="mdi mdi-creation-outline" /> Auto-caption</button>
       <button class="chip-btn" :class="{ on: bulkOpen }" @click="bulkOpen = !bulkOpen"><i class="mdi mdi-text-box-edit-outline" /> Bulk</button>
