@@ -270,6 +270,9 @@ const ctrlView = (it: DatasetItem, p: string) =>
 const aspect = (it: DatasetItem) => (it.width && it.height ? `${it.width} / ${it.height}` : '1')
 const isSimplePair = (it: DatasetItem) => it.controls?.length === 1 && it.kind !== 'video' && !isVideoPath(it.controls[0]!)
 
+// what holding Shift over an item shows: the file itself (a video plays), not its thumbnail
+const full = (it: DatasetItem) => `${viewUrl({ ...it, type: 'input' })}&v=${bust.value}`
+
 // ---- lightbox -----------------------------------------------------------------------------
 const lightbox = ref<number | null>(null)
 const lbItems = computed<LightboxItem[]>(() =>
@@ -399,7 +402,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
         class="card-item"
         :class="{ sel: selected.has(it.path) }"
       >
-        <button class="thumb" :title="it.path" @click="lightbox = i">
+        <button class="thumb" :title="it.path" :data-peek="full(it)" @click="lightbox = i">
           <img :src="thumb(it, thumbSize)" loading="lazy" :alt="cap(it)" :style="{ objectFit: fit }" />
           <img v-if="showMasks && it.mask" :src="thumb({ path: it.mask }, thumbSize)" loading="lazy" alt="" class="mask-ov" :style="{ objectFit: fit }" />
           <!-- an edit pair: its input picture in the corner (the big one is the target) -->
@@ -435,13 +438,13 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
             <ZenCompare :before="thumb({ path: it.controls![0]! }, 768)" :after="thumb(it, 768)" before-label="Input" after-label="Result" />
           </div>
           <template v-else>
-            <button v-for="(c, n) in it.controls ?? []" :key="c" class="pane" :title="c" @click="lightbox = i">
+            <button v-for="(c, n) in it.controls ?? []" :key="c" class="pane" :title="c" :data-peek="ctrlView(it, c)" @click="lightbox = i">
               <video v-if="isVideoPath(c)" :src="ctrlView(it, c)" muted loop playsinline preload="metadata" @mouseenter="($event.target as HTMLVideoElement).play()" @mouseleave="($event.target as HTMLVideoElement).pause()" />
               <img v-else :src="thumb({ path: c }, 512)" loading="lazy" alt="" />
               <span class="pane-tag">{{ (it.controls?.length ?? 0) > 1 ? `Input ${n + 1}` : 'Input' }}</span>
             </button>
             <i v-if="it.controls?.length" class="mdi mdi-arrow-right pair-arrow" />
-            <button class="pane result" :title="it.path" @click="lightbox = i">
+            <button class="pane result" :title="it.path" :data-peek="full(it)" @click="lightbox = i">
               <video v-if="it.kind === 'video'" :src="ctrlView(it, it.path)" muted loop playsinline preload="metadata" @mouseenter="($event.target as HTMLVideoElement).play()" @mouseleave="($event.target as HTMLVideoElement).pause()" />
               <img v-else :src="thumb(it, 512)" loading="lazy" alt="" />
               <span class="pane-tag">{{ it.controls?.length ? 'Result' : 'No input' }}</span>
@@ -483,7 +486,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
       </div>
       <div v-for="(it, i) in shown" :key="it.path" class="tr" :class="{ sel: selected.has(it.path), dirty: drafts[k(it)] != null }">
         <label class="c-check" @click.prevent="toggleSelect(it, i, $event)"><i :class="selected.has(it.path) ? 'mdi mdi-checkbox-marked' : 'mdi mdi-checkbox-blank-outline'" /></label>
-        <button class="c-thumb" @click="lightbox = i"><img :src="thumb(it, 128)" loading="lazy" alt="" /></button>
+        <button class="c-thumb" :data-peek="full(it)" @click="lightbox = i"><img :src="thumb(it, 128)" loading="lazy" alt="" /></button>
         <span class="c-name mono ellipsis" :title="it.path">{{ it.path }}</span>
         <span class="c-res mono muted">{{ it.width ? `${it.width}×${it.height}` : '–' }}</span>
         <span class="c-bytes mono muted">{{ kb(it.bytes) }}</span>
@@ -829,17 +832,17 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
   display: block;
 }
 .pairs {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(max(260px, calc(var(--ph) * 1.25)), 1fr));
+  gap: 12px;
+  align-items: start;
 }
 .pair {
   position: relative;
-  display: grid;
-  grid-template-columns: auto minmax(220px, 1fr);
-  gap: 14px;
-  padding: 10px;
-  align-items: start;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
 }
 .pair.sel {
   border-color: var(--zen-accent);
@@ -852,9 +855,12 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
 .pair-media {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  gap: 6px;
   height: var(--ph);
   overflow-x: auto;
+  border-radius: var(--r-md);
+  background: var(--zen-surface-2);
 }
 .pane {
   position: relative;
@@ -871,7 +877,12 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
 .pane video {
   height: 100%;
   width: auto;
+  max-width: 100%;
+  object-fit: contain;
   display: block;
+}
+.pane.compare {
+  max-width: 100%;
 }
 .pane.compare {
   cursor: ew-resize;
@@ -899,8 +910,9 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
 .pair-text {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
+  padding: 0 2px;
 }
 .side-inputs {
   display: grid;
@@ -914,11 +926,12 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
   border-radius: var(--r-sm);
   display: block;
 }
-.control-inset {
+.thumb .control-inset {
   position: absolute;
   left: 6px;
   top: 6px;
   width: 34%;
+  height: auto;
   aspect-ratio: 1;
   object-fit: cover;
   border-radius: var(--r-sm);

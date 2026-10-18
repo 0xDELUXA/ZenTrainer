@@ -11,7 +11,7 @@ let shift = false
 let x = 0
 let y = 0
 
-const VIDEO = /\.(mp4|webm|mov|mkv)(\?|$)/i
+const VIDEO = /\.(mp4|webm|mov|mkv)([?&#]|$)/i  // also /view?filename=x.mp4&subfolder=...
 
 function under(): { url: string; video: boolean; time: number } | null {
   for (const el of document.elementsFromPoint(x, y)) {
