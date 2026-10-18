@@ -491,6 +491,9 @@ def test_image_flags_rules():
     }
     flags = image_flags(looks, {"a": 1024, "b": 1024, "c": 600, "d": 1024})
     assert "dark" in flags["b"] and "near-duplicate" in flags["b"] and "near-duplicate" in flags["a"]
+    close = {"x": {**ok, "hash": 0}, "y": {**ok, "hash": 2**10 - 1}, "z": {**ok, "hash": 2**64 - 2**33}}
+    cf = image_flags(close, {})
+    assert cf.get("x") == ["similar"] and cf.get("y") == ["similar"] and "z" not in cf  # 10 bits apart: similar
     assert "blurry" in flags["c"] and "small" in flags["c"]
     assert "bars" in flags["d"] and "greyscale" in flags["d"]
 

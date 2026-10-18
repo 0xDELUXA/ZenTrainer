@@ -86,9 +86,9 @@ const tiles = computed<Tile[]>(() => {
     {
       key: 'uniqueness',
       label: 'Uniqueness',
-      value: `${v.near_duplicates}`,
-      sub: v.near_duplicates ? 'near-duplicates' : 'no near-duplicates',
-      tip: 'Pictures with a near-identical twin (a difference hash a few bits apart, whatever the size or compression). Repeats make the LoRA overfit to them.',
+      value: `${(v.near_duplicates ?? 0) + (v.similar ?? 0)}`,
+      sub: v.near_duplicates || v.similar ? `${v.near_duplicates} near-identical · ${v.similar ?? 0} similar` : 'all distinct',
+      tip: 'How distinct the pictures are from each other (a 64-bit difference hash: unrelated pictures differ in about half the bits). Near-identical: 6 bits or fewer apart; similar: up to 14, the same shot or a close variation. The score dips the closer each picture\'s nearest neighbour is. Repeats make the LoRA overfit to them.',
     },
   ]
   if (scores.value.faces != null)

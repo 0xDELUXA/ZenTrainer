@@ -27,6 +27,8 @@ from pathlib import Path
 
 TARGET_SIDE = 768  # a picture's short side at or above this is training-ready at the usual sizes
 NEAR_DUP = 6  # bits of 64 a difference hash may differ by and still count as the same picture
+SIMILAR = 14  # closer than this: the same shot or a close variation (unrelated pictures sit near 32)
+SOFT = 16  # the uniqueness score starts to dip below this distance to the nearest other picture
 
 
 def _store_dir() -> Path:
@@ -114,16 +116,21 @@ def _looks(name: str, items: list) -> dict[str, dict | None]:
     return out
 
 
-def _near_duplicates(looks: dict[str, dict | None]) -> set[str]:
-    """The pictures that have a near-identical twin."""
+def _nearest(looks: dict[str, dict | None]) -> dict[str, int]:
+    """Each picture's distance (differing hash bits) to its closest other picture."""
     vals = [(p, lk["hash"]) for p, lk in looks.items() if lk]
-    dup = set()
+    best = {p: 64 for p, _ in vals}
     for i in range(len(vals)):
         for j in range(i + 1, len(vals)):
-            if bin(vals[i][1] ^ vals[j][1]).count("1") <= NEAR_DUP:
-                dup.add(vals[i][0])
-                dup.add(vals[j][0])
-    return dup
+            d = bin(vals[i][1] ^ vals[j][1]).count("1")
+            best[vals[i][0]] = min(best[vals[i][0]], d)
+            best[vals[j][0]] = min(best[vals[j][0]], d)
+    return best
+
+
+def _near_duplicates(looks: dict[str, dict | None], within: int = NEAR_DUP) -> set[str]:
+    """The pictures with another this close (a near-identical twin by default)."""
+    return {p for p, d in _nearest(looks).items() if d <= within}
 
 
 def image_flags(looks: dict[str, dict | None], sides: dict[str, int]) -> dict[str, list[str]]:
@@ -132,7 +139,7 @@ def image_flags(looks: dict[str, dict | None], sides: dict[str, int]) -> dict[st
     vals = [lk for lk in looks.values() if lk]
     sharp_med = st.median(lk["sharp"] for lk in vals) if vals else 0
     sat_med = st.median(lk["sat"] for lk in vals) if vals else 0
-    dups = _near_duplicates(looks)
+    near = _nearest(looks)
     out = {}
     for p, lk in looks.items():
         f = []
@@ -151,8 +158,10 @@ def image_flags(looks: dict[str, dict | None], sides: dict[str, int]) -> dict[st
                 f.append("greyscale")
         if sides.get(p, TARGET_SIDE) < TARGET_SIDE:
             f.append("small")
-        if p in dups:
+        if near.get(p, 64) <= NEAR_DUP:
             f.append("near-duplicate")
+        elif near.get(p, 64) <= SIMILAR:
+            f.append("similar")
         if f:
             out[p] = f
     return out
@@ -193,7 +202,12 @@ def compute(name: str, set_name: str = "default") -> dict:
             side_of[str(it.path)] = min(w, h)
     dup_caps = sum(c - 1 for c in Counter(captioned).values() if c > 1)
     looks = _looks(name, items)
-    near = len(_near_duplicates(looks))
+    nearest = _nearest(looks)
+    near = sum(d <= NEAR_DUP for d in nearest.values())
+    similar = sum(NEAR_DUP < d <= SIMILAR for d in nearest.values())
+    # each picture pays for how close its nearest other picture is: nothing past SOFT bits apart,
+    # everything when identical
+    closeness = [max(0.0, (SOFT - d) / SOFT) for d in nearest.values()]
     flags = image_flags(looks, side_of)
     lv = [lk for lk in looks.values() if lk]
     bright = sorted(lk["bright"] for lk in lv)
@@ -212,6 +226,7 @@ def compute(name: str, set_name: str = "default") -> dict:
         "below_target": sum(s < TARGET_SIDE for s in sides),
         "aspect_top_share": round(max(Counter(aspects).values()) / len(aspects), 3) if aspects else 0.0,
         "near_duplicates": near,
+        "similar": similar,
         "brightness_median": round(st.median(bright), 3) if bright else 0,
         "brightness_spread": round(bright[int(len(bright) * 0.9)] - bright[int(len(bright) * 0.1)], 3) if len(bright) > 2 else 0,
         "too_dark": count("dark"),
@@ -221,7 +236,7 @@ def compute(name: str, set_name: str = "default") -> dict:
         "bars": count("bars"),
         "greyscale": count("greyscale"),
         "saturation_median": round(st.median(lk["sat"] for lk in lv), 3) if lv else 0,
-        "image_issues": sum(1 for f in flags.values() if set(f) - {"near-duplicate"}),
+        "image_issues": sum(1 for f in flags.values() if set(f) - {"near-duplicate", "similar"}),
         "muted": len(off),
         "masked": sum(1 for it in items if it.mask),
         "pairs": sum(1 for it in items if it.controls),
@@ -252,7 +267,7 @@ def compute(name: str, set_name: str = "default") -> dict:
                              * (1 - (dup_caps + m["caption_short"]) / max(1, len(captioned)))) if captioned else 0.0,
         # quality: training-ready size, sharp, sensibly exposed, no bars
         "quality": clamp(1 - m["image_issues"] / n) if n else 0.0,
-        "uniqueness": clamp(1 - near / n) if n else 0.0,
+        "uniqueness": clamp(1 - sum(closeness) / n) if n else 0.0,
     }
     if face_scores is not None:
         scores["faces"] = clamp(face_scores)

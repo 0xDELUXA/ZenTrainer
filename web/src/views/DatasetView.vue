@@ -484,7 +484,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
         <button :class="{ on: filter === 'unmasked' }" @click="filter = 'unmasked'">Unmasked</button>
         <button v-if="counts.pairs" :class="{ on: filter === 'pairs' }" title="Edit pairs: images with a <name>_control input picture" @click="filter = 'pairs'">Pairs {{ counts.pairs }}</button>
         <button v-if="counts.muted" :class="{ on: filter === 'muted' }" :title="`Kept, but not trained on in the “${activeSet}” caption set`" @click="filter = 'muted'">Muted {{ counts.muted }}</button>
-        <button v-if="counts.imageIssues" :class="{ on: filter === 'images' }" title="Pictures the stats flagged: dark, blown out, flat, blurry, letterbox bars, greyscale, small, near-duplicate" @click="filter = 'images'">Image issues {{ counts.imageIssues }}</button>
+        <button v-if="counts.imageIssues" :class="{ on: filter === 'images' }" title="Pictures the stats flagged: dark, blown out, flat, blurry, letterbox bars, greyscale, small, near-duplicate, similar to another" @click="filter = 'images'">Image issues {{ counts.imageIssues }}</button>
         <button v-if="faces?.items" :class="{ on: filter === 'faces' }" title="Pictures whose face needs a look: none found, several people, or not like the others" @click="filter = 'faces'">Face issues {{ counts.faceIssues }}</button>
       </div>
       <div class="search"><ZenInput v-model="query" placeholder="Search captions or names" size="sm" /></div>
