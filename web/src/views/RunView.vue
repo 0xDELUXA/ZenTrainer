@@ -5,6 +5,7 @@
 import { ZenButton, ZenCombo, ZenLightbox, ZenModal, ZenNumber, ZenSlider, ZenSwitch } from '@nynxz/zenkit-ui'
 import type { LightboxItem } from '@nynxz/zenkit-ui'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { playTogether } from '../videoSync'
 import { useRouter } from 'vue-router'
 import { loadedModels, watchLoaded } from '@/loaded'
 import { gb } from '@/system'
@@ -441,6 +442,38 @@ function openManual(i: number, row?: SampleRow | null) {
 // a tile shaped like its render (pairs side by side: twice as wide), so nothing letterboxes
 const shapeOf = (x: SampleRow | null | undefined, pair = false) =>
   x?.width && x?.height ? { aspectRatio: `${x.width * (pair ? 2 : 1)} / ${x.height}` } : undefined
+// a Manual tile: 96px high, but a portrait render grows taller so the tile stays at least
+// 80px wide and its "Step N" label fits
+const tileOf = (x: SampleRow | null | undefined) => {
+  const shape = shapeOf(x)
+  if (!x?.width || !x?.height) return shape
+  const r = x.width / x.height
+  return 96 * r < 80 ? { ...shape, height: `${Math.min(170, Math.round(80 / r))}px` } : shape
+}
+// a row's videos playing together (Progression and Manual): one row at a time
+const syncing = ref<string | null>(null)
+let stopSync: (() => void) | null = null
+function toggleSync(key: string, row: Element | null | undefined) {
+  stopSync?.()
+  stopSync = null
+  if (syncing.value === key || !row) {
+    syncing.value = null
+    return
+  }
+  syncing.value = key
+  stopSync = playTogether([...row.querySelectorAll('video')])
+}
+onUnmounted(() => stopSync?.())
+const inSync = (v: HTMLVideoElement) => !!syncing.value && !!v.closest('[data-syncing]')
+const hoverPlay = (e: Event) => {
+  const v = e.target as HTMLVideoElement
+  if (!inSync(v)) void v.play().catch(() => {})
+}
+const hoverPause = (e: Event) => {
+  const v = e.target as HTMLVideoElement
+  if (!inSync(v)) v.pause()
+}
+const rowHasVideo = (xs: (SampleRow | null | undefined)[]) => xs.some((x) => x && isVideo(x))
 const isVideo = (x: SampleRow) => /\.(mp4|webm)$/i.test(x.filename)
 const sampleItem = (x: SampleRow): LightboxItem => ({
   src: viewUrl(x),
@@ -630,24 +663,32 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
                     </div>
                   </div>
                 </div>
-                <div v-for="(g, gi) in manualGroups" :key="g.index" class="mrow2">
+                <div v-for="(g, gi) in manualGroups" :key="g.index" class="mrow2" :data-syncing="syncing === `m${g.index}` || undefined">
                   <div class="mprompt">
                     <span class="mtext" :title="rowOf(g).prompt">{{ rowOf(g).prompt }}</span>
                     <span class="mmeta mono">
                       {{ rowOf(g).width }}×{{ rowOf(g).height }}<template v-if="(rowOf(g).frames ?? 1) > 1"> · {{ rowOf(g).frames }}f</template> · seed {{ rowOf(g).seed }}
                     </span>
-                    <span class="macts">
+                    <span class="macts" :class="{ held: syncing === `m${g.index}` }">
+                      <button
+                        v-if="rowHasVideo([g.base, ...g.steps])"
+                        :class="{ on: syncing === `m${g.index}` }"
+                        :title="syncing === `m${g.index}` ? 'Stop' : 'Play the whole row together'"
+                        @click="toggleSync(`m${g.index}`, ($event.currentTarget as HTMLElement).closest('.mrow2')?.querySelector('.mcells'))"
+                      >
+                        <i :class="syncing === `m${g.index}` ? 'mdi mdi-stop' : 'mdi mdi-play'" />
+                      </button>
                       <button title="Put this prompt back in the box to change it" @click="tryPrompt = rowOf(g).prompt"><i class="mdi mdi-pencil-outline" /></button>
                       <button title="Copy the prompt" @click="copyText(rowOf(g).prompt)"><i class="mdi mdi-content-copy" /></button>
                     </span>
                   </div>
                   <div class="mcells">
-                    <button v-for="x in [...(g.base ? [g.base] : []), ...g.steps]" :key="x.filename" class="tcell" :style="shapeOf(x)" @click="openManual(gi, x)">
-                      <video v-if="isVideo(x)" :src="viewUrl(x)" muted loop playsinline preload="metadata" @mouseenter="($event.target as HTMLVideoElement).play()" @mouseleave="($event.target as HTMLVideoElement).pause()" />
+                    <button v-for="x in [...(g.base ? [g.base] : []), ...g.steps]" :key="x.filename" class="tcell" :style="tileOf(x)" @click="openManual(gi, x)">
+                      <video v-if="isVideo(x)" :src="viewUrl(x)" muted loop playsinline preload="metadata" @mouseenter="hoverPlay" @mouseleave="hoverPause" />
                       <img v-else :src="viewUrl(x)" loading="lazy" alt="" />
                       <span class="clabel">{{ x.base ? 'No LoRA' : `Step ${x.step}` }}</span>
                     </button>
-                    <div v-for="t in waitingCards.filter((w) => w.againIndex === g.index)" :key="t.key" class="tcell pending" :class="{ live: t.live }" :style="shapeOf(g.steps.at(-1) ?? g.base)">
+                    <div v-for="t in waitingCards.filter((w) => w.againIndex === g.index)" :key="t.key" class="tcell pending" :class="{ live: t.live }" :style="tileOf(g.steps.at(-1) ?? g.base)">
                       <img v-if="t.live && liveManual?.preview" :src="liveManual.preview" alt="" />
                       <i v-else :class="t.live ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-clock-outline'" />
                       <div v-if="t.live" class="qbar"><span :style="{ width: `${t.frac * 100}%` }" /></div>
@@ -657,7 +698,7 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
                     <button
                       v-if="status === 'training' && !g.steps.some((x) => x.step === step) && !queuedTries.some((q) => q.again === g.index)"
                       class="tcell add"
-                      :style="shapeOf(g.steps.at(-1) ?? g.base)"
+                      :style="tileOf(g.steps.at(-1) ?? g.base)"
                       title="Render this prompt again (same seed) with the LoRA as it is now"
                       @click="again(g)"
                     >
@@ -684,8 +725,8 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
                       loop
                       playsinline
                       preload="metadata"
-                      @mouseenter="($event.target as HTMLVideoElement).play()"
-                      @mouseleave="($event.target as HTMLVideoElement).pause()"
+                      @mouseenter="hoverPlay"
+                      @mouseleave="hoverPause"
                     />
                     <i v-if="isVideo(latestFor(i - 1)!)" class="mdi mdi-play play-badge" />
                     <img v-else :src="viewUrl(latestFor(i - 1)!)" alt="" />
@@ -710,8 +751,20 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
                   </div>
                 </div>
                 <template v-for="[index, prompt] in prompts" :key="index">
-                  <div class="mlabel" :title="prompt"><span class="pnum">{{ index + 1 }}</span><span class="ellipsis">{{ prompt }}</span></div>
-                  <div class="mrow">
+                  <div class="mlabel" :title="prompt">
+                    <span class="pnum">{{ index + 1 }}</span>
+                    <button
+                      v-if="rowHasVideo(steps.map((s) => cell(index, s)))"
+                      class="rowplay"
+                      :class="{ on: syncing === `p${index}` }"
+                      :title="syncing === `p${index}` ? 'Stop' : 'Play the whole row together'"
+                      @click="toggleSync(`p${index}`, ($event.currentTarget as HTMLElement).parentElement?.nextElementSibling)"
+                    >
+                      <i :class="syncing === `p${index}` ? 'mdi mdi-stop' : 'mdi mdi-play'" />
+                    </button>
+                    <span class="ellipsis">{{ prompt }}</span>
+                  </div>
+                  <div class="mrow" :data-syncing="syncing === `p${index}` || undefined">
                     <div v-for="s in steps" :key="s" class="mcell">
                       <button v-if="cell(index, s)" @click="openGrid(index, s)">
                         <video
@@ -721,8 +774,8 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
                           loop
                           playsinline
                           preload="metadata"
-                          @mouseenter="($event.target as HTMLVideoElement).play()"
-                          @mouseleave="($event.target as HTMLVideoElement).pause()"
+                          @mouseenter="hoverPlay"
+                          @mouseleave="hoverPause"
                         />
                         <img v-else :src="viewUrl(cell(index, s)!)" loading="lazy" :alt="prompt" />
                       </button>
@@ -1181,8 +1234,30 @@ dd {
   transition: opacity var(--zen-dur-fast);
 }
 .mrow2:hover .macts,
-.macts:focus-within {
+.macts:focus-within,
+.macts.held {
   opacity: 1;
+}
+.macts button.on,
+.rowplay.on {
+  color: var(--zen-accent);
+}
+.rowplay {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--zen-muted);
+  cursor: pointer;
+  padding: 0;
+}
+.rowplay:hover {
+  color: var(--zen-text);
+  background: var(--zen-surface-2);
 }
 .macts button {
   width: 24px;
@@ -1218,6 +1293,7 @@ dd {
 }
 .mcells {
   display: flex;
+  align-items: flex-start;
   gap: 8px;
   overflow-x: auto;
   padding-bottom: 4px;
