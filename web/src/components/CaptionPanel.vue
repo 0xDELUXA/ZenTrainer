@@ -293,7 +293,7 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
 <template>
   <div class="cp card">
     <div class="row">
-      <label class="f model"><span class="eyebrow">Model</span>
+      <div class="f model"><span class="eyebrow">Model</span>
         <ZenCombo
           v-model="form.clip_name"
           :items="models.map((n) => ({ value: n, label: n }))"
@@ -347,7 +347,7 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
           </div>
           <div v-if="loraNote" class="muted small">{{ loraNote }}</div>
         </div>
-      </label>
+      </div>
       <div class="f"><span class="eyebrow">Style</span>
         <div class="seg">
           <button v-for="st in styles" :key="st.id" :class="{ on: form.style === st.id }" :title="st.prompt" @click="pick(st.id)">{{ st.label }}</button>
