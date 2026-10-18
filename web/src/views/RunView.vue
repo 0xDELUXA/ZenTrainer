@@ -107,6 +107,8 @@ const running = computed(() => !!status.value && ACTIVE.includes(status.value) &
 // checkpoint instead (engine: POST .../sample), and the results land at that step
 const sampleCkpt = computed(() => (running.value || sampleBusy.value ? null : (ckRows.value.find((c) => c.size !== null) ?? null)))
 const sampleBusy = computed(() => status.value === 'sampling' || queuedToSample.value)
+// a finished run's newest checkpoint with its file still there
+const newestCkpt = computed(() => (running.value ? null : (ckRows.value.find((c) => c.size !== null) ?? null)))
 async function sampleFinished(tries?: Record<string, unknown>[]) {
   if (!sampleCkpt.value) return
   try {
@@ -225,6 +227,12 @@ async function again(g: { index: number; base: SampleRow | null; steps: SampleRo
 const queuedTries = ref<{ id: number; prompt: string; again?: number }[]>([])
 // the cards for tries not landed yet: the first one is live while a manual render runs (even
 // one this page didn't queue, e.g. after a reload)
+// a prompt as samples render it: [trigger] substituted (engine: callbacks.sample_text), so a waiting
+// try can find the row its first render (the no-LoRA one) already started
+const asRendered = (p: string) => {
+  const t = detail.value?.spec.dataset.trigger ?? ''
+  return p.replaceAll('[trigger]', t).trim()
+}
 const waitingCards = computed(() => {
   const live = liveManual.value
   const phase = live
@@ -235,15 +243,18 @@ const waitingCards = computed(() => {
   const frac = live?.s_total ? Math.min(1, (live.s_step ?? 0) / live.s_total) : 0
   const cards = queuedTries.value.map((q, i) => ({
     key: `q${q.id}`,
-    prompt: q.prompt,
+    prompt: asRendered(q.prompt),
     again: q.again != null,
-    againIndex: q.again,
+    // a new try whose no-LoRA render landed waits in that row, not in a row of its own
+    againIndex: q.again ?? manualGroups.value.find((g) => !g.steps.length && rowOf(g).prompt === asRendered(q.prompt))?.index,
     live: i === 0 && !!live,
+    // a finished run's job loads the whole model before its first render
+    loading: i === 0 && !live && sampleBusy.value,
     frac: i === 0 ? frac : 0,
-    state: i === 0 && live ? phase : i === (live ? 1 : 0) ? 'Next' : `Queued · ${i - (live ? 1 : 0)} ahead`,
+    state: i === 0 && live ? phase : i === 0 && sampleBusy.value ? 'Loading the model…' : i === (live ? 1 : 0) ? 'Next' : `Queued · ${i - (live ? 1 : 0)} ahead`,
   }))
   if (live && !cards.length)
-    cards.push({ key: 'live', prompt: live.prompt ?? '', again: false, againIndex: undefined, live: true, frac, state: phase })
+    cards.push({ key: 'live', prompt: live.prompt ?? '', again: false, againIndex: undefined, live: true, loading: false, frac, state: phase })
   return cards
 })
 let tryIds = 0
@@ -726,7 +737,7 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
               <div class="seg" role="tablist">
                 <button :class="{ on: sampleView === 'latest' }" @click="sampleView = 'latest'">Latest</button>
                 <button :class="{ on: sampleView === 'grid' }" :disabled="!steps.length" title="Each prompt across training: in the viewer ←→ steps, ↑↓ prompts (or WASD)" @click="sampleView = 'grid'">Progression</button>
-                <button :class="{ on: sampleView === 'manual' }" title="Try any prompt at the current step, apart from the run's samples" @click="sampleView = 'manual'">Manual<span v-if="manualCount" class="muted"> {{ manualCount }}</span><i v-if="liveManual" class="mdi mdi-circle live-dot" /></button>
+                <button :class="{ on: sampleView === 'manual' }" title="Try any prompt at the current step, apart from the run's samples" @click="sampleView = 'manual'">Manual<span v-if="manualCount" class="muted"> {{ manualCount }}</span><i class="mdi mdi-circle live-dot" :class="{ off: !liveManual }" /></button>
               </div>
               <button
                 v-if="running"
@@ -738,18 +749,25 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
                 <i :class="sampling ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-image-refresh-outline'" /> Sample now
               </button>
               <button
-                v-else-if="(sampleCkpt && !steps.includes(sampleCkpt.step)) || sampleBusy"
+                v-else-if="newestCkpt && !steps.includes(newestCkpt.step)"
                 class="chip-btn"
                 :disabled="sampleBusy || !detail.spec.samples.prompts.length"
                 :title="sampleCkpt ? `Render the sample prompts with the step ${sampleCkpt.step} checkpoint: they join the samples and the likeness line (replacing any already at that step)` : 'Sampling'"
                 @click="sampleFinished()"
               >
-                <i :class="sampleBusy || sampling ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-image-refresh-outline'" /> {{ sampleBusy ? 'Sampling…' : `Sample step ${sampleCkpt!.step}` }}
+                <i :class="sampleBusy || sampling ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-image-refresh-outline'" /> {{ sampleBusy ? 'Sampling…' : `Sample step ${newestCkpt.step}` }}
               </button>
             </header>
             <div v-if="sampleView === 'manual'" class="manual">
               <div class="try">
-                <textarea v-model="tryPrompt" v-autosize rows="1" class="try-in" placeholder="Try a prompt at this step, e.g. [trigger] reading a book in a cafe (one per line for several)" @keydown.ctrl.enter="renderTry" />
+                <textarea
+                  v-model="tryPrompt"
+                  v-autosize
+                  rows="1"
+                  class="try-in"
+                  :placeholder="`Try a prompt ${running ? 'at this step' : newestCkpt ? `on the step ${newestCkpt.step} checkpoint` : ''}, e.g. [trigger] reading a book in a cafe (one per line for several)`"
+                  @keydown.ctrl.enter="renderTry"
+                />
                 <div class="try-opts">
                   <ZenCombo v-model="trySize" :items="trySizes" :sorted="false" :searchable="false" size="sm" />
                   <ZenNumber v-if="(detail.spec.samples.frames ?? 1) > 1" :model-value="tryFrames ?? detail.spec.samples.frames ?? 1" :min="1" :max="361" :step="17" :precision="0" size="sm" title="Frames" @update:model-value="tryFrames = $event" />
@@ -757,7 +775,9 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
                   <ZenButton size="sm" variant="primary" icon="mdi mdi-creation-outline" :disabled="(status !== 'training' && !sampleCkpt) || !tryPrompt.trim()" :title="status === 'training' ? 'Queues it (Ctrl+Enter). One prompt per line queues several' : sampleCkpt ? `Renders with the step ${sampleCkpt.step} checkpoint (Ctrl+Enter). One prompt per line for several` : 'Only while it trains, or once it has a checkpoint'" @click="renderTry">Render</ZenButton>
                 </div>
               </div>
-              <div v-if="!manualGroups.length && !liveManual" class="muted small empty-manual">Prompts you try here render with the LoRA as it is now, at the step it's on. They don't join the run's samples.</div>
+              <div v-if="!manualGroups.length && !waitingCards.length" class="muted small empty-manual">
+                Prompts you try here render with {{ running ? "the LoRA as it is now, at the step it's on" : 'the newest checkpoint' }}. They don't join the run's samples.
+              </div>
               <!-- one row per try: its prompt, then its renders across (no LoRA, then each step) -->
               <div class="mrows">
                 <div v-for="t in waitingCards.filter((w) => w.againIndex == null)" :key="t.key" class="mrow2">
@@ -765,7 +785,7 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
                   <div class="mcells">
                     <div class="tcell pending" :class="{ live: t.live }">
                       <img v-if="t.live && liveManual?.preview" :src="liveManual.preview" alt="" />
-                      <i v-else :class="t.live ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-clock-outline'" />
+                      <i v-else :class="t.live || t.loading ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-clock-outline'" />
                       <div v-if="t.live" class="qbar"><span :style="{ width: `${t.frac * 100}%` }" /></div>
                       <span class="clabel">{{ t.state }}</span>
                     </div>
@@ -1301,9 +1321,15 @@ dd {
   gap: 12px;
 }
 .try {
+  /* one row: the prompt grows, its options and Render sit at its right (they wrap below when narrow) */
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: flex-start;
   gap: 8px;
+}
+.try-in {
+  flex: 1 1 320px;
+  min-width: 0;
 }
 .try-in {
   display: block;
@@ -1328,9 +1354,11 @@ dd {
   display: flex;
   gap: 8px;
   align-items: center;
+  flex: 0 0 auto;
+  min-height: 38px; /* the prompt box's one-line height, so they line up with it */
 }
 .try-opts > :first-child {
-  width: 200px;
+  width: 170px;
 }
 .empty-manual {
   padding: 8px 0;
@@ -1529,6 +1557,9 @@ dd {
   font-size: 8px;
   margin-left: 4px;
   vertical-align: middle;
+}
+.live-dot.off {
+  visibility: hidden; /* keeps its room: the tab doesn't change width when a render starts */
 }
 .base-sw {
   display: inline-flex;

@@ -839,8 +839,9 @@ class Trainer:
         return str(path)
 
     def _status(self, status: str, message: str | None = None, **fields: Any) -> None:
-        if self.sample_job and status in ("loading", "training"):
-            status = "sampling"  # setup's progress, while sampling a finished run: still just sampling
+        if self.sample_job and status in ("loading", "training", "sampling"):
+            # setup's progress, while sampling a finished run: still just sampling, said plainly
+            status, message = "sampling", f"sampling step {self.sample_job['step']}"
         self.emit(events.STATUS, {"run_id": self.run_id, "status": status, "message": message, "step": self.step})
         self.emit(events.ZENKIT_JOB, {
             "id": f"zentrainer:{self.run_id}", "name": f"Train {self.spec.name}",
