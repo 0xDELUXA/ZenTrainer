@@ -75,4 +75,33 @@ class ZenCaptionSession(io.ComfyNode):
         return io.NodeOutput()
 
 
-NODES: list[type[io.ComfyNode]] = [ZenTrainSession, ZenCaptionSession]
+class ZenSegmentSession(io.ComfyNode):
+    """Hosts one SAM3 mask request from the dataset mask editor (engine: segment.py)."""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="ZenSegmentSession",
+            display_name="Segment for Mask (ZenTrainer)",
+            category="zentrainer",
+            is_output_node=True,
+            inputs=[io.String.Input("job_id")],
+            outputs=[],
+        )
+
+    @classmethod
+    def fingerprint_inputs(cls, job_id):
+        return time.time()
+
+    @classmethod
+    def execute(cls, job_id) -> io.NodeOutput:
+        from . import segment
+
+        job = segment.get(job_id)
+        if job is None:
+            raise RuntimeError(f"segment job {job_id} is gone (ComfyUI restarted?); try again")
+        segment.run(job)
+        return io.NodeOutput()
+
+
+NODES: list[type[io.ComfyNode]] = [ZenTrainSession, ZenCaptionSession, ZenSegmentSession]

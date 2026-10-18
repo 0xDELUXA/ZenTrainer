@@ -572,6 +572,12 @@ export interface SamplePrompt {
   seed?: number
 }
 export const promptText = (p: string | SamplePrompt) => (typeof p === 'string' ? p : p.prompt)
+/** engine/zentrainer/segment.py: one SAM3 request from the mask editor */
+export interface SegmentJob {
+  job_id: string
+  status: 'queued' | 'running' | 'done' | 'error'
+  message: string
+}
 export interface ModelProfile {
   id: string
   families: string[]
@@ -607,6 +613,11 @@ export const engine = {
     call<ModelDownload>('/downloads', { method: 'POST', body: JSON.stringify({ family, folder, name }) }),
   cancelDownload: (id: string) => call<{ cancelled: boolean }>(`/downloads/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   clearDownloads: () => call<{ ok: true }>('/downloads/clear', { method: 'POST' }),
+  segment: (name: string, body: { path: string; text?: string; positive?: { x: number; y: number }[]; negative?: { x: number; y: number }[]; threshold?: number }) =>
+    call<{ job: SegmentJob }>(`${dsPath(name)}/segment`, { method: 'POST', body: JSON.stringify(body) }),
+  segmentJob: (id: string) => call<{ job: SegmentJob }>(`/segment/${encodeURIComponent(id)}`).then((r) => r.job),
+  saveMask: (name: string, path: string, png: string) =>
+    call<{ mask: string | null }>(`${dsPath(name)}/mask`, { method: 'PUT', body: JSON.stringify({ path, png }) }),
   splitVideos: (name: string, body: { seconds: number; count: number; longer_than: number }) =>
     call<{ clips: number; moved: string[] }>(`${dsPath(name)}/split`, { method: 'POST', body: JSON.stringify(body) }),
   mergeLoras: (body: { members: { name: string; strength: number }[]; out_name: string; max_rank?: number; energy?: number }) =>

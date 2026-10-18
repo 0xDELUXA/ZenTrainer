@@ -478,13 +478,15 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
               <div class="muted">M toggles it over the picture</div>
             </div>
           </div>
+          <RouterLink v-if="shown[index].kind !== 'video'" :to="{ path: `/datasets/${encodeURIComponent(name)}/mask`, query: { path: shown[index].path } }" class="edit-mask">
+            <i class="mdi mdi-vector-selection" /> {{ shown[index].mask ? 'Edit mask' : 'Make a mask' }} <span class="muted">· SAM3, brush, feather</span>
+          </RouterLink>
           <dl>
             <dt>File</dt><dd class="mono">{{ shown[index].path }}</dd>
             <dt>Size</dt><dd class="mono">{{ shown[index].width }}×{{ shown[index].height }} · {{ kb(shown[index].bytes) }}</dd>
             <template v-if="shown[index].kind === 'video'">
               <dt>Video</dt><dd class="mono">{{ secs(shown[index].duration) }} · {{ shown[index].fps }} fps · {{ shown[index].frames }} frames</dd>
             </template>
-            <template v-if="!shown[index].mask && shown[index].kind !== 'video'"><dt>Mask</dt><dd>none: drop name-masklabel.png to add one</dd></template>
             <dt v-if="shown[index].repeats > 1">Repeats</dt><dd v-if="shown[index].repeats > 1">×{{ shown[index].repeats }}</dd>
           </dl>
         </div>
@@ -664,6 +666,15 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
 .mini:hover {
   color: var(--zen-text);
   background: var(--zen-surface-2);
+}
+.edit-mask {
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: var(--r-md);
+  border: 1px solid color-mix(in srgb, var(--zen-border) 70%, transparent);
+}
+.edit-mask:hover {
+  border-color: var(--zen-accent);
 }
 .mask-info {
   display: flex;

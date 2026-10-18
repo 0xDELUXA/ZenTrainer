@@ -28,6 +28,7 @@ const router = createRouter({
     { path: '/runs/:id', component: () => import('./views/RunView.vue'), props: true },
     { path: '/datasets', component: () => import('./views/DatasetsView.vue') },
     { path: '/datasets/:name', component: () => import('./views/DatasetView.vue'), props: true },
+    { path: '/datasets/:name/mask', component: () => import('./views/MaskEditorView.vue'), props: true },
     { path: '/models', component: () => import('./views/ModelsView.vue') },
     { path: '/gallery', component: () => import('./views/GalleryView.vue') },
     { path: '/apps', component: () => import('./views/AppsView.vue') },

@@ -166,6 +166,58 @@ def register(server) -> None:
             return _bad("ComfyUI rejected the caption job", 422, comfy=result)
         return web.json_response({"job": job.public()})
 
+    @routes.post("/zentrainer/api/datasets/{name}/segment")
+    async def segment_image(request):
+        """SAM3 on one image: {path, text?, positive?: [{x,y}], negative?: [{x,y}], threshold?, refine?}.
+        Waits up to ~20 s for the result ({job} with status done -> GET .../segment/{id}.png);
+        when the GPU is busy (a training run) it returns the queued job to poll."""
+        from . import jobqueue, segment
+
+        name = request.match_info["name"]
+        b = await request.json()
+        try:
+            root = datasets.folder(name)
+            img = (root / str(b.get("path", ""))).resolve()
+            if root.resolve() not in img.parents or not img.is_file():
+                return _bad("no such image in the dataset", 404)
+        except FileNotFoundError:
+            return _bad("dataset not found", 404)
+        job = segment.create(img, text=str(b.get("text") or ""), positive=list(b.get("positive") or []),
+                             negative=list(b.get("negative") or []), threshold=float(b.get("threshold") or 0.5),
+                             refine=int(b.get("refine", 2)))
+        if jobqueue.get().current:
+            job.message = "waits for the training run to finish"
+        payload = {"prompt": {"seg": {"class_type": "ZenSegmentSession", "inputs": {"job_id": job.job_id},
+                                      "_meta": {"title": f"mask {name}"}}}, "prompt_id": str(uuid.uuid4())}
+        async with aiohttp.ClientSession() as s:
+            async with s.post(_loopback(server) + "/prompt", json=payload) as r:
+                res = await r.json()
+        if r.status != 200:
+            return _bad("ComfyUI rejected the segment job", 422, comfy=res)
+        for _ in range(100):
+            if job.status not in segment.ACTIVE:
+                break
+            await asyncio.sleep(0.2)
+        return web.json_response({"job": job.public()})
+
+    @routes.get("/zentrainer/api/segment/{job_id}")
+    async def segment_job(request):
+        from . import segment
+
+        jid = request.match_info["job_id"]
+        if jid.endswith(".png"):
+            p = segment.result(jid[:-4])
+            return web.FileResponse(p, headers={"Cache-Control": "no-store"}) if p else _bad("no mask yet", 404)
+        job = segment.get(jid)
+        return web.json_response({"job": job.public()}) if job else _bad("no such job", 404)
+
+    @routes.put("/zentrainer/api/datasets/{name}/mask")
+    async def save_mask(request):
+        """Write an image's mask from the editor: {path, png: data URL}; empty png deletes it."""
+        name = request.match_info["name"]
+        b = await request.json()
+        return await _ds(lambda: datasets.save_mask(name, str(b.get("path", "")), str(b.get("png") or "")))
+
     @routes.get("/zentrainer/api/caption/{job_id}")
     async def caption_job(request):
         from . import captioner

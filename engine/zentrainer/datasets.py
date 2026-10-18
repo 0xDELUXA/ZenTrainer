@@ -202,6 +202,35 @@ def save_upload(name: str, filename: str, data: bytes) -> str:
     return str(target.relative_to(d))
 
 
+def save_mask(name: str, rel: str, data_url: str) -> dict:
+    """Save (or with no data, remove) an image's mask: <stem>-masklabel.png beside it, replacing
+    whatever mask file it had. The PNG is greyscale: white trains at full weight."""
+    import base64
+    import io
+
+    from PIL import Image
+
+    d = folder(name)
+    img = (d / rel).resolve()
+    if d.resolve() not in img.parents or not img.is_file():
+        raise DatasetError("no such image")
+    old = find_mask(img)
+    if not data_url:
+        if old:
+            old.unlink()
+        return {"mask": None}
+    raw = base64.b64decode(data_url.split(",", 1)[-1])
+    with Image.open(io.BytesIO(raw)) as m:
+        with Image.open(img) as src:
+            size = src.size
+        mask = m.convert("L").resize(size, Image.Resampling.BILINEAR) if m.size != size else m.convert("L")
+    target = img.with_name(img.stem + "-masklabel.png")
+    if old and old != target:
+        old.unlink()
+    mask.save(target)
+    return {"mask": str(target.relative_to(d))}
+
+
 def split_videos(name: str, seconds: float = 3.0, count: int = 20, longer_than: float = 20.0) -> dict:
     """Cut every video in the dataset longer than `longer_than` s into short clips (see
     harness/video.split) beside it; the originals move to _long/, which training ignores."""
