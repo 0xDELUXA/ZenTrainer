@@ -20,8 +20,9 @@ export interface Recipe {
   photos: { min: number; ideal: string; tips: string[] }
   /** the card's accent and icon */
   cover: { from: string; to: string; icon: string }
-  /** example images for the card (web/public/recipes/), shown in turn on hover; none = a text card */
-  covers?: string[]
+  /** the card's picture, as ComfyUI's template thumbnails: one image, two that crossfade on hover
+   *  ("dissolve"), or a before/after the pointer slides across ("slider"); paths in web/public */
+  thumb?: { src: string; after?: string; mode?: 'slider' | 'dissolve'; before_label?: string; after_label?: string }
   /** preferred files per folder; the family's recommended file when not installed */
   files: Partial<Record<Folder, string[]>>
   /** steps from the number of photos: perPhoto × photos, clamped */

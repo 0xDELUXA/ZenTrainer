@@ -2,7 +2,7 @@
 // Simple mode: pick a recipe card, add photos, name it, train. Everything else (settings, captions,
 // model files) comes from the recipe; what's missing is downloaded and the photos are captioned
 // before the run starts, each as a visible step.
-import { ZenButton, ZenInput } from '@nynxz/zenkit-ui'
+import { ZenButton, ZenCompare, ZenInput } from '@nynxz/zenkit-ui'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { EngineError, defaultSpec, engine, thumbUrl, type DatasetInfo, type DatasetItem } from '@/api/engine'
@@ -212,12 +212,20 @@ void leaving
       </div>
       <div class="cards">
         <RouterLink v-for="x in shown" :key="x.id" :to="`/simple/${x.id}`" class="rcard" :style="{ '--a': x.cover.from }">
-          <div v-if="x.covers?.length" class="cover">
-            <img v-for="(c, i) in x.covers" :key="c" :src="asset(c)" :class="{ alt: i > 0 }" alt="" loading="lazy" />
+          <div class="thumb">
+            <ZenCompare
+              v-if="x.thumb?.after"
+              :before="asset(x.thumb.src)"
+              :after="asset(x.thumb.after)"
+              :mode="x.thumb.mode ?? 'slider'"
+              :before-label="x.thumb.before_label"
+              :after-label="x.thumb.after_label"
+            />
+            <img v-else-if="x.thumb" :src="asset(x.thumb.src)" alt="" loading="lazy" />
+            <div v-else class="thumb-none"><i :class="x.cover.icon" /></div>
           </div>
           <div class="rbody">
             <div class="rtop">
-              <span class="ric"><i :class="x.cover.icon" /></span>
               <span class="chip">{{ x.model }}</span>
               <span class="kind-tag">{{ x.kind === 'character' ? 'Character' : x.kind === 'style' ? 'Style' : 'Video' }}</span>
             </div>
@@ -390,25 +398,29 @@ void leaving
   border-color: color-mix(in srgb, var(--a) 70%, var(--zen-border));
   transform: translateY(-2px);
 }
-.cover {
+.thumb {
   position: relative;
-  aspect-ratio: 16 / 10;
+  aspect-ratio: 4 / 3;
   background: var(--zen-surface-2);
   overflow: hidden;
 }
-.cover img {
-  position: absolute;
-  inset: 0;
+.thumb > img {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transition: opacity 0.4s ease;
+  display: block;
+  transition: transform 0.4s ease;
 }
-.cover img.alt {
-  opacity: 0;
+.rcard:hover .thumb > img {
+  transform: scale(1.04);
 }
-.rcard:hover .cover img.alt {
-  opacity: 1;
+.thumb-none {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  font-size: 40px;
+  color: color-mix(in srgb, var(--a) 70%, var(--zen-muted));
+  background: radial-gradient(circle at 50% 40%, color-mix(in srgb, var(--a) 14%, transparent), transparent 70%);
 }
 .rbody {
   padding: 16px;
