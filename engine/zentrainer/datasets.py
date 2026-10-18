@@ -167,7 +167,7 @@ def _settings_file() -> Path:
 def get_settings(name: str) -> dict:
     try:
         saved = json.loads(_settings_file().read_text()).get(name, {})
-    except (OSError, ValueError):
+    except (OSError, ValueError, ImportError):  # ImportError: outside ComfyUI (tests, tools)
         saved = {}
     return {**DEFAULT_SETTINGS, **{k: v for k, v in saved.items() if k in DEFAULT_SETTINGS}}
 
