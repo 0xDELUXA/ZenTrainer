@@ -833,6 +833,9 @@ async function start(position: 'next' | 'end' = 'next') {
                 <span v-else class="sw-state">Off</span>
               </div>
             </ZenField>
+            <ZenField label="Fused int8 backward" stack tip="int8 ConvRot bases (MiniMax H3, Krea 2 int8): each frozen layer's input gradient from a fused Triton kernel instead of a rebuilt bf16 weight (Fizgig's, by @mabseyuk). Less VRAM per layer; faster at large token counts (video clips)">
+              <div class="sw-row"><ZenSwitch :model-value="!!spec.memory.fused_int8_backward" @update:model-value="spec.memory.fused_int8_backward = $event" /><span class="sw-state">{{ spec.memory.fused_int8_backward ? 'On' : 'Off' }}</span></div>
+            </ZenField>
             <ZenField label="Bypass mode" stack tip="Forward hooks; automatic for quantized bases"><div class="sw-row"><ZenSwitch v-model="spec.memory.bypass_mode" /><span class="sw-state">{{ spec.memory.bypass_mode ? 'On' : 'Off' }}</span></div></ZenField>
           </div>
         </section>

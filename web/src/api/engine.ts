@@ -87,6 +87,8 @@ export interface TrainSpec {
     checkpoint_skip: number
     /** TREAD: share of a video clip's tokens routed around the middle blocks (0 = off) */
     tread?: number
+    /** fused Triton backward for int8 ConvRot layers */
+    fused_int8_backward?: boolean
     offloading: boolean
     quantized_backward: boolean
     bypass_mode: boolean

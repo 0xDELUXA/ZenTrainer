@@ -145,6 +145,10 @@ class MemorySpec:
     # middle blocks (2 to n-3) and rejoins unchanged. 0.5 roughly halves those blocks' work;
     # stills, samples and validation always run whole. 0 = off.
     tread: float = 0.0
+    # int8 ConvRot bases (MiniMax H3, Krea 2 int8): the backward computes each frozen layer's
+    # input gradient with a fused Triton kernel instead of rebuilding its bf16 weight (Fizgig's,
+    # by @mabseyuk). Saves a transient weight per layer; faster at large token counts.
+    fused_int8_backward: bool = False
     # With offloading: VRAM kept free for activations, the LoRA and its optimizer (GB);
     # the rest holds as much of the model as fits. 0 = auto: 8 GB, more for long video clips.
     vram_headroom: float = 0.0

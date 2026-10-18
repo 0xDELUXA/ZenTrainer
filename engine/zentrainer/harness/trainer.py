@@ -211,6 +211,9 @@ class Trainer:
 
         s = self.spec
         compat.apply()  # ComfyUI model fixes for training (see compat.py)
+        from . import int8_backward
+
+        int8_backward.enable(s.memory.fused_int8_backward)
         lora_root(s.output.lora_dir)  # a bad save folder fails now, not at the first save
         torch.manual_seed(s.seed)
         random.seed(s.seed)
