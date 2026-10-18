@@ -29,7 +29,10 @@ import logging
 
 import torch
 
+import collections
+
 _mode = ""  # "", "fused" or "w8a8"
+stats: collections.Counter = collections.Counter()  # which path each backward took (see profile)
 _patched = False
 _warned = False
 
@@ -111,10 +114,17 @@ def _patch() -> None:
     @torch.autograd.function.once_differentiable
     def backward(ctx, grad_output):
         global _warned
+        if not (_mode and mm.in_training and not ctx.fp8_bwd and not ctx.weight_requires_grad):
+            stats["off: " + ("no mode" if not _mode else "not training" if not mm.in_training
+                             else "fp8 backward" if ctx.fp8_bwd else "weight trains")] += 1
         if _mode and mm.in_training and not ctx.fp8_bwd and not ctx.weight_requires_grad:
             try:
                 _input, weight = ctx.saved_tensors
                 params = getattr(weight, "_params", None)
+                why = ("not quantized" if params is None else "not convrot" if not getattr(params, "convrot", False)
+                       else "no int8 data" if getattr(weight, "_qdata", None) is None or weight._qdata.dtype != torch.int8
+                       else "cpu" if not grad_output.is_cuda else "")
+                stats[why or _mode] += 1
                 if params is not None and getattr(params, "convrot", False) and getattr(weight, "_qdata", None) is not None \
                         and weight._qdata.dtype == torch.int8 and grad_output.is_cuda:
                     grad_2d = grad_output.flatten(0, -2)

@@ -462,6 +462,9 @@ class Trainer:
         (out / f"profile-step{self.step:06d}.txt").write_text(f"{table}\n\nby input shape\n{shapes}\n")
         prof.export_chrome_trace(str(out / f"profile-step{self.step:06d}.json"))
         logging.info("[ZenTrainer] profiled step %d: %s", self.step, out / f"profile-step{self.step:06d}.txt")
+        from . import int8_backward
+
+        logging.info("[ZenTrainer] int8 backward paths so far: %s", dict(int8_backward.stats))
 
     def _train_step(self) -> None:
         s = self.spec
