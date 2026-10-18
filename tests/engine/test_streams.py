@@ -529,3 +529,24 @@ def test_masked_out_faces_dont_count():
     mask[:, 140:] = 1  # now the main face is masked out: the bystander is the trained face
     r = _summarize(frames, mask)
     assert (r["faces"], r["masked"], r["emb"], r["share"]) == (1, 1, [0.0, 1.0], 0.2)
+
+
+def test_stopping_right_after_a_save_writes_no_copy():
+    from types import SimpleNamespace
+
+    from zentrainer.harness.callbacks import Checkpoints
+
+    saved = []
+    t = SimpleNamespace(step=0, spec=SimpleNamespace(optim=SimpleNamespace(steps=1000)),
+                        save=lambda tag, final=False: saved.append(tag))
+    cb = Checkpoints(250)
+    t.step = 250
+    cb.on_step(t)
+    cb.on_end(t, "stopped")  # stopped at the step just saved: that file resumes
+    assert saved == ["step000250"]
+    t.step = 260
+    cb.on_end(t, "error")  # past it: the newer weights are kept
+    assert saved == ["step000250", "error-step000260"]
+    t.step = 1000
+    cb.on_end(t, "done")
+    assert saved[-1] == "final"

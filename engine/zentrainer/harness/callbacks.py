@@ -79,14 +79,19 @@ class Checkpoints(Callback):
 
     def __init__(self, every: int):
         self.every = every
+        self.saved = None  # the step last saved by this run
 
     def on_step(self, t):
         if self.every and t.step % self.every == 0 and t.step < t.spec.optim.steps:
             t.save(f"step{t.step:06d}")
+            self.saved = t.step
 
     def on_end(self, t, status):
-        if t.step > 0:
-            t.save("final" if status == "done" else f"{status}-step{t.step:06d}", final=status == "done")
+        if t.step <= 0:
+            return
+        if status != "done" and self.saved == t.step:
+            return  # stopped right after a save (often while it sampled): that file and its state resume
+        t.save("final" if status == "done" else f"{status}-step{t.step:06d}", final=status == "done")
 
 
 class _OptionsOnly:

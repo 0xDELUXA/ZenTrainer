@@ -359,17 +359,30 @@ const bestStep = computed(() => {
   if (bestBy.value === 'likeness') return cks.reduce((a, b) => (likeAt(b.step)! > likeAt(a.step)! ? b : a)).step
   return cks.reduce((a, b) => (ckptVal(b.step)! < ckptVal(a.step)! ? b : a)).step
 })
-// how far into the run it was saved
-const ckptAt = (stepAt: number) => {
-  const row = detail.value?.metrics.find((m) => m.step >= stepAt)
-  return row?.elapsed != null ? `${dur(row.elapsed)} in` : ''
-}
+// why a checkpoint was saved, from its name: the schedule (null), by hand, or as the run stopped
+const ckKind = (c: { lora_name: string }) => /_(stopped|error|manual)-step\d+/.exec(c.lora_name)?.[1] ?? null
+// one row per step, newest first: a run stopped right after a save (or resumed) can hold several
+// files of one step, so the final, then the scheduled save, then a manual one, then a stop's stands
+const ckRank = (c: { final?: boolean; lora_name: string }) => (c.final ? 0 : { null: 1, manual: 2, stopped: 3, error: 4 }[String(ckKind(c))] ?? 5)
+const ckRows = computed(() => {
+  const by = new Map<number, NonNullable<typeof detail.value>['checkpoints'][number]>()
+  for (const c of detail.value?.checkpoints ?? []) {
+    const had = by.get(c.step)
+    if (!had || ckRank(c) < ckRank(had)) by.set(c.step, c)
+  }
+  return [...by.values()].sort((a, b) => b.step - a.step)
+})
+// every checkpoint of a run is the same size: said once, in the header
+const ckSize = computed(() => {
+  const sizes = new Set(ckRows.value.map((c) => c.size).filter((v): v is number => !!v))
+  return sizes.size ? `${fmtBytes(Math.max(...sizes))} each` : ''
+})
 const saveLine = computed(() => {
-  const n = detail.value?.checkpoints.length ?? 0
+  const n = ckRows.value.length
   const next = nextSave.value
   const plan = detail.value?.spec.save_every ? `every ${detail.value.spec.save_every}` : 'final only'
   if (running.value && next) return `${n ? `${n} · ` : ''}next ${next.step} · ${next.in}`
-  return n ? `${n} · ${plan}` : plan
+  return [n ? `${n} · ${plan}` : plan, ckSize.value].filter(Boolean).join(' · ')
 })
 const etaLine = computed(() => {
   const pct = `${Math.round(progress.value * 100)}%`
@@ -828,30 +841,35 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
               <span class="sec-title">Checkpoints</span>
               <span class="sec-sub">{{ saveLine }}</span>
             </header>
-            <div v-if="!detail.checkpoints.length" class="muted small">
+            <div v-if="!ckRows.length" class="muted small">
               {{ running ? `The first save lands at step ${nextSave?.step ?? total}.` : 'None saved.' }}
             </div>
             <div class="ckpts">
-              <div v-for="c in [...detail.checkpoints].reverse()" :key="c.path" class="ckpt" :class="{ best: c.step === bestStep }" :title="c.path">
-                <div class="ck-main">
-                  <span class="ck-step mono">{{ c.step }}</span>
-                  <span v-if="c.final" class="chip">final</span>
-                  <span v-if="c.step === bestStep" class="chip best-chip" :title="bestBy === 'likeness' ? 'Its samples look most like the dataset\'s faces' : 'Lowest validation loss of the saved checkpoints'">best</span>
-                  <span class="spacer" />
-                  <span class="ck-size mono" :class="{ gone: c.size === null }">{{ [ckptAt(c.step), c.size ? fmtBytes(c.size) : c.size === null ? 'file missing' : ''].filter(Boolean).join(' · ') }}</span>
-                </div>
-                <div class="ck-acts">
-                  <span class="ck-sub mono">
-                    <template v-if="likeAt(c.step) != null"><span title="How much its samples' faces look like the dataset's (same person ≳ 0.5)">likeness {{ likeAt(c.step)!.toFixed(2) }}</span> · </template>{{ ckptVal(c.step) != null ? `val ${ckptVal(c.step)!.toFixed(4)}` : 'no val' }}
-                  </span>
-                  <span class="spacer" />
-                  <RouterLink class="mini-btn" :to="`/apps/test-lora?run=${id}&lora=${encodeURIComponent(c.lora_name)}`" title="Try it in Test LoRA, on this run's model">Test</RouterLink>
-                  <button v-if="resumable && !c.final" class="mini-btn" title="Resume this run from here, optimizer state and all" @click="resume(c.path)">Resume</button>
-                  <RouterLink v-else class="mini-btn" :to="`/runs/new?from=${id}&init=${encodeURIComponent(c.lora_name)}`" title="A new run with these settings that starts from this LoRA">Train more</RouterLink>
+              <div
+                v-for="c in ckRows"
+                :key="c.path"
+                class="ckpt"
+                :class="{ best: c.step === bestStep }"
+                :title="c.size === null ? `File missing: ${c.path}` : c.path"
+                tabindex="-1"
+              >
+                <span class="ck-step mono" :class="{ gone: c.size === null }">{{ c.step }}</span>
+                <span v-if="c.final" class="chip">final</span>
+                <span v-else-if="ckKind(c)" class="chip muted" :title="`Saved when the run ${ckKind(c) === 'manual' ? 'was asked to' : ckKind(c)}`">{{ ckKind(c) }}</span>
+                <span v-if="c.step === bestStep" class="chip best-chip" :title="bestBy === 'likeness' ? 'Its samples look most like the dataset\'s faces' : 'Lowest validation loss of the saved checkpoints'">best</span>
+                <span class="spacer" />
+                <span class="ck-val mono">
+                  <template v-if="likeAt(c.step) != null"><span title="How much its samples' faces look like the dataset's (same person ≳ 0.5)">♥ {{ likeAt(c.step)!.toFixed(2) }}</span> · </template>
+                  <span title="Validation loss">{{ ckptVal(c.step) != null ? ckptVal(c.step)!.toFixed(4) : '—' }}</span>
+                </span>
+                <span class="ck-acts">
+                  <RouterLink class="ib" :to="`/apps/test-lora?run=${id}&lora=${encodeURIComponent(c.lora_name)}`" title="Test: try it in Test LoRA, on this run's model"><i class="mdi mdi-flask-outline" /></RouterLink>
+                  <button v-if="resumable && !c.final" class="ib" title="Resume this run from here, optimizer state and all" @click="resume(c.path)"><i class="mdi mdi-play-outline" /></button>
+                  <RouterLink v-else class="ib" :to="`/runs/new?from=${id}&init=${encodeURIComponent(c.lora_name)}`" title="Train more: a new run with these settings that starts from this LoRA"><i class="mdi mdi-fast-forward-outline" /></RouterLink>
                   <button class="ib" :title="copied === c.lora_name ? 'Copied' : `Copy LoRA name: ${c.lora_name}`" @click="copy(c.lora_name)">
                     <i :class="copied === c.lora_name ? 'mdi mdi-check' : 'mdi mdi-content-copy'" />
                   </button>
-                </div>
+                </span>
               </div>
             </div>
           </section>
@@ -1647,68 +1665,69 @@ dd {
 .ckpts {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 1px;
 }
+/* one line per checkpoint; its actions take the numbers' place on hover */
 .ckpt {
+  position: relative;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px 8px;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 8px;
   margin: 0 -8px;
   border-radius: var(--r-md);
   font-size: 12px;
 }
-.ckpt:hover {
+.ckpt:hover,
+.ckpt:focus-within {
   background: color-mix(in srgb, var(--zen-surface-2) 60%, transparent);
 }
 .ckpt.best {
   background: color-mix(in srgb, var(--zen-ok) 8%, transparent);
 }
-.ck-main {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 26px;
-}
 .ck-step {
   font-weight: 650;
   font-size: 13px;
-  min-width: 5ch;
+  min-width: 4ch;
 }
-.ck-sub {
-  font-size: 11px;
-  color: var(--zen-muted);
-}
-.ck-size {
-  font-size: 11px;
-  color: var(--zen-muted);
-}
-.ck-size.gone {
+.ck-step.gone {
   color: var(--zen-warn);
+  text-decoration: line-through;
+}
+.ckpt .chip {
+  font-size: 10px;
+  padding: 0 6px;
+  line-height: 16px;
+}
+.ckpt .chip.muted {
+  color: var(--zen-muted);
+}
+.ck-val {
+  font-size: 11px;
+  color: var(--zen-muted);
+  white-space: nowrap;
+  transition: opacity 0.12s ease;
 }
 .ck-acts {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  translate: 0 -50%;
   display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-top: 2px;
+  gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
 }
-.mini-btn {
-  height: 24px;
-  padding: 0 8px;
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid color-mix(in srgb, var(--zen-border) 80%, transparent);
-  border-radius: var(--r-md);
-  background: none;
-  color: var(--zen-text);
-  font: inherit;
-  font-size: 11px;
-  text-decoration: none;
-  cursor: pointer;
-  white-space: nowrap;
+.ckpt:hover .ck-acts,
+.ckpt:focus-within .ck-acts {
+  opacity: 1;
+  pointer-events: auto;
 }
-.mini-btn:hover {
-  border-color: var(--zen-accent);
+.ckpt:hover .ck-val,
+.ckpt:focus-within .ck-val {
+  opacity: 0;
 }
 .best-chip {
   color: var(--zen-ok);
