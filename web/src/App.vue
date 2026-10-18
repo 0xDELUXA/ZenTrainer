@@ -3,6 +3,7 @@ import { ZenLotus } from '@nynxz/zenkit-ui'
 import { nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import AppSidebar from './components/AppSidebar.vue'
+import HoverPeek from './components/HoverPeek.vue'
 import LogDrawer from './components/LogDrawer.vue'
 import ScrollArea from './components/ScrollArea.vue'
 import { drawerHeight, drawerOpen, startLogSync } from './logs'
@@ -91,6 +92,7 @@ watch(
         <div class="log-room" :style="{ height: `${roomPx}px` }" aria-hidden="true" />
       </ScrollArea>
       <LogDrawer />
+      <HoverPeek />
     </div>
   </div>
 </template>

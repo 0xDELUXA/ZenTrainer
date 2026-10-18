@@ -524,6 +524,25 @@ def _previewer(t):
         return None
 
 
+def _video_tae_previewer(vae, device):
+    """TAEHV previews decoded by the tiny model itself, kept on the GPU (21 MB) for the run.
+    ComfyUI's VAE.decode goes through model management, which re-stages it on every sampler
+    step because loading the sampled model back pushes it out."""
+    import latent_preview
+
+    model = vae.first_stage_model.to(device=device, dtype=vae.vae_dtype).eval()
+
+    class Direct(latent_preview.LatentPreviewer):
+        takes_video = True
+
+        @torch.no_grad()
+        def decode_latent_to_preview(self, x0):
+            out = model.decode(x0[:1, :, :1].to(device=device, dtype=vae.vae_dtype))
+            return latent_preview.preview_to_image(vae.process_output(out.float()).movedim(1, -1)[0][0], do_scale=False)
+
+    return Direct()
+
+
 def _tiny_previewer(t, fmt):
     import comfy.utils
     import folder_paths
@@ -542,7 +561,7 @@ def _tiny_previewer(t, fmt):
 
             vae = VAE(comfy.utils.load_torch_file(path))
             vae.first_stage_model.show_progress_bar = False
-            return latent_preview.TAEHVPreviewerImpl(vae)
+            return _video_tae_previewer(vae, t.device)
         from comfy.taesd.taesd import TAESD
 
         return latent_preview.TAESDPreviewerImpl(TAESD(None, path, latent_channels=fmt.latent_channels).to(t.device))
@@ -559,7 +578,7 @@ def _preview_url(previewer, x0) -> str | None:
         x0 = first_stream(x0)[:1]
         # a video latent: the video tiny VAEs take it whole (and decode its first frame);
         # the rest want one frame
-        if x0.ndim == 5 and type(previewer).__name__ != "TAEHVPreviewerImpl":
+        if x0.ndim == 5 and not getattr(previewer, "takes_video", False):
             x0 = x0[:, :, 0]
         img = previewer.decode_latent_to_preview(x0)
         img.thumbnail((384, 384))
