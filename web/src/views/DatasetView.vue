@@ -1008,10 +1008,10 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
   background: color-mix(in srgb, var(--zen-ok) 18%, transparent);
 }
 
-/* grid: every card the same size; the slider sets it */
+/* grid: every card exactly the slider's size, so the sidebar costs a column, never card size */
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--card), 1fr));
+  grid-template-columns: repeat(auto-fill, var(--card));
   gap: 12px;
   align-items: start;
 }
@@ -1592,10 +1592,7 @@ dd {
   gap: 10px;
 }
 .ds-side {
-  position: sticky;
-  top: 58px;
-  max-height: calc(100vh - 80px);
-  overflow-y: auto;
+  /* scrolls with the page: no scrollbar of its own */
   display: flex;
   flex-direction: column;
   gap: 10px;
