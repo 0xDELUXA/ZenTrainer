@@ -440,7 +440,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
 </script>
 
 <template>
-  <div class="page wide ds-page">
+  <div class="page full ds-page">
     <header class="ds-head">
       <RouterLink to="/datasets" class="crumb">Datasets</RouterLink>
       <h1>{{ name }}</h1>
@@ -787,9 +787,6 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
 </template>
 
 <style scoped>
-.wide {
-  max-width: 1400px;
-}
 .warn {
   color: var(--zen-warn);
 }

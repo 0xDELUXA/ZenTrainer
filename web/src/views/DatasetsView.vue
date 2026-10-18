@@ -51,7 +51,28 @@ async function create() {
   }
 }
 
-type Key = 'name' | 'items' | 'captioned' | 'size' | 'modified'
+// the pentagon's axes as columns; faces falls back to balance (and quality to resolution) like it does
+const AXES = [
+  { key: 'captions', label: 'Captions' },
+  { key: 'consistency', label: 'Consist.', tip: 'Consistency' },
+  { key: 'quality', label: 'Quality', alt: 'resolution' },
+  { key: 'uniqueness', label: 'Unique', tip: 'Uniqueness' },
+  { key: 'faces', label: 'Faces', alt: 'balance' },
+] as const
+type Axis = (typeof AXES)[number]
+function axisScore(d: DatasetInfo, a: Axis): { v: number; alt: boolean } | null {
+  const s = d.health?.scores
+  if (!s) return null
+  if (s[a.key] != null) return { v: s[a.key]!, alt: false }
+  return !('alt' in a) || s[a.alt] == null ? null : { v: s[a.alt]!, alt: true }
+}
+function overall(d: DatasetInfo): number | null {
+  const vs = AXES.map((a) => axisScore(d, a)?.v).filter((v): v is number => v != null)
+  return vs.length ? vs.reduce((x, y) => x + y, 0) / vs.length : null
+}
+const pct = (v: number) => Math.round(v * 100)
+
+type Key = 'name' | 'items' | 'captioned' | 'size' | 'modified' | 'health' | Axis['key']
 const sortKey = ref<Key>('modified')
 const sortDir = ref(-1)
 function sortBy(k: Key) {
@@ -65,7 +86,11 @@ const shown = computed(() => {
   const q = query.value.trim().toLowerCase()
   const list = (datasets.value ?? []).filter((d) => !q || d.folder.toLowerCase().includes(q))
   const val = (d: DatasetInfo): string | number =>
-    ({ name: d.folder.toLowerCase(), items: d.images, captioned: d.images ? d.captioned / d.images : 0, size: d.bytes ?? 0, modified: d.modified ?? 0 })[sortKey.value]
+    sortKey.value === 'health'
+      ? (overall(d) ?? -1)
+      : AXES.find((a) => a.key === sortKey.value)
+        ? (axisScore(d, AXES.find((a) => a.key === sortKey.value)!)?.v ?? -1)
+        : ({ name: d.folder.toLowerCase(), items: d.images, captioned: d.images ? d.captioned / d.images : 0, size: d.bytes ?? 0, modified: d.modified ?? 0 } as Record<string, string | number>)[sortKey.value] ?? 0
   return [...list].sort((a, b) => (val(a) < val(b) ? -1 : val(a) > val(b) ? 1 : 0) * sortDir.value)
 })
 
@@ -95,7 +120,7 @@ const ago = (t?: number) => {
 </script>
 
 <template>
-  <div class="page">
+  <div class="page full">
     <div class="page-head">
       <div class="titles">
         <h1>Datasets</h1>
@@ -152,8 +177,10 @@ const ago = (t?: number) => {
           <button class="sortable" @click="sortBy('name')">Name <i v-if="sortKey === 'name'" :class="sortDir > 0 ? 'mdi mdi-arrow-up' : 'mdi mdi-arrow-down'" /></button>
           <button class="sortable" @click="sortBy('items')">Items <i v-if="sortKey === 'items'" :class="sortDir > 0 ? 'mdi mdi-arrow-up' : 'mdi mdi-arrow-down'" /></button>
           <button class="sortable" @click="sortBy('captioned')">Captioned <i v-if="sortKey === 'captioned'" :class="sortDir > 0 ? 'mdi mdi-arrow-up' : 'mdi mdi-arrow-down'" /></button>
+          <button class="sortable hide-s" title="The pentagon's five scores, averaged (from the last stats snapshot)" @click="sortBy('health')">Health <i v-if="sortKey === 'health'" :class="sortDir > 0 ? 'mdi mdi-arrow-up' : 'mdi mdi-arrow-down'" /></button>
+          <button v-for="a in AXES" :key="a.key" class="sortable num hide-m" :title="'tip' in a ? a.tip : a.label" @click="sortBy(a.key)">{{ a.label }} <i v-if="sortKey === a.key" :class="sortDir > 0 ? 'mdi mdi-arrow-up' : 'mdi mdi-arrow-down'" /></button>
           <span class="hide-s">Caption sets</span>
-          <button class="sortable hide-s" @click="sortBy('size')">Size <i v-if="sortKey === 'size'" :class="sortDir > 0 ? 'mdi mdi-arrow-up' : 'mdi mdi-arrow-down'" /></button>
+          <button class="sortable hide-s hide-m" @click="sortBy('size')">Size <i v-if="sortKey === 'size'" :class="sortDir > 0 ? 'mdi mdi-arrow-up' : 'mdi mdi-arrow-down'" /></button>
           <button class="sortable hide-s" @click="sortBy('modified')">Changed <i v-if="sortKey === 'modified'" :class="sortDir > 0 ? 'mdi mdi-arrow-up' : 'mdi mdi-arrow-down'" /></button>
           <span />
         </div>
@@ -167,10 +194,20 @@ const ago = (t?: number) => {
             <span class="meter"><span :class="{ part: d.captioned < d.images }" :style="{ width: `${d.images ? (d.captioned / d.images) * 100 : 0}%` }" /></span>
             <span class="small mono" :class="d.captioned < d.images ? 'warn' : 'muted'">{{ d.captioned }}/{{ d.images }}</span>
           </span>
+          <span class="health hide-s" :title="d.health ? `Health of the “${d.health.set}” caption set` : 'Not measured yet: open the dataset'">
+            <template v-if="d.health">
+              <HealthPentagon :scores="d.health.scores" :size="26" class="card-pent" />
+              <span class="small mono">{{ pct(overall(d) ?? 0) }}</span>
+            </template>
+            <span v-else class="small muted">—</span>
+          </span>
+          <span v-for="a in AXES" :key="a.key" class="small mono num hide-m" :class="{ muted: !axisScore(d, a) || axisScore(d, a)!.alt, warn: (axisScore(d, a)?.v ?? 1) < 0.5 }" :title="axisScore(d, a)?.alt && 'alt' in a ? `${a.alt} (no ${a.key} score)` : undefined">
+            {{ axisScore(d, a) ? pct(axisScore(d, a)!.v) : '—' }}
+          </span>
           <span class="sets hide-s">
             <span v-for="st in d.sets" :key="st" class="set">{{ st }}</span>
           </span>
-          <span class="small mono muted hide-s">{{ fmtBytes(d.bytes) }}</span>
+          <span class="small mono muted hide-s hide-m">{{ fmtBytes(d.bytes) }}</span>
           <span class="small muted hide-s">{{ ago(d.modified) }}</span>
           <RouterLink :to="{ path: '/runs/new', query: { dataset: d.folder } }" @click.stop>
             <ZenButton size="sm" icon="mdi mdi-play">Train</ZenButton>
@@ -300,7 +337,7 @@ const ago = (t?: number) => {
 }
 .tr {
   display: grid;
-  grid-template-columns: 112px minmax(140px, 1.4fr) 150px 150px minmax(120px, 1fr) 70px 80px 84px;
+  grid-template-columns: 112px minmax(140px, 1.4fr) 130px 130px 72px repeat(5, 58px) minmax(110px, 1fr) 70px 80px 84px;
   align-items: center;
   gap: 12px;
   padding: 8px 14px;
@@ -362,6 +399,23 @@ const ago = (t?: number) => {
 }
 .empty {
   padding: 16px;
+}
+.health {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.num {
+  text-align: right;
+  justify-content: flex-end;
+}
+@media (max-width: 1350px) {
+  .tr {
+    grid-template-columns: 112px minmax(140px, 1.4fr) 130px 130px 72px minmax(110px, 1fr) 80px 84px;
+  }
+  .hide-m {
+    display: none;
+  }
 }
 @media (max-width: 900px) {
   .tr {

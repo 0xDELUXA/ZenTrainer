@@ -42,6 +42,10 @@ a {
   flex-direction: column;
   gap: 18px;
 }
+/* pages that are mostly a grid of pictures use the whole width; forms and reading pages keep the cap */
+.page.full {
+  max-width: none;
+}
 /* one compact row: [crumb /] title · status ......... actions. The title names the page; the
    status line says only what's true right now (counts, paused) — never what the page is for. */
 .page-head {

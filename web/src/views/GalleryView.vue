@@ -116,7 +116,7 @@ async function remove(it: GalleryItem) {
 </script>
 
 <template>
-  <div class="page">
+  <div class="page full">
     <div class="page-head">
       <div class="titles">
         <h1>Gallery</h1>
