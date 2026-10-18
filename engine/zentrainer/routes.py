@@ -21,7 +21,7 @@ from aiohttp import web
 from . import __version__, state
 from . import datasets, jobqueue, presets, system
 from .harness import control
-from .spec import SpecError, TrainSpec
+from .spec import SpecError, TrainSpec, locked_changes
 
 WEB_DIST = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
 
@@ -325,7 +325,11 @@ def register(server) -> None:
         waiting = run_id in jobqueue.get().snapshot()["order"] and meta.get("status") == "queued"
         retry = (control.get(run_id) is None and meta.get("status") in RETRYABLE
                  and not store.read(run_id, "metrics") and not store.read(run_id, "checkpoints"))
-        if not (waiting or retry):
+        # a stopped run that has trained: settings the saved LoRA and optimizer state don't
+        # depend on can change before it resumes (memory, samples, LR, length...)
+        resume_edit = (control.get(run_id) is None and meta.get("status") in RETRYABLE and not retry
+                       and bool(store.read(run_id, "checkpoints")))
+        if not (waiting or retry or resume_edit):
             return _bad(f"this run is {meta.get('status')}: it can't be edited", 409)
         body = await request.json()
         try:
@@ -333,6 +337,12 @@ def register(server) -> None:
             spec.validate()
         except (SpecError, TypeError) as e:
             return _bad(str(e))
+        if resume_edit:
+            # through the dataclass so fields added since it was saved compare at their defaults
+            changed = locked_changes(TrainSpec.from_dict(store.spec(run_id)).to_dict(), spec.to_dict())
+            if changed:
+                return _bad("these can't change once a run has trained (its LoRA and optimizer state were "
+                            f"made with them; Duplicate starts over): {', '.join(changed)}", 409, locked=changed)
         store.set_spec(run_id, spec.to_dict())
         if retry:
             for stream in ("samples", "validation"):

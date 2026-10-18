@@ -148,7 +148,12 @@ onMounted(async () => {
       const src = (await engine.run(edit)).spec
       merge(spec as unknown as Record<string, unknown>, structuredClone(src) as unknown as Record<string, unknown>)
       editing.value = edit
-      retrying.value = (await engine.run(edit)).run.status !== 'queued'
+      const r = await engine.run(edit)
+      // trained already: only what its LoRA and optimizer state don't depend on can change,
+      // then it resumes where it stopped
+      resuming.value = r.run.status !== 'queued' && (r.checkpoints.length > 0 || r.metrics.length > 0)
+      resumeStep.value = r.metrics.at(-1)?.step ?? 0
+      retrying.value = r.run.status !== 'queued' && !resuming.value
     } catch {
       error.value = "That run can't be loaded to edit."
     }
@@ -337,13 +342,16 @@ function nextName(name: string): string {
 
 const editing = ref<string | null>(null)
 const retrying = ref(false) // a run that ended before training: saving requeues it
+const resuming = ref(false) // a stopped run that has trained: saving resumes it with the new settings
+const resumeStep = ref(0)
 async function saveEdit() {
   if (!editing.value) return
   submitting.value = true
   error.value = null
   try {
     await engine.editRun(editing.value, spec)
-    router.push(retrying.value ? `/runs/${editing.value}` : '/jobs')
+    if (resuming.value) await engine.resume(editing.value)
+    router.push(retrying.value || resuming.value ? `/runs/${editing.value}` : '/jobs')
   } catch (e) {
     error.value = String((e as Error).message ?? e)
   } finally {
@@ -370,8 +378,10 @@ async function start(position: 'next' | 'end' = 'next') {
   <div class="page wide">
     <div class="page-head">
       <div class="titles">
-        <h1>{{ editing ? (retrying ? 'Edit & retry' : 'Edit queued run') : 'New run' }}</h1>
-        <p v-if="editing" class="lede">{{ retrying ? 'goes back to the front of the queue' : 'keeps its place in the queue' }}</p>
+        <h1>{{ editing ? (resuming ? 'Edit & resume' : retrying ? 'Edit & retry' : 'Edit queued run') : 'New run' }}</h1>
+        <p v-if="editing" class="lede">
+          {{ resuming ? `carries on from step ${resumeStep} with the new settings` : retrying ? 'goes back to the front of the queue' : 'keeps its place in the queue' }}
+        </p>
       </div>
     </div>
 
@@ -387,7 +397,11 @@ async function start(position: 'next' | 'end' = 'next') {
 
     <div class="layout">
       <div class="form">
-        <section class="card sec">
+        <div v-if="resuming" class="card locked-note small">
+          <i class="mdi mdi-lock-outline" /> It has trained, so its model, dataset and LoRA shape (algorithm, rank, layers, blocks) and
+          optimizer type stay as they were. Memory, samples, learning rate, schedule and length can change.
+        </div>
+        <section class="card sec" :class="{ locked: resuming }">
           <h2><span class="num">1</span> Model</h2>
           <FamilyPicker
             v-model="spec.model"
@@ -448,7 +462,7 @@ async function start(position: 'next' | 'end' = 'next') {
           </div>
         </section>
 
-        <section class="card sec">
+        <section class="card sec" :class="{ locked: resuming }">
           <h2><span class="num">2</span> Dataset</h2>
           <ZenField label="Folder" stack>
             <ZenCombo
@@ -618,7 +632,7 @@ async function start(position: 'next' | 'end' = 'next') {
                 <ZenField label="Grad clip" stack tip="Max grad norm; 0 = off"><ZenNumber v-model="spec.optim.max_grad_norm" :min="0" :step="0.1" :precision="2" /></ZenField>
               </div>
             </div>
-            <div class="subgroup">
+            <div class="subgroup" :class="{ locked: resuming }">
               <div class="sub-title">Network</div>
               <div class="grid-2">
                 <ZenField label="Algorithm" stack><ZenCombo v-model="spec.network.algorithm" :items="items(['LoRA', 'LoHa', 'LoKr', 'OFT'])" :searchable="false" :sorted="false" /></ZenField>
@@ -830,8 +844,8 @@ async function start(position: 'next' | 'end' = 'next') {
         </ul>
         <div v-if="error" class="err mono">{{ error }}</div>
         <template v-if="editing">
-          <ZenButton variant="primary" icon="mdi mdi-content-save-outline" block :disabled="submitting || !!missing" :title="missing ?? (retrying ? 'Saves these settings and queues it to run next' : 'Keeps its place in the queue')" @click="saveEdit">
-            {{ missing ?? (retrying ? 'Save & retry' : 'Save changes') }}
+          <ZenButton variant="primary" icon="mdi mdi-content-save-outline" block :disabled="submitting || !!missing" :title="missing ?? (resuming ? 'Saves these settings and resumes it from its last state' : retrying ? 'Saves these settings and queues it to run next' : 'Keeps its place in the queue')" @click="saveEdit">
+            {{ missing ?? (resuming ? 'Save & resume' : retrying ? 'Save & retry' : 'Save changes') }}
           </ZenButton>
           <ZenButton icon="mdi mdi-close" block @click="router.push('/jobs')">Cancel</ZenButton>
         </template>
@@ -940,6 +954,17 @@ h2 {
   border: 1px solid color-mix(in srgb, var(--zen-border) 70%, transparent);
 }
 .seg button,
+.locked {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.locked-note {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  color: var(--zen-muted);
+  line-height: 1.5;
+}
 .chip-btn {
   border: none;
   background: none;

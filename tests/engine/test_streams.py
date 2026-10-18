@@ -246,3 +246,17 @@ def test_late_blocks_train_without_input_grad_and_early_blocks_skip_backward():
     y.sum().backward()
     assert lora.grad is not None and torch.all(lora.grad == 2)
     assert hits == []  # nothing flowed back into the untrained early block
+
+
+def test_locked_changes_at_resume():
+    from zentrainer.spec import TrainSpec, locked_changes
+
+    old = TrainSpec().to_dict()
+    new = TrainSpec().to_dict()
+    new["memory"]["bypass_mode"] = True
+    new["optim"]["learning_rate"] = 5e-5
+    new["samples"]["steps"] = 6
+    assert locked_changes(old, new) == []
+    new["network"]["rank"] = 32
+    new["optim"]["optimizer"] = "Prodigy"
+    assert locked_changes(old, new) == ["network.rank", "optim.optimizer"]

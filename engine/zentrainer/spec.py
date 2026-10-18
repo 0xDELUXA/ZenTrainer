@@ -338,3 +338,24 @@ def sample_prompts(s: SampleSpec) -> list[SamplePrompt]:
         out.append(SamplePrompt(d["prompt"], d.get("width") or s.width, d.get("height") or s.height,
                                 d.get("frames") or s.frames, s.seed + i if d.get("seed") is None else d["seed"]))
     return out
+
+
+# what a trained run's saved LoRA, optimizer state and dataset cache depend on: everything else
+# (memory, samples, validation, LR and schedule, length, timesteps) may change at a resume
+LOCKED_AT_RESUME = ("model", "dataset", "network", "optim.optimizer", "optim.batch_size", "optim.lora_plus", "seed")
+
+
+def locked_changes(old: dict, new: dict) -> list[str]:
+    def at(d: dict, path: str):
+        for k in path.split("."):
+            d = d.get(k) if isinstance(d, dict) else None
+        return d
+
+    out = []
+    for path in LOCKED_AT_RESUME:
+        a, b = at(old, path), at(new, path)
+        if isinstance(a, dict) and isinstance(b, dict):
+            out += [f"{path}.{k}" for k in sorted(set(a) | set(b)) if a.get(k) != b.get(k)]
+        elif a != b:
+            out.append(path)
+    return out

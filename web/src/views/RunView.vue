@@ -541,6 +541,7 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
             <ZenButton variant="danger" icon="mdi mdi-stop" :disabled="!!busy" @click="send('stop')">Stop</ZenButton>
           </template>
           <RouterLink v-if="retryable" :to="`/runs/new?edit=${id}`"><ZenButton icon="mdi mdi-pencil-outline" title="Change its settings, then it goes back in the queue">Edit &amp; retry</ZenButton></RouterLink>
+          <RouterLink v-else-if="resumable" :to="`/runs/new?edit=${id}`"><ZenButton icon="mdi mdi-tune-variant" title="Change memory, samples, learning rate or length, then resume from its last state">Edit &amp; resume</ZenButton></RouterLink>
           <ZenButton v-if="resumable" variant="primary" icon="mdi mdi-play-circle-outline" :disabled="!!busy" @click="resume()">
             {{ resumePoint ? `Resume from ${resumePoint}` : 'Restart' }}
           </ZenButton>
