@@ -43,6 +43,16 @@ export const SETTINGS = {
       { value: 'full', label: 'Full', icon: 'mdi mdi-motion-play-outline' },
     ],
   }),
+  experimental: def<boolean>({
+    category: 'Appearance',
+    label: 'Experimental pages',
+    description: "Apps, Tools and Gallery: they work, but they're still being finished. A run's Try buttons open Apps either way.",
+    default: false,
+    options: [
+      { value: false, label: 'Hidden', icon: 'mdi mdi-eye-off-outline' },
+      { value: true, label: 'Shown', icon: 'mdi mdi-flask-outline' },
+    ],
+  }),
   keepStates: def<'latest' | 'all' | 'none'>({
     category: 'Training',
     label: 'Resume states',

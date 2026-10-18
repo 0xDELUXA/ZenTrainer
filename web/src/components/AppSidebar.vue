@@ -30,6 +30,8 @@ interface NavItem {
   icon: string
   label: string
   count?: () => number
+  /** behind Settings → Experimental pages */
+  experimental?: boolean
 }
 // six places: no group headings needed
 const items: NavItem[] = [
@@ -37,9 +39,9 @@ const items: NavItem[] = [
   { to: '/jobs', icon: 'mdi mdi-chart-timeline-variant', label: 'Jobs', count: () => activeRuns.value.length + activeCaptions.value.length },
   { to: '/datasets', icon: 'mdi mdi-image-multiple-outline', label: 'Datasets' },
   { to: '/models', icon: 'mdi mdi-cube-outline', label: 'Models' },
-  { to: '/apps', icon: 'mdi mdi-view-grid-outline', label: 'Apps' },
-  { to: '/tools', icon: 'mdi mdi-toolbox-outline', label: 'Tools' },
-  { to: '/gallery', icon: 'mdi mdi-image-album', label: 'Gallery' },
+  { to: '/apps', icon: 'mdi mdi-view-grid-outline', label: 'Apps', experimental: true },
+  { to: '/tools', icon: 'mdi mdi-toolbox-outline', label: 'Tools', experimental: true },
+  { to: '/gallery', icon: 'mdi mdi-image-album', label: 'Gallery', experimental: true },
 ]
 const isActive = (to: string) =>
   to === '/jobs' ? route.path.startsWith('/jobs') || (route.path.startsWith('/runs/') && route.path !== '/runs/new') : route.path === to || route.path.startsWith(to + '/')
@@ -145,7 +147,7 @@ onUnmounted(() => {
     </RouterLink>
     <ScrollArea class="nav-scroll"><nav>
       <RouterLink
-        v-for="item in items"
+        v-for="item in items.filter((i) => !i.experimental || settings.experimental)"
         :key="item.to"
         :to="item.to"
         class="row item"
