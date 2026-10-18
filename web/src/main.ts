@@ -15,6 +15,7 @@ const router = createRouter({
     { path: '/', redirect: '/jobs' },
     { path: '/jobs', component: () => import('./views/JobsView.vue') },
     { path: '/simple', component: () => import('./views/SimpleView.vue') },
+    { path: '/loras/merge', component: () => import('./views/MergeView.vue') },
     { path: '/simple/run/:id', component: () => import('./views/SimpleRunView.vue'), props: true },
     { path: '/simple/:id', component: () => import('./views/SimpleView.vue'), props: true },
     { path: '/jobs/caption/:id', component: () => import('./views/CaptionJobView.vue'), props: true },

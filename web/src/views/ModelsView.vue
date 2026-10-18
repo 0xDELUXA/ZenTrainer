@@ -2,7 +2,7 @@
 // Every model family ComfyUI ships a template for (plus Comfy-Org and model makers' ComfyUI
 // repos): what you have of it, its repo, and the rest one click away. Newest first by default.
 // Opening a family lists every build in its Hugging Face repo.
-import { ZenEmpty, ZenInput } from '@nynxz/zenkit-ui'
+import { ZenButton, ZenEmpty, ZenInput } from '@nynxz/zenkit-ui'
 import { computed, onMounted, ref, watch } from 'vue'
 import { engine, type ModelFamily, type ModelFolder } from '@/api/engine'
 import FileState from '@/components/FileState.vue'
@@ -78,6 +78,7 @@ onMounted(() => {
       <div class="titles">
         <h1>Models</h1>
       </div>
+      <RouterLink to="/loras/merge"><ZenButton icon="mdi mdi-call-merge" title="Bake several LoRAs into one">Merge LoRAs</ZenButton></RouterLink>
     </div>
 
     <div class="toolbar card">

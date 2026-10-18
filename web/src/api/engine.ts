@@ -599,6 +599,8 @@ export const engine = {
     call<ModelDownload>('/downloads', { method: 'POST', body: JSON.stringify({ family, folder, name }) }),
   cancelDownload: (id: string) => call<{ cancelled: boolean }>(`/downloads/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   clearDownloads: () => call<{ ok: true }>('/downloads/clear', { method: 'POST' }),
+  mergeLoras: (body: { members: { name: string; strength: number }[]; out_name: string; max_rank?: number; energy?: number }) =>
+    call<{ lora_name: string; mean_rank?: number; kept_energy?: number; bytes: number }>('/loras/merge', { method: 'POST', body: JSON.stringify(body) }),
   adapters: (family?: string | null) =>
     call<{ adapters: TrainingAdapter[] }>(`/adapters${family ? `?family=${encodeURIComponent(family)}` : ''}`).then((r) => r.adapters),
   addAdapter: (link: string, family?: string | null, file?: string) =>

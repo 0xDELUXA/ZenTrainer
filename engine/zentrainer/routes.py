@@ -814,6 +814,35 @@ def register(server) -> None:
             return _bad(str(e))
         return web.json_response(job.public())
 
+    @routes.post("/zentrainer/api/loras/merge")
+    async def merge_loras(request):
+        """Merge LoRAs: {members: [{name, strength}], out_name, max_rank?, energy?}. Saves to
+        output/zentrainer/loras/merged/ (a loras folder), so it loads at once."""
+        import re as _re
+
+        import folder_paths
+
+        from . import merge
+
+        b = await request.json()
+        try:
+            members = [(Path(folder_paths.get_full_path_or_raise("loras", str(m["name"]))), float(m.get("strength", 1.0)))
+                       for m in b.get("members", [])]
+        except Exception as e:
+            return _bad(f"can't find that LoRA: {e}")
+        if not members:
+            return _bad("add at least one LoRA")
+        name = _re.sub(r"[^A-Za-z0-9_.-]+", "_", str(b.get("out_name") or "merged")).strip("._") or "merged"
+        out = Path(folder_paths.get_output_directory()) / "zentrainer" / "loras" / "merged" / f"{name}.safetensors"
+        if out.exists() and not b.get("overwrite"):
+            return _bad(f"merged/{out.name} already exists", 409)
+        try:
+            stats = await asyncio.to_thread(merge.merge_files, members, out, int(b.get("max_rank") or 0),
+                                            float(b.get("energy") or 0.999))
+        except Exception as e:
+            return _bad(f"merge failed: {e}")
+        return web.json_response({"lora_name": f"merged/{out.name}", **stats})
+
     @routes.get("/zentrainer/api/adapters")
     async def list_adapters(request):
         """Training adapters for the picker: the family's known ones first, custom, then local files."""
