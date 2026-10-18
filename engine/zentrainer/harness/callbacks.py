@@ -8,6 +8,7 @@ not a change to the loop.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from pathlib import Path
@@ -475,19 +476,50 @@ def _prompt_cache(t, prompts: list[str], negative: str):
 
 
 def _previewer(t):
-    """ComfyUI's latent previewer for this model: TAESD when its decoder is installed and
-    previews are set to TAESD, else the cheap latent-to-RGB projection."""
+    """The sharpest previewer installed for this model: its tiny VAE (models/vae_approx: taeh3,
+    taef2, taesdxl...) when present, whatever ComfyUI's own --preview-method says (it launches
+    with tiny-VAE previews off), else the cheap latent-to-RGB projection. Kept for the run."""
+    cached = getattr(t, "_previewer", None)
+    if cached is not None:
+        return cached
     try:
         import latent_preview
 
         fmt = t.models.patcher.model.latent_format
-        previewer = latent_preview.get_previewer(t.device, fmt)
-        # ComfyUI launches with previews off by default; ours always want one
+        previewer = _tiny_previewer(t, fmt) or latent_preview.get_previewer(t.device, fmt)
         if previewer is None and fmt.latent_rgb_factors is not None:
             previewer = latent_preview.Latent2RGBPreviewer(
                 fmt.latent_rgb_factors, fmt.latent_rgb_factors_bias, fmt.latent_rgb_factors_reshape)
+        t._previewer = previewer
         return previewer
     except Exception:
+        return None
+
+
+def _tiny_previewer(t, fmt):
+    import comfy.utils
+    import folder_paths
+    import latent_preview
+
+    name = getattr(fmt, "taesd_decoder_name", None)
+    if not name:
+        return None
+    file = next((f for f in folder_paths.get_filename_list("vae_approx") if f.startswith(name)), None)
+    path = folder_paths.get_full_path("vae_approx", file) if file else None
+    if not path:
+        return None
+    try:
+        if name in latent_preview.VIDEO_TAES:
+            from comfy.sd import VAE
+
+            vae = VAE(comfy.utils.load_torch_file(path))
+            vae.first_stage_model.show_progress_bar = False
+            return latent_preview.TAEHVPreviewerImpl(vae)
+        from comfy.taesd.taesd import TAESD
+
+        return latent_preview.TAESDPreviewerImpl(TAESD(None, path, latent_channels=fmt.latent_channels).to(t.device))
+    except Exception:
+        logging.warning("[ZenTrainer] tiny VAE %s didn't load; previews use the latent colours", file, exc_info=True)
         return None
 
 
@@ -497,7 +529,9 @@ def _preview_url(previewer, x0) -> str | None:
 
     try:
         x0 = first_stream(x0)[:1]
-        if x0.ndim == 5:  # a video latent: its first frame
+        # a video latent: the video tiny VAEs take it whole (and decode its first frame);
+        # the rest want one frame
+        if x0.ndim == 5 and type(previewer).__name__ != "TAEHVPreviewerImpl":
             x0 = x0[:, :, 0]
         img = previewer.decode_latent_to_preview(x0)
         img.thumbnail((384, 384))
