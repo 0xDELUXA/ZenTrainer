@@ -222,14 +222,15 @@ class Samples(Callback):
         # samples only substitute [trigger] (and, on edit runs, take the instruction template)
         self.prompts = [_sample_text(t, p.prompt) for p in self.items]
         negative = apply_trigger(s.negative, trig, False)
-        self._conds = self._encode_texts(t, self.prompts, negative, [_grounding(t, p.control) for p in self.items])
+        self._conds = self._encode_texts(t, self.prompts, negative, [_special(t, p) for p in self.items])
 
-    def _encode_texts(self, t, prompts: list[str], negative: str, pictures: list | None = None) -> list:
+    def _encode_texts(self, t, prompts: list[str], negative: str, special: list | None = None) -> list:
         """[(cond, negative cond)] for these prompts; cached like captions, so a run with
-        nothing new to encode never loads the text encoder. A grounded edit sample's picture
-        (a path, or None) is seen by the encoder with its prompt and with the negative."""
-        pictures = pictures or [None] * len(prompts)
-        stamp = [f"{p}|{p.stat().st_mtime_ns}" if p else None for p in pictures]
+        nothing new to encode never loads the text encoder. A prompt with a `special` encoder
+        (an edit sample's input: grounded, or H3's references / first frame; see _special) is
+        encoded by it, its stamp in the cache key."""
+        special = special or [None] * len(prompts)
+        stamp = [sp[0] if sp else None for sp in special]
         path = _prompt_cache(t, prompts + ([stamp] if any(stamp) else []), negative)
         if path is not None and path.is_file():
             try:
@@ -241,20 +242,18 @@ class Samples(Callback):
         clip = t.models.clip
         neg = clip.encode_from_tokens_scheduled(clip.tokenize(negative))
         conds = []
-        for text, pic in zip(prompts, pictures):
-            if pic is None:
+        for text, sp in zip(prompts, special):
+            if sp is None:
                 conds.append((clip.encode_from_tokens_scheduled(clip.tokenize(text)), neg))
             else:
-                from .edit import encode_grounded, grounding_pixels
-
-                px = [grounding_pixels(pic)]
-                conds.append((encode_grounded(clip, text, px), encode_grounded(clip, negative, px)))
+                c, n = sp[1](clip, text, negative)
+                conds.append((c, neg if n is None else n))
         if path is not None:
             from .data import _to_cpu
 
             path.parent.mkdir(parents=True, exist_ok=True)
             torch.save({"prompts": [_to_cpu(c) for c, _ in conds], "negative": _to_cpu(neg),
-                        "negatives": [_to_cpu(n) if p is not None else None for (_, n), p in zip(conds, pictures)]}, path)
+                        "negatives": [_to_cpu(n) if sp is not None else None for (_, n), sp in zip(conds, special)]}, path)
         return conds
 
     def render_manual(self, t, tries: list[dict], more=None) -> list[dict]:
@@ -279,7 +278,9 @@ class Samples(Callback):
                 with torch.no_grad():  # the encoder stays loaded across the batch's prompts
                     for a in tries:
                         text = _sample_text(t, str(a["prompt"]))
-                        jobs.append((a, text, self._encode_texts(t, [text], negative, [_grounding(t, a.get("control"))])))
+                        it = SamplePrompt(text, a.get("width") or s.width, a.get("height") or s.height,
+                                          a.get("frames") or s.frames, 0, a.get("control") or None)
+                        jobs.append((a, text, self._encode_texts(t, [text], negative, [_special(t, it)])))
                 if hasattr(t, "_drop_text_encoder"):
                     t._drop_text_encoder()  # don't keep a big encoder beside training
                 for a, text, conds in jobs:
@@ -384,7 +385,7 @@ class Samples(Callback):
                     progress(i, 0, s.steps)
                     channels = model.model.latent_format.latent_channels
                     it = self.items[i]
-                    if it.control:  # an edit sample: the picture to edit as the reference, at its own shape
+                    if it.control and not getattr(t, "h3", False):  # an edit sample: the picture to edit as the reference, at its own shape
                         ref, it = _control(t, it, comp)
                         from .edit import with_refs
 
@@ -545,10 +546,38 @@ def _control_path(t, control: str) -> Path:
     return path
 
 
-def _grounding(t, control: str | None) -> Path | None:
-    """The picture a grounded edit run's text encoder sees with this sample (None otherwise)."""
+def _special(t, it):
+    """How a sample with an input picture is encoded, as (cache stamp, fn(clip, text, negative) ->
+    (cond, negative or None)); None for a plain prompt.
+    - MiniMax H3: ComfyUI's own reference (edit runs) or image-to-video (keyframes) node, the
+      sample's size and length; the negative stays plain.
+    - grounded edits: the encoder sees the picture with the prompt and with the negative."""
     d = t.spec.dataset
-    return _control_path(t, control) if control and d.edit and d.edit_grounded else None
+    if not it.control or not (d.edit or (getattr(t, "h3", False) and d.keyframes)):
+        return None
+    path = _control_path(t, it.control)
+    base = f"{path}|{path.stat().st_mtime_ns}"
+    if getattr(t, "h3", False):
+        from . import edit
+
+        size = (it.width, it.height, it.frames)
+        if d.edit:
+            def ref(clip, text, _neg):
+                return edit.h3_reference_cond(clip, t.models.vae, t.models.audio_vae, text, [path], *size), None
+            return f"h3ref|{base}|{size}", ref
+
+        def first(clip, text, _neg):
+            px = edit._image(path)
+            return edit.h3_keyframe_cond(clip, t.models.vae, text, px, None, *size), None
+        return f"h3first|{base}|{size}", first
+    if d.edit_grounded:
+        from .edit import encode_grounded, grounding_pixels
+
+        def grounded(clip, text, negative):
+            px = [grounding_pixels(path)]
+            return encode_grounded(clip, text, px), encode_grounded(clip, negative, px)
+        return f"grounded|{base}", grounded
+    return None
 
 
 def _control(t, it, comp: int):

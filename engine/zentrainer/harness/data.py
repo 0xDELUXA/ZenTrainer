@@ -101,11 +101,15 @@ def is_control_file(p: Path) -> bool:
     return bool(CONTROL.search(p.stem))
 
 
+CONTROL_EXTS = MEDIA_EXTS | {".wav", ".flac", ".mp3", ".m4a", ".ogg", ".opus", ".aac"}
+
+
 def find_controls(img: Path) -> list[Path]:
-    """An edit pair's input picture(s): <stem>_control, then _control2, _control3..."""
+    """An edit pair's input(s): <stem>_control, then _control2, _control3... Pictures for every
+    model; videos and audio too for MiniMax H3's references."""
     out = []
     for n in ["", *map(str, range(2, 10))]:
-        hit = next((c for e in sorted(IMAGE_EXTS) if (c := img.with_name(f"{img.stem}_control{n}{e}")).is_file()), None)
+        hit = next((c for e in sorted(CONTROL_EXTS) if (c := img.with_name(f"{img.stem}_control{n}{e}")).is_file()), None)
         if hit is None:
             break
         out.append(hit)
@@ -142,8 +146,7 @@ def scan(root: Path, caption_ext: str = ".txt", warn: bool = True) -> list[Item]
             caps = caption_sets(p, caption_ext)
             if "default" not in caps and warn:
                 logging.warning("[ZenTrainer] no caption for %s; training it with an empty caption", p.name)
-            items.append(Item(p, caps.get("default", ""), repeats, find_mask(p), caps,
-                              [] if is_video(p) else find_controls(p)))
+            items.append(Item(p, caps.get("default", ""), repeats, find_mask(p), caps, find_controls(p)))
     return items
 
 
@@ -209,6 +212,8 @@ def cache_key(items: list[Item], spec: DatasetSpec, encoder_id: str) -> str:
         if it.mask:
             ms = it.mask.stat()
             h.update(f"|mask:{it.mask}|{ms.st_mtime_ns}|{ms.st_size}".encode())
+        if spec.keyframes:
+            h.update(f"|keyframes:{spec.keyframes}".encode())
         if spec.edit:
             if spec.edit_grounded:
                 h.update(b"grounded")
@@ -219,15 +224,15 @@ def cache_key(items: list[Item], spec: DatasetSpec, encoder_id: str) -> str:
 
 
 def build(spec: DatasetSpec, clip, vae, root: Path, cache_dir: Path, encoder_id: str, progress=None,
-          audio_vae=None) -> Dataset:
+          audio_vae=None, h3: bool = False) -> Dataset:
     # The harness runs outside ComfyUI's inference_mode, where the frozen VAE/text
     # encoder parameters still require grad: encode under no_grad, or every cached
     # latent drags an autograd graph (and a VAE backward) into training.
     with torch.no_grad():
-        return _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae)
+        return _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae, h3)
 
 
-def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=None) -> Dataset:
+def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=None, h3: bool = False) -> Dataset:
     items = scan(root, spec.caption_ext)
     if not items:
         raise FileNotFoundError(f"no images found in {root}")
@@ -246,7 +251,8 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
         variants.append(texts)
         it.caption = " ||| ".join(texts)  # only feeds the cache key
 
-    key = cache_key(items, spec, encoder_id)
+    # H3 builds references/keyframes its own way; other runs keep their caches
+    key = cache_key(items, spec, encoder_id + ("|h3" if h3 and (spec.edit or spec.keyframes) else ""))
     path = cache_dir / key
     if (path / "dataset.pt").is_file():
         logging.info("[ZenTrainer] dataset cache hit %s (%d images)", key, len(items))
@@ -265,6 +271,9 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
     samples: list[Sample] = []
     owners: list[int] = []
     grounded: list[tuple[int, list[Path], str]] = []  # (sample, inputs, caption): encoded with the captions
+    # MiniMax H3: (sample, inputs, first frame, last frame, caption, (w, h), frames), each sample's
+    # conditioning built by ComfyUI's own H3 nodes after the pictures
+    h3_jobs: list[tuple] = []
     sounds: list[tuple[int, Path, float, float]] = []  # (sample, video, t0, t1): encoded after the pictures
     for n, it in enumerate(items):
         idx = [cap_index[t] for t in variants[n]]
@@ -284,7 +293,13 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
                 logging.warning("[ZenTrainer] %s is too short for a clip; skipping it", it.path.name)
             size = pick_bucket(p.width, p.height, video_sizes)
             for k, frames in enumerate(windows):
-                latent = _encode(vae, video.read(it.path, frames, size), it.path)
+                px = video.read(it.path, frames, size)
+                latent = _encode(vae, px, it.path)
+                if h3 and ((spec.edit and it.controls) or spec.keyframes):
+                    first = px[:1].clone() if spec.keyframes else None
+                    last = px[-1:].clone() if spec.keyframes == "first_last" else None
+                    h3_jobs.append((len(samples), it.controls if spec.edit else [], first, last, variants[n][0],
+                                    size, len(frames)))
                 if spec.video_audio and audio_vae is not None:
                     sounds.append((len(samples), it.path, frames[0] / p.fps, (frames[-1] + 1) / p.fps))
                 samples.append(Sample(latent, idx[0], None, idx))
@@ -301,7 +316,9 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
             m = load_image(it.mask, size, mode="L")[None, None]  # (1, 1, H, W)
             mask = torch.nn.functional.interpolate(m, size=tuple(latent.shape[-2:]), mode="area")[0, 0]
         refs = None
-        if spec.edit and it.controls:  # the input picture(s) at the target's size, as the model's references
+        if h3 and spec.edit and it.controls:  # H3 takes them in its own conditioning, built below
+            h3_jobs.append((len(samples), it.controls, None, None, variants[n][0], size, 1))
+        elif spec.edit and it.controls:  # the input picture(s) at the target's size, as the model's references
             for c in it.controls:
                 with Image.open(c) as cim:
                     cw, ch = cim.size
@@ -341,6 +358,21 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
                 samples[i].cond_empty = _to_cpu(encode_grounded(clip, "", pics))
             if progress:
                 progress(k + 1, len(grounded), "encoding instructions with their pictures")
+
+    if h3_jobs:  # H3: references or keyframes, and the text encoder seeing them
+        from .edit import h3_keyframe_cond, h3_reference_cond
+
+        def h3_cond(text, inputs, first, last, size, nframes):
+            if inputs:
+                return h3_reference_cond(clip, vae, audio_vae, text, inputs, size[0], size[1], nframes)
+            return h3_keyframe_cond(clip, vae, text, first, last, size[0], size[1], nframes)
+
+        for k, (i, inputs, first, last, text, size, nframes) in enumerate(h3_jobs):
+            samples[i].cond = _to_cpu(h3_cond(text, inputs, first, last, size, nframes))
+            if spec.caption_dropout:
+                samples[i].cond_empty = _to_cpu(h3_cond("", inputs, first, last, size, nframes))
+            if progress:
+                progress(k + 1, len(h3_jobs), "encoding captions with their references")
 
     ds = Dataset(samples, conditionings, captions, cap_index[""], owners=owners)
     path.mkdir(parents=True, exist_ok=True)

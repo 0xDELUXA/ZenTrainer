@@ -11,18 +11,29 @@ import inspect
 import torch
 
 
-def takes_references(model) -> bool:
-    """Whether this ComfyUI model reads reference_latents from its conditioning."""
+def _reads(model, key: str) -> bool:
     for cls in type(model).__mro__:
         fn = cls.__dict__.get("extra_conds")
         if fn is None:
             continue
         try:
-            if "reference_latents" in inspect.getsource(fn):
+            if key in inspect.getsource(fn):
                 return True
         except (OSError, TypeError):
             pass
     return False
+
+
+def takes_references(model) -> bool:
+    """Whether this ComfyUI model takes reference inputs: reference_latents, or MiniMax H3's own
+    reference blocks."""
+    return _reads(model, "reference_latents") or is_h3(model)
+
+
+def is_h3(model) -> bool:
+    """MiniMax H3: references (images, videos with sound, audio) and keyframes ride in its own
+    conditioning, and its text encoder sees them, so each sample's conditioning is its own."""
+    return _reads(model, "minimax_refs")
 
 
 def method(model, chosen: str = "") -> str | None:
@@ -90,3 +101,70 @@ def encode_grounded(clip, text: str, pictures: list[torch.Tensor]):
         raise ValueError("grounded edits need a vision-language text encoder (Qwen3-VL: Krea 2, Qwen Image)")
     tokens = clip.tokenize(text, images=pictures, llama_template=template)
     return clip.encode_from_tokens_scheduled(tokens)
+
+
+# ---- MiniMax H3: built by ComfyUI's own nodes, so training sees exactly what inference does ----
+
+AUDIO_EXTS = {".wav", ".flac", ".mp3", ".m4a", ".ogg", ".opus", ".aac"}
+
+
+def _image(path) -> torch.Tensor:
+    import numpy as np
+    from PIL import Image, ImageOps
+
+    with Image.open(path) as im:
+        return torch.from_numpy(np.asarray(ImageOps.exif_transpose(im).convert("RGB"), dtype=np.float32) / 255.0)[None]
+
+
+def _audio(path, seconds: float | None = None) -> dict | None:
+    from . import video
+
+    got = video.read_audio(path, 0.0, seconds if seconds else 1e9)
+    if got is None:
+        return None
+    wave, sr = got
+    return {"waveform": wave[None], "sample_rate": sr}
+
+
+def _video(path, max_frames: int) -> torch.Tensor:
+    """A reference clip's frames at 24 fps, at its own size (H3's node fits the canvas)."""
+    from . import video
+
+    p = video.probe(path)
+    n = min(max_frames, int(p.frames * 24 / p.fps))
+    idx = [min(p.frames - 1, round(i * p.fps / 24)) for i in range(n)]
+    return video.read(path, idx, (p.width, p.height))
+
+
+def h3_reference_cond(clip, vae, audio_vae, text: str, inputs: list, width: int, height: int, frames: int):
+    """MiniMaxH3ReferenceToVideo's conditioning for this caption and these inputs: images,
+    videos (with their soundtrack) and audio files, in order."""
+    from pathlib import Path
+
+    from comfy_extras.nodes_minimax_h3 import MiniMaxH3ReferenceToVideo
+
+    from .data import IMAGE_EXTS, VIDEO_EXTS
+
+    images, videos, sounds, audios = {}, {}, {}, {}
+    for p in map(Path, inputs):
+        ext = p.suffix.lower()
+        if ext in IMAGE_EXTS:
+            images[f"ref_image_{len(images) + 1}"] = _image(p)
+        elif ext in VIDEO_EXTS:
+            k = len(videos) + 1
+            videos[f"ref_video_{k}"] = _video(p, 15 * 24)
+            if audio_vae is not None and (snd := _audio(p, 15.0)) is not None:
+                sounds[f"ref_video_audio_{k}"] = snd
+        elif ext in AUDIO_EXTS and audio_vae is not None and (snd := _audio(p)) is not None:
+            audios[f"ref_audio_{len(audios) + 1}"] = snd
+    out = MiniMaxH3ReferenceToVideo.execute(clip, text, width, height, frames, "match", vae, audio_vae,
+                                            ref_images=images, ref_videos=videos, ref_video_audios=sounds, ref_audios=audios)
+    return out.args[0]
+
+
+def h3_keyframe_cond(clip, vae, text: str, first: torch.Tensor | None, last: torch.Tensor | None,
+                     width: int, height: int, frames: int):
+    """MiniMaxH3ImageToVideo's conditioning: the clip anchored on its first (and last) frame."""
+    from comfy_extras.nodes_minimax_h3 import MiniMaxH3ImageToVideo
+
+    return MiniMaxH3ImageToVideo.execute(clip, vae, text, width, height, frames, first, last).args[0]

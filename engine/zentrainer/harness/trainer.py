@@ -232,9 +232,14 @@ class Trainer:
         self.encoder_id, self.cache_dir = encoder_id, cache
         if s.dataset.video_audio and self.models.audio_vae is None:
             raise ValueError("training on video sound needs the model's audio VAE: set Model -> Audio VAE")
+        from .edit import is_h3
+
+        self.h3 = is_h3(patcher.model)
+        if s.dataset.keyframes and not self.h3:
+            raise ValueError("keyframes (image-to-video training) are for MiniMax H3's fl2va model")
         self.dataset = data.build(s.dataset, _Lazy(lambda: self.models.clip), self.models.vae, root, cache, encoder_id,
                                   progress=lambda i, n, msg: self._status("loading", message=f"{msg} ({i}/{n})"),
-                                  audio_vae=self.models.audio_vae)
+                                  audio_vae=self.models.audio_vae, h3=self.h3)
         self.edit_method = None
         if s.dataset.edit:
             from .edit import method, takes_references
@@ -242,10 +247,10 @@ class Trainer:
             if not takes_references(patcher.model):
                 raise ValueError(f"{type(patcher.model).__name__} doesn't take reference images, so it can't train "
                                  "edits: pick an edit-capable model (Flux 3 Klein, Flux 2, Kontext, Qwen Image Edit)")
-            pairs = sum(sm.refs is not None for sm in self.dataset.samples)
+            pairs = sum(sm.refs is not None or sm.cond is not None for sm in self.dataset.samples)
             if not pairs:
                 raise ValueError("edit training, but no image has a <name>_control picture beside it")
-            self.edit_method = method(patcher.model, s.dataset.edit_method)
+            self.edit_method = None if self.h3 else method(patcher.model, s.dataset.edit_method)
             logging.info("[ZenTrainer] edit training: %d of %d images have an input picture (references: %s)",
                          pairs, len(self.dataset.samples), self.edit_method or "the model's own")
         self.batches = data.Batches(self.dataset, s.optim.batch_size, s.seed)
@@ -526,7 +531,7 @@ class Trainer:
         """A caption's processed conds for sample i's shape; an edit pair's carry its own input
         picture, so those are kept per sample."""
         sample = self.dataset.samples[i]
-        key = (cap, tuple(sample.latent.shape), i if sample.refs else None)
+        key = (cap, tuple(sample.latent.shape), i if sample.refs or sample.cond is not None else None)
         if key not in self._conds:
             cond = self.dataset.conditionings[cap]
             if sample.cond is not None:  # grounded: the encoder saw this image's inputs

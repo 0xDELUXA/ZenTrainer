@@ -53,6 +53,9 @@ class DatasetSpec:
     # the text encoder sees the input pictures too (Qwen3-VL based: Krea 2, Qwen Image), as
     # krea2edit's identity edits do: conditioning becomes per image, encoded when the dataset caches
     edit_grounded: bool = False
+    # MiniMax H3 image-to-video: each clip conditioned on its own first frame ("first") or first
+    # and last ("first_last"), as the fl2va model is at inference; the text encoder sees them too
+    keyframes: str = ""
     caption_dropout: float = 0.0
     # Caption sets: <img>.txt is "default", <img>.<set>.txt the others (tags, nl, bbox, ...).
     # Train on one set, or mix several: each step picks one of the image's sets at random.
@@ -338,6 +341,8 @@ class TrainSpec:
             raise SpecError("objective.uniform_mix is a share between 0 and 1")
         if self.dataset.edit_method not in ("", "index", "offset", "index_timestep_zero", "negative_index", "uxo"):
             raise SpecError("dataset.edit_method is one of index, offset, index_timestep_zero (or empty for the model's own)")
+        if self.dataset.keyframes not in ("", "first", "first_last"):
+            raise SpecError("dataset.keyframes is first, first_last or empty")
         if self.dataset.edit_template and "{}" not in self.dataset.edit_template:
             raise SpecError("dataset.edit_template needs {} where the instruction goes")
         if not 0.0 <= self.optim.ema < 1.0:
