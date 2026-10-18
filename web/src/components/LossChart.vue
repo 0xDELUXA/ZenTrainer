@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// Loss over optimizer steps: training loss (EMA-smoothed in the accent, raw drawn faintly
-// in the same hue) and, when the run has it, the fixed-set validation loss as a second
+// Loss over optimizer steps: training loss (EMA-smoothed in the accent; each step's raw loss is
+// in the tooltip) and, when the run has it, the fixed-set validation loss as a second
 // series with markers. Two series, one unit, one axis: a legend names them.
 // Crosshair + tooltip on hover. The learning rate, when it changes (warmup, decay, Automagic
 // finding its own), rides on a right-hand axis as ai-toolkit draws it: a thin solid line in
@@ -19,7 +19,7 @@ const props = withDefaults(
     like?: { step: number; score: number }[]
     height?: number
   }>(),
-  { smoothing: 0.9, marks: () => [], val: () => [], like: () => [], height: 240 },
+  { smoothing: 0.95, marks: () => [], val: () => [], like: () => [], height: 240 },
 )
 
 const W = 720
@@ -39,8 +39,10 @@ const ema = computed(() => {
 })
 
 const xMax = computed(() => Math.max(props.total ?? 0, points.value.at(-1)?.step ?? 1, 1))
+// fitted to the smoothed loss and validation: the raw per-step loss spikes (its value is in the
+// hover tooltip) would otherwise squash both against the bottom
 const yRange = computed(() => {
-  const v = [...points.value.map((p) => p.loss), ...props.val.map((r) => r.val_loss)]
+  const v = [...ema.value, ...props.val.map((r) => r.val_loss)]
   if (!v.length) return [0, 1] as const
   const lo = Math.min(...v)
   const hi = Math.max(...v)
@@ -57,7 +59,6 @@ const y = (v: number) => {
 const path = (vals: number[]) =>
   points.value.map((p, i) => `${i ? 'L' : 'M'}${x(p.step).toFixed(1)},${y(vals[i]!).toFixed(1)}`).join('')
 
-const rawPath = computed(() => path(points.value.map((p) => p.loss)))
 const valPath = computed(() =>
   props.val.map((r, i) => `${i ? 'L' : 'M'}${x(r.step).toFixed(1)},${y(r.val_loss).toFixed(1)}`).join(''),
 )
@@ -111,7 +112,7 @@ const fmt = (v: number) => (v === 0 || Math.abs(v) >= 0.01 ? v.toFixed(4) : v.to
   <figure class="loss">
     <figcaption>
       <span class="legend">
-        <span class="key"><svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" class="k-ema" /></svg> Training (EMA {{ smoothing }}, raw faint)</span>
+        <span class="key"><svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" class="k-ema" /></svg> Training (smoothed)</span>
         <span v-if="val.length" class="key"><svg width="18" height="8"><line x1="0" y1="4" x2="18" y2="4" class="k-val" /><circle cx="9" cy="4" r="3" class="k-val-dot" /></svg> Validation (fixed set)</span>
         <span v-if="like.length" class="key"><svg width="18" height="8"><line x1="0" y1="4" x2="18" y2="4" class="k-like" /><circle cx="9" cy="4" r="3" class="k-like-dot" /></svg> Likeness</span>
         <span v-if="lrShown" class="key muted"><svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" class="k-lr" /></svg> Learning rate (right axis)</span>
@@ -134,7 +135,6 @@ const fmt = (v: number) => (v === 0 || Math.abs(v) >= 0.01 ? v.toFixed(4) : v.to
           :y1="pad.t"
           :y2="H - pad.b"
         />
-        <path class="raw" :d="rawPath" />
         <path class="ema" :d="emaPath" />
         <path v-if="lrShown" class="lr-line" :d="lrPath" />
         <path v-if="val.length > 1" class="val" :d="valPath" />
@@ -253,17 +253,12 @@ figcaption .muted {
   stroke: var(--zen-accent);
   opacity: 0.6;
 }
-.raw,
 .ema {
   fill: none;
   stroke: var(--zen-accent);
   vector-effect: non-scaling-stroke;
   stroke-linejoin: round;
   stroke-linecap: round;
-}
-.raw {
-  stroke-width: 1;
-  opacity: 0.25;
 }
 .ema {
   stroke-width: 2;
