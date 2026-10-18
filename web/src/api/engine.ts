@@ -90,6 +90,7 @@ export interface TrainSpec {
     tread?: number
     /** fused Triton backward for int8 ConvRot layers */
     fused_int8_backward?: boolean
+    w8a8_backward?: boolean
     offloading: boolean
     quantized_backward: boolean
     bypass_mode: boolean
