@@ -34,6 +34,20 @@ from .objective import Objective, is_flow, sample_percents, sigmas_for
 _DTYPES = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}
 
 
+def _has_soundtracks(root, look: int = 6) -> bool:
+    """Whether the dataset's clips carry audio (the first few looked at)."""
+    from . import video
+
+    clips = [it.path for it in data.scan(root, warn=False) if video.is_video(it.path)][:look]
+    for p in clips:
+        try:
+            if video.read_audio(p, 0.0, 0.5) is not None:
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def _release_frames(e: BaseException) -> None:
     """Drop the locals held by a failed run's traceback (and what it was raised from). ComfyUI
     keeps the exception as the job's error, and its frames hold the failed step's activations
@@ -301,6 +315,12 @@ class Trainer:
             self.edit_method = None if self.h3 else method(patcher.model, s.dataset.edit_method)
             logging.info("[ZenTrainer] edit training: %d of %d images have an input picture (references: %s)",
                          pairs, len(self.dataset.samples), self.edit_method or "the model's own")
+        if self.h3 and not s.dataset.video_audio and _has_soundtracks(root):
+            msg = ("these clips have sound, but 'Train on sound' is off: the model sees silence beside every clip, "
+                   "and the LoRA drifts the audio with nothing holding it (measured: the beat about halves). "
+                   "Turn on Train on sound")
+            logging.warning("[ZenTrainer] %s", msg)
+            self._status("loading", message=msg)
         if s.memory.tread > 0 and s.memory.tread_steps >= 1.0 and self.dataset.samples and all(
                 sm.latent.ndim == 4 and sm.latent.shape[1] > 1 for sm in self.dataset.samples):
             msg = ("TREAD routes every step: this dataset is all clips, with no stills run whole to anchor the "
