@@ -232,6 +232,12 @@ export interface LikenessRow {
   base?: boolean
 }
 
+/** a dataset's health now and over time (engine dataset_stats.snapshot) */
+export interface DatasetStats {
+  current: { metrics: Record<string, number | null | Record<string, number>>; scores: Record<string, number>; flags?: Record<string, string[]> }
+  history: { at: number; scores: Record<string, number>; metrics: Record<string, unknown> }[]
+}
+
 /** a dataset's faces (engine faces.dataset_faces) */
 export interface DatasetFaces {
   available: boolean
@@ -248,6 +254,8 @@ export interface DatasetInfo {
   /** how many of `images` are videos */
   videos?: number
   masked?: number
+  /** the last stats snapshot's 0-1 scores (captions, consistency, resolution, uniqueness, faces|balance) */
+  health?: Record<string, number> | null
   /** images with a <name>_control input picture (edit pairs) */
   pairs?: number
   /** total size of the media files */
@@ -712,6 +720,7 @@ export const engine = {
       method: 'POST',
       body: JSON.stringify({ link, family, file }),
     }),
+  datasetStats: (name: string) => call<DatasetStats>(`/datasets/${encodeURIComponent(name)}/stats`),
   datasetFaces: (name: string) => call<DatasetFaces>(`/datasets/${encodeURIComponent(name)}/faces`),
   addCaptionLora: (link: string, file?: string, id?: string) =>
     call<{ download?: ModelDownload; name?: string; choices?: { file: string; size: number | null }[]; repo?: string }>('/caption/loras', {

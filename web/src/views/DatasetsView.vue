@@ -5,6 +5,7 @@ import { ZenButton, ZenEmpty, ZenInput } from '@nynxz/zenkit-ui'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { engine, thumbUrl, type DatasetInfo } from '@/api/engine'
+import HealthPentagon from '@/components/HealthPentagon.vue'
 import TemplateCard from '@/components/TemplateCard.vue'
 
 const router = useRouter()
@@ -137,6 +138,7 @@ const ago = (t?: number) => {
             </div>
           </template>
           <div class="capline" :title="`${d.captioned} of ${d.images} have a default caption`">
+            <HealthPentagon v-if="d.health" :scores="d.health" :size="30" class="card-pent" />
             <div class="meter"><span :class="{ part: d.captioned < d.images }" :style="{ width: `${d.images ? (d.captioned / d.images) * 100 : 0}%` }" /></div>
             <span class="small" :class="d.captioned < d.images ? 'warn' : 'muted'">{{ d.captioned }}/{{ d.images }} captioned</span>
           </div>
@@ -369,5 +371,8 @@ const ago = (t?: number) => {
   .tr > :nth-child(3) {
     display: none;
   }
+}
+.card-pent {
+  flex: none;
 }
 </style>

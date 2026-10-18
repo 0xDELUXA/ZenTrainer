@@ -107,6 +107,17 @@ def register(server) -> None:
         return await _ds(lambda: {"changed": datasets.bulk(name, b.get("op", ""), b.get("text", ""), b.get("find", ""),
                                                            set_name=str(b.get("set") or "default"))})
 
+    @routes.get("/zentrainer/api/datasets/{name}/stats")
+    async def dataset_stats(request):
+        """The dataset's health now and over time: {"current": {metrics, scores}, "history"}; a
+        snapshot is kept whenever the dataset changed since the last look."""
+        from . import dataset_stats
+
+        try:
+            return web.json_response(await asyncio.to_thread(dataset_stats.snapshot, request.match_info["name"]))
+        except FileNotFoundError:
+            return _bad("dataset not found", 404)
+
     @routes.get("/zentrainer/api/datasets/{name}/faces")
     async def dataset_faces(request):
         """The dataset's faces (faces extra): per picture, faces found, the main face's size, how

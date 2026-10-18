@@ -55,6 +55,7 @@ def summary() -> list[dict]:
             "images": len(items),
             "masked": sum(1 for i in items if getattr(i, "mask", None)),
             "pairs": sum(1 for i in items if getattr(i, "controls", None)),
+            "health": _health(d.name),
             "bytes": sum(st.st_size for st in stats),
             "modified": max((st.st_mtime for st in stats), default=0),
             "videos": sum(1 for i in items if video.is_video(i.path)),
@@ -96,6 +97,16 @@ def mask_stats(mask: Path) -> tuple[float, int, int] | None:
         except OSError:
             return None
     return _mask_stats[key]
+
+
+def _health(name: str) -> dict | None:
+    """The last stats snapshot's 0-1 scores (dataset_stats), or None before a first look."""
+    try:
+        from .dataset_stats import latest_scores
+
+        return latest_scores(name)
+    except Exception:
+        return None
 
 
 def items(name: str, caption_ext: str = ".txt") -> dict:

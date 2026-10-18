@@ -9,6 +9,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { engine, thumbUrl, viewUrl, type CaptionJob, type DatasetFaces, type DatasetItem } from '@/api/engine'
 import { activeCaptions } from '@/captions'
 import CaptionPanel from '@/components/CaptionPanel.vue'
+import DatasetStats from '@/components/DatasetStats.vue'
 import { vAutosize } from '@/autosize'
 
 const props = defineProps<{ name: string }>()
@@ -28,9 +29,10 @@ const view = ref<'grid' | 'list' | 'pairs'>(saved.view ?? 'grid')
 const zoom = ref<number>(saved.zoom ?? 200)
 const fit = ref<'cover' | 'contain'>(saved.fit ?? 'cover')
 const showMasks = ref<boolean>(saved.masks ?? false) // dim what each mask leaves out, on the grid
-watch([view, zoom, fit, showMasks], () => {
+const showStats = ref<boolean>(saved.stats ?? false) // the health panel above the pictures
+watch([view, zoom, fit, showMasks, showStats], () => {
   try {
-    localStorage.setItem(PREFS, JSON.stringify({ view: view.value, zoom: zoom.value, fit: fit.value, masks: showMasks.value }))
+    localStorage.setItem(PREFS, JSON.stringify({ view: view.value, zoom: zoom.value, fit: fit.value, masks: showMasks.value, stats: showStats.value }))
   } catch {
     // storage blocked
   }
@@ -73,7 +75,7 @@ async function load() {
 onMounted(load)
 
 // ---- filter / sort / select -------------------------------------------------------------------
-type Filter = 'all' | 'uncaptioned' | 'masked' | 'unmasked' | 'pairs' | 'faces'
+type Filter = 'all' | 'uncaptioned' | 'masked' | 'unmasked' | 'pairs' | 'faces' | 'images'
 const filter = ref<Filter>('all')
 const query = ref('')
 const sortKey = ref<'name' | 'size' | 'res' | 'caption'>('name')
@@ -99,15 +101,20 @@ const counts = computed(() => ({
   videos: items.value.filter((i) => i.kind === 'video').length,
   pairs: items.value.filter((i) => i.controls?.length).length,
   faceIssues: items.value.filter((i) => faceIssue(i)).length,
+  imageIssues: items.value.filter((i) => imageFlags.value[i.path]?.length).length,
 }))
+// the stats panel's per-picture flags (dark, blurry, bars, small, near-duplicate...)
+const imageFlags = ref<Record<string, string[]>>({})
 
 // ---- faces (faces extra): a face per picture, how much it looks like the rest -----------------
 const faces = ref<DatasetFaces | null>(null)
 const facesBusy = ref(false)
+const statsPanel = ref<InstanceType<typeof DatasetStats> | null>(null)
 async function checkFaces() {
   facesBusy.value = true
   try {
     faces.value = await engine.datasetFaces(props.name)
+    statsPanel.value?.load() // the faces score joins the stats
   } catch (e) {
     faces.value = { available: false, hint: e instanceof Error ? e.message : String(e) }
   } finally {
@@ -136,7 +143,8 @@ const shown = computed(() => {
         (f === 'masked' && it.mask) ||
         (f === 'unmasked' && !it.mask) ||
         (f === 'pairs' && it.controls?.length) ||
-        (f === 'faces' && faceIssue(it))) &&
+        (f === 'faces' && faceIssue(it)) ||
+        (f === 'images' && imageFlags.value[it.path]?.length)) &&
       (!q || cap(it).toLowerCase().includes(q) || it.path.toLowerCase().includes(q)),
   )
   const key = (it: DatasetItem): string | number =>
@@ -385,10 +393,14 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
         <button :class="{ on: filter === 'masked' }" @click="filter = 'masked'">Masked {{ counts.masked }}</button>
         <button :class="{ on: filter === 'unmasked' }" @click="filter = 'unmasked'">Unmasked</button>
         <button v-if="counts.pairs" :class="{ on: filter === 'pairs' }" title="Edit pairs: images with a <name>_control input picture" @click="filter = 'pairs'">Pairs {{ counts.pairs }}</button>
+        <button v-if="counts.imageIssues" :class="{ on: filter === 'images' }" title="Pictures the stats flagged: dark, blown out, flat, blurry, letterbox bars, greyscale, small, near-duplicate" @click="filter = 'images'">Image issues {{ counts.imageIssues }}</button>
         <button v-if="faces?.items" :class="{ on: filter === 'faces' }" title="Pictures whose face needs a look: none found, several people, or not like the others" @click="filter = 'faces'">Face issues {{ counts.faceIssues }}</button>
       </div>
       <div class="search"><ZenInput v-model="query" placeholder="Search captions or names" size="sm" /></div>
       <span class="spacer" />
+      <button class="chip-btn" :class="{ on: showStats }" title="The dataset's health: captions, consistency, resolution, near-duplicates, faces; and how each changed over time" @click="showStats = !showStats">
+        <i class="mdi mdi-chart-box-outline" /> Stats
+      </button>
       <button
         class="chip-btn"
         :class="{ on: !!faces?.items }"
@@ -432,6 +444,8 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
 
     <div v-if="notice" class="notice">{{ notice }}</div>
 
+    <DatasetStats v-if="showStats && items.length" :key="name" ref="statsPanel" :name="name" class="stats-panel" @loaded="(s) => (imageFlags = s.current.flags ?? {})" />
+
     <ZenEmpty v-if="!loading && !items.length" title="Empty dataset" icon="mdi mdi-image-plus-outline">
       Drop images, videos, same-name .txt captions and masks (<span class="mono">name-masklabel.png</span>) anywhere on this page.
     </ZenEmpty>
@@ -455,6 +469,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
             </span>
             <span v-if="it.kind === 'video'" class="badge" :title="`Video: ${it.frames ?? '?'} frames at ${it.fps ?? '?'} fps`"><i class="mdi mdi-play" /> {{ secs(it.duration) }}</span>
             <span v-if="it.repeats > 1" class="badge" :title="`Repeats ${it.repeats}×`">×{{ it.repeats }}</span>
+            <span v-if="imageFlags[it.path]?.length" class="badge warn" :title="imageFlags[it.path]!.join(', ')"><i class="mdi mdi-image-filter-center-focus-weak" /> {{ imageFlags[it.path]!.length }}</span>
             <span v-if="faceOf(it)" class="badge" :class="{ warn: !!faceIssue(it) }" :title="faceIssue(it) ?? `Face ${Math.round((faceOf(it)!.share) * 100)}% of the height; likeness to the others ${faceOf(it)!.likeness?.toFixed(2)}`">
               <i :class="faceOf(it)!.faces === 0 ? 'mdi mdi-face-man-outline' : 'mdi mdi-face-recognition'" />
               {{ faceOf(it)!.faces === 0 ? '0' : faceOf(it)!.likeness != null ? faceOf(it)!.likeness!.toFixed(2) : faceOf(it)!.faces }}
@@ -527,6 +542,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
         <button class="c-res sortable" @click="sortBy('res')">Size <i v-if="sortKey === 'res'" :class="sortDir > 0 ? 'mdi mdi-arrow-up' : 'mdi mdi-arrow-down'" /></button>
         <button class="c-bytes sortable" @click="sortBy('size')">File <i v-if="sortKey === 'size'" :class="sortDir > 0 ? 'mdi mdi-arrow-up' : 'mdi mdi-arrow-down'" /></button>
         <span class="c-mask">Mask</span>
+        <span class="c-face">Face</span>
         <button class="c-cap sortable" @click="sortBy('caption')">Caption <i v-if="sortKey === 'caption'" :class="sortDir > 0 ? 'mdi mdi-arrow-up' : 'mdi mdi-arrow-down'" /></button>
         <span class="c-act" />
       </div>
@@ -537,6 +553,16 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
         <span class="c-res mono muted">{{ it.width ? `${it.width}×${it.height}` : '–' }}</span>
         <span class="c-bytes mono muted">{{ kb(it.bytes) }}</span>
         <span class="c-mask small" :class="{ warn: it.mask_mismatch }" :title="it.mask_mismatch ? 'Different shape from its image: it won\'t line up' : ''">{{ it.mask ? pct(it.mask_coverage) : '' }}</span>
+        <span
+          class="c-face small mono"
+          :class="{ warn: !!faceIssue(it) }"
+          :title="faceOf(it) ? faceIssue(it) ?? `Face ${Math.round(faceOf(it)!.share * 100)}% of the height; likeness to the others ${faceOf(it)!.likeness?.toFixed(2)}` : 'Run Faces to check'"
+        >
+          <template v-if="faceOf(it)">
+            <i v-if="faceIssue(it)" class="mdi mdi-alert-outline" />
+            {{ faceOf(it)!.faces === 0 ? 'none' : faceOf(it)!.faces > 1 ? `${faceOf(it)!.faces} faces` : faceOf(it)!.likeness?.toFixed(2) }}
+          </template>
+        </span>
         <textarea
           v-autosize
           class="c-cap cap-edit"
@@ -978,6 +1004,9 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
   border-radius: var(--r-sm);
   display: block;
 }
+.stats-panel {
+  margin-bottom: 12px;
+}
 .thumb .control-inset {
   position: absolute;
   left: 6px;
@@ -1079,7 +1108,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
 }
 .tr {
   display: grid;
-  grid-template-columns: 32px 64px minmax(120px, 0.9fr) 84px 64px 44px minmax(280px, 4fr) 48px;
+  grid-template-columns: 32px 64px minmax(120px, 0.9fr) 84px 64px 44px 70px minmax(280px, 4fr) 48px;
   align-items: center;
   gap: 10px;
   padding: 6px 10px;
