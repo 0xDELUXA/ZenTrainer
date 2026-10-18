@@ -16,6 +16,7 @@ Headless (scriptable; starts ComfyUI in the background when it isn't running):
     zt pause|unpause|stop|save RUN                 zt resume RUN [--set key=value]...
     zt sample RUN "prompt" [--base] [--size WxH] [--seed N]
     zt queue [pause|resume]    zt caption DATASET --model FILE [--style nl|tags] [--all]
+    zt profile RUN             one step under the profiler: where the GPU time goes
 
 The managed ComfyUI lives in ./comfyui (pinned by comfy.lock, own .venv) and uses its
 own input/, output/ and user/ folders, as any ComfyUI does. All gitignored. Models are never copied:
@@ -567,6 +568,25 @@ def cmd_sample(a) -> None:
     say("queued; it renders at the next step boundary")
 
 
+def cmd_profile(a) -> None:
+    """Profile the run's next training step; print where the GPU time went."""
+    import time
+
+    runs = ROOT / "comfyui" / "user" / "zentrainer" / "runs" / a.run
+    before = set(runs.glob("profile-step*.txt"))
+    _api(a, "POST", f"/runs/{a.run}/control", {"command": "profile"})
+    say("profiling the next step...")
+    for _ in range(600):
+        new = sorted(set(runs.glob("profile-step*.txt")) - before)
+        if new:
+            text = new[-1].read_text()
+            print("\n".join(text.splitlines()[: a.lines]))
+            say(f"full table and Chrome trace: {new[-1].with_suffix('')}.*")
+            return
+        time.sleep(1)
+    die("no profile came back (is the run training?)")
+
+
 def cmd_queue(a) -> None:
     if a.action:
         _api(a, "POST", "/queue", {"action": a.action})
@@ -672,6 +692,9 @@ def main() -> None:
     s.add_argument("--base", action="store_true", help="without the LoRA, to compare")
     s.add_argument("--size", metavar="WxH")
     s.add_argument("--seed", type=int)
+    s = _client(sub, "profile", cmd_profile, "profile one training step: where the GPU time goes")
+    s.add_argument("run")
+    s.add_argument("--lines", type=int, default=40)
     s = _client(sub, "queue", cmd_queue, "show the queue, or pause/resume it")
     s.add_argument("action", nargs="?", choices=["pause", "resume"])
     s = _client(sub, "caption", cmd_caption, "auto-caption a dataset")

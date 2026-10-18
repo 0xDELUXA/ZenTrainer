@@ -417,7 +417,11 @@ class Trainer:
         while self.step < total:
             self._handle_commands()
             t0 = time.perf_counter()
-            self._train_step()
+            if getattr(self, "_profile_next", False):
+                self._profile_next = False
+                self._profiled_step()
+            else:
+                self._train_step()
             self.last_step_seconds = time.perf_counter() - t0
             self.train_seconds += self.last_step_seconds
             self.step += 1
@@ -425,6 +429,22 @@ class Trainer:
             for cb in self.callbacks:
                 cb.on_step(self)
         return "done"
+
+    def _profiled_step(self) -> None:
+        """One training step under torch.profiler ("profile" command): a table of where the GPU
+        time went (by op, and by op + input shapes) and a Chrome trace, in the run's folder."""
+        from torch.profiler import ProfilerActivity, profile
+
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
+            self._train_step()
+            torch.cuda.synchronize()
+        out = self.store.dir(self.run_id) if self.store else Path(".")
+        ka = prof.key_averages()
+        table = ka.table(sort_by="cuda_time_total", row_limit=60)
+        shapes = prof.key_averages(group_by_input_shape=True).table(sort_by="cuda_time_total", row_limit=40)
+        (out / f"profile-step{self.step:06d}.txt").write_text(f"{table}\n\nby input shape\n{shapes}\n")
+        prof.export_chrome_trace(str(out / f"profile-step{self.step:06d}.json"))
+        logging.info("[ZenTrainer] profiled step %d: %s", self.step, out / f"profile-step{self.step:06d}.txt")
 
     def _train_step(self) -> None:
         s = self.spec
@@ -592,6 +612,8 @@ class Trainer:
                     tries.append(cmd.args)  # "Try a prompt": batched below
                 else:
                     self._samples.render(self)
+            elif cmd.name == "profile":
+                self._profile_next = True
             elif cmd.name == "set_lr":
                 optim.set_lr(self.optimizer, self.scheduler, float(cmd.args["lr"]))
         if tries and self._samples:

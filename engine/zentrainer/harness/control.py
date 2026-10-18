@@ -11,7 +11,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any
 
-COMMANDS = {"pause", "resume", "stop", "save", "sample", "set_lr"}
+COMMANDS = {"pause", "resume", "stop", "save", "sample", "set_lr", "profile"}
 
 
 @dataclass
