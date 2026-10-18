@@ -9,6 +9,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { activeRuns, latest, lossTrail } from '@/runs'
 import { activeCaptions, startCaptionSync } from '@/captions'
+import { settings } from '@/settings'
 import { activeDownloads, fmtBytes, startDownloadSync } from '@/downloads'
 import { disks, gb, memLatest, startSystemSync } from '@/system'
 import { drawerOpen, toggleDrawer, unseenErrors } from '@/logs'
@@ -18,6 +19,7 @@ const emit = defineEmits<{ toggle: []; navigate: [] }>()
 
 // the mark: blooms when clicked, breathes while something trains
 const lotus = ref<InstanceType<typeof ZenLotus> | null>(null)
+const simple = computed(() => settings.mode === 'simple')
 const training = computed(() => activeRuns.value.some((r) => r.status === 'training'))
 const route = useRoute()
 const router = useRouter()
@@ -97,7 +99,7 @@ function onKey(e: KeyboardEvent) {
   const t = e.target as HTMLElement
   if (e.metaKey || e.ctrlKey || e.altKey || t.closest('input, textarea, select, [contenteditable]')) return
   if (e.key === '[') emit('toggle')
-  else if (e.key === 'n') router.push('/runs/new')
+  else if (e.key === 'n') router.push(simple.value ? '/simple' : '/runs/new')
 }
 
 onMounted(() => {
@@ -125,9 +127,9 @@ onUnmounted(() => {
       <span class="lbl">ZenTrainer</span>
     </RouterLink>
 
-    <RouterLink to="/runs/new" class="row cta" title="New run (N)" @click="emit('navigate')">
+    <RouterLink :to="simple ? '/simple' : '/runs/new'" class="row cta" :title="`${simple ? 'Train a LoRA' : 'New run'} (N)`" @click="emit('navigate')">
       <span class="ic"><i class="mdi mdi-plus" /></span>
-      <span class="lbl">New run</span>
+      <span class="lbl">{{ simple ? 'Train a LoRA' : 'New run' }}</span>
       <kbd class="lbl">N</kbd>
     </RouterLink>
     <ScrollArea class="nav-scroll"><nav>
@@ -153,7 +155,7 @@ onUnmounted(() => {
     <RouterLink
       v-for="r in live"
       :key="r.run_id"
-      :to="`/runs/${r.run_id}`"
+      :to="simple ? `/simple/run/${r.run_id}` : `/runs/${r.run_id}`"
       class="live"
       :title="`${r.name}: ${r.status} ${Math.round(r.frac * 100)}%`"
       @click="emit('navigate')"

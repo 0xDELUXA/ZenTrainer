@@ -227,6 +227,7 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
 
     samples: list[Sample] = []
     owners: list[int] = []
+    sounds: list[tuple[int, Path, float, float]] = []  # (sample, video, t0, t1): encoded after the pictures
     for n, it in enumerate(items):
         idx = [cap_index[t] for t in variants[n]]
         if is_video(it.path):
@@ -242,10 +243,9 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
             size = pick_bucket(p.width, p.height, video_sizes)
             for k, frames in enumerate(windows):
                 latent = _encode(vae, video.read(it.path, frames, size), it.path)
-                sound = None
                 if spec.video_audio and audio_vae is not None:
-                    sound = _encode_audio(audio_vae, it.path, frames[0] / p.fps, (frames[-1] + 1) / p.fps)
-                samples.append(Sample(latent, idx[0], None, idx, sound))
+                    sounds.append((len(samples), it.path, frames[0] / p.fps, (frames[-1] + 1) / p.fps))
+                samples.append(Sample(latent, idx[0], None, idx))
                 owners.append(n)
                 if progress:
                     progress(n + 1, len(items) + len(captions), f"encoding {it.path.name} ({k + 1}/{len(windows)})")
@@ -264,6 +264,12 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
             progress(n + 1, len(items) + len(captions), f"encoding {it.path.name}")
     if not samples:
         raise FileNotFoundError(f"nothing in {root} could be encoded")
+    # soundtracks in one pass after every picture: the video and audio VAEs each load once,
+    # instead of swapping in and out per clip
+    for k, (i, path, t0, t1) in enumerate(sounds):
+        samples[i].audio = _encode_audio(audio_vae, path, t0, t1)
+        if progress and k % 10 == 0:
+            progress(k + 1, len(sounds), f"encoding soundtracks ({path.name})")
 
     conditionings = []
     for n, c in enumerate(captions):

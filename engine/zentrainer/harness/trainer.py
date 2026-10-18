@@ -45,6 +45,10 @@ def _oom_advice(spec: TrainSpec, step: int) -> str:
         tips.append("turn on weight offloading")
     if d.resolution > 768:
         tips.append(f"lower resolution ({d.resolution} -> {d.resolution * 3 // 4 // 64 * 64})")
+    if d.video_frames > 22:
+        tips.append(f"shorter video clips ({d.video_frames} frames) or a lower video resolution ({d.video_resolution})")
+    if m.offloading:
+        tips.append("more VRAM headroom (Memory -> VRAM headroom, in GB)")
     if o.batch_size > 1:
         tips.append(f"batch size {o.batch_size} -> 1 (use grad accumulation instead)")
     if m.training_dtype == "fp32":
@@ -111,6 +115,10 @@ def _comfy_compiler(on: bool) -> None:
 # VRAM left for the LoRA, optimizer state, activations and ComfyUI itself when the base model
 # loads whole; below this the run offloads weights instead (see Trainer._auto_offload)
 AUTO_OFFLOAD_HEADROOM = 8 * 1024 ** 3
+# video clips are many tokens per step (73 frames at 512 px: ~5k; a 1024 px image on H3: ~1k):
+# activations grow with them, so the headroom does too, beyond this many tokens
+HEADROOM_TOKENS = 2048
+HEADROOM_PER_TOKEN = int(1.6 * 1024 ** 2)
 
 
 class _Lazy:
@@ -293,6 +301,19 @@ class Trainer:
         mm.soft_empty_cache()
         logging.info("[ZenTrainer] text encoder released: captions and sample prompts are encoded")
 
+    @property
+    def headroom(self) -> int:
+        """Bytes of VRAM kept free beside the (partly) loaded model: the spec's, or 8 GB plus
+        room for the dataset's longest clip."""
+        if self.spec.memory.vram_headroom > 0:
+            return int(self.spec.memory.vram_headroom * 1024 ** 3)
+        tokens = 0
+        for smp in getattr(getattr(self, "dataset", None), "samples", [])[:2000]:
+            lat = smp.latent
+            if lat.ndim == 4:  # (C, T, h, w): a video clip; images keep the flat default
+                tokens = max(tokens, lat.shape[1] * lat.shape[2] * lat.shape[3] // 4)
+        return AUTO_OFFLOAD_HEADROOM + max(0, tokens - HEADROOM_TOKENS) * HEADROOM_PER_TOKEN
+
     def _auto_offload(self, patcher) -> None:
         """Offloading off means the whole base model sits in VRAM. When it can't (its weights
         alone leave too little room for the LoRA, optimizer and activations), turn offloading
@@ -302,7 +323,7 @@ class Trainer:
             return
         weights = patcher.model_size()
         total = torch.cuda.get_device_properties(torch.cuda.current_device()).total_memory
-        if weights > total - AUTO_OFFLOAD_HEADROOM:
+        if weights > total - self.headroom:
             m.offloading = True
             gb = 1024 ** 3
             logging.info("[ZenTrainer] weight offloading on: the model is %.1f GB on a %.1f GB card", weights / gb, total / gb)
@@ -319,7 +340,8 @@ class Trainer:
             # weight budget of nothing: every layer crossed PCIe twice a step.)
             ours = [lm for lm in mm.current_loaded_models if lm.model is patcher]
             mm.free_memory(1e30, self.device, keep_loaded=ours)
-            mm.load_models_gpu([patcher], memory_required=AUTO_OFFLOAD_HEADROOM, force_full_load=False)
+            logging.info("[ZenTrainer] keeping %.1f GB of VRAM free for training beside the model", self.headroom / 1024 ** 3)
+            mm.load_models_gpu([patcher], memory_required=self.headroom, force_full_load=False)
         else:
             mm.load_models_gpu([patcher], memory_required=1e20, force_full_load=True)
         patcher.model.requires_grad_(False)

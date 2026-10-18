@@ -104,6 +104,39 @@ const eta = computed(() => {
   if (!l?.it_s || status.value !== 'training') return null
   return (total.value - l.step) / l.it_s
 })
+// what the run is doing when it isn't stepping: shown in the step bar's place (same size), with
+// its own progress where there is one (a sample's steps, the dataset's "(12/120)")
+const phase = computed(() => {
+  const d = detail.value
+  if (!d || !running.value) return null
+  const sm = sampling.value
+  if (sm && sm.phase !== 'done') {
+    const baseline = step.value === 0 && d.spec.samples.baseline
+    const st = sm.s_total ?? 0
+    const s0 = sm.s_step ?? 0
+    return {
+      icon: 'mdi mdi-image-filter-center-focus-weak',
+      label: baseline ? 'Baseline' : 'Sampling',
+      text: (baseline ? 'The model before training · ' : '') + (sm.prompt ?? ''),
+      frac: st ? s0 / st : 0,
+      right: `${sm.count ? `${(sm.index ?? 0) + 1}/${sm.count} · ` : ''}${st && s0 >= st ? 'decoding' : st ? `${s0}/${st}` : ''}`,
+    }
+  }
+  if (status.value === 'queued') return { icon: 'mdi mdi-clock-outline', label: 'Queued', text: 'Waiting for its turn', frac: 0, right: '' }
+  if (status.value === 'loading') {
+    const msg = d.run.message || 'Loading the model and the dataset'
+    const m = msg.match(/\((\d+)\/(\d+)\)\s*$/)
+    return {
+      icon: 'mdi mdi-database-arrow-down-outline',
+      label: 'Preparing',
+      text: m ? msg.slice(0, m.index).trim() : msg,
+      frac: m ? Number(m[1]) / Number(m[2]) : 0,
+      right: m ? `${m[1]}/${m[2]}` : '',
+    }
+  }
+  if (status.value === 'training' && !last.value) return { icon: 'mdi mdi-progress-helper', label: 'Starting', text: d.run.message || 'First steps', frac: 0, right: '' }
+  return null
+})
 const wall = computed(() => {
   const d = detail.value
   if (!d) return null
@@ -283,6 +316,11 @@ watch([() => steps.value.length, sampleView], async () => {
 })
 
 const lb = ref<{ items: LightboxItem[]; index: number; grid?: number } | null>(null)
+// tiles take the samples' own shape, so neither stills nor videos are cropped
+const sampleAspect = computed(() => {
+  const sp = detail.value?.spec.samples
+  return sp?.width && sp?.height ? `${sp.width} / ${sp.height}` : '1'
+})
 const isVideo = (x: SampleRow) => /\.(mp4|webm)$/i.test(x.filename)
 const sampleItem = (x: SampleRow): LightboxItem => ({
   src: viewUrl(x),
@@ -390,10 +428,18 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
         </div>
       </div>
       <div v-if="error" class="card err mono">{{ error }}</div>
-      <div v-if="detail.run.message" class="card muted mono msg">{{ detail.run.message }}</div>
+      <div v-if="detail.run.message && !running" class="card muted mono msg">{{ detail.run.message }}</div>
 
       <!-- one slim line: fixed-width text columns either side, so the bar (and its notches) never moves -->
-      <div class="progline card">
+      <div v-if="phase" class="progline card phase">
+        <span class="pl-step"><i :class="phase.icon" /> {{ phase.label }}</span>
+        <div class="ph-mid">
+          <span class="ph-text ellipsis" :title="phase.text">{{ phase.text }}</span>
+          <div class="bar thin"><div :style="{ width: `${phase.frac * 100}%` }" /></div>
+        </div>
+        <span class="pl-eta mono muted">{{ phase.right }}</span>
+      </div>
+      <div v-else class="progline card">
         <span class="pl-step mono"><b>{{ step }}</b><span class="muted"> / {{ total }}</span></span>
         <div class="track">
           <div class="bar"><div :style="{ width: `${progress * 100}%` }" /></div>
@@ -438,7 +484,7 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
                 <i :class="sampling ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-image-refresh-outline'" /> Sample now
               </button>
             </header>
-            <div v-if="sampleView === 'latest'" class="tiles" :style="{ '--cols': latestCols }">
+            <div v-if="sampleView === 'latest'" class="tiles" :style="{ '--cols': latestCols, '--ar': sampleAspect }">
               <div v-for="i in promptCount" :key="i" class="tile-wrap">
                 <div class="tile" :class="{ live: liveIndex === i - 1 }">
                   <template v-if="liveIndex === i - 1">
@@ -447,7 +493,17 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
                     <span class="tile-badge mono">{{ sampling?.s_step }}/{{ sampling?.s_total }}</span>
                   </template>
                   <button v-else-if="latestFor(i - 1)" class="tile-btn" :class="{ stale: sampling && sampling.phase === 'sampling' && (sampling.index ?? 0) < i - 1 }" @click="openLatest(i - 1)">
-                    <video v-if="isVideo(latestFor(i - 1)!)" :src="viewUrl(latestFor(i - 1)!)" autoplay muted loop playsinline />
+                    <video
+                      v-if="isVideo(latestFor(i - 1)!)"
+                      :src="viewUrl(latestFor(i - 1)!)"
+                      muted
+                      loop
+                      playsinline
+                      preload="metadata"
+                      @mouseenter="($event.target as HTMLVideoElement).play()"
+                      @mouseleave="($event.target as HTMLVideoElement).pause()"
+                    />
+                    <i v-if="isVideo(latestFor(i - 1)!)" class="mdi mdi-play play-badge" />
                     <img v-else :src="viewUrl(latestFor(i - 1)!)" alt="" />
                   </button>
                   <div v-else class="tile-empty"><i class="mdi mdi-image-outline" /></div>
@@ -619,6 +675,29 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
 .spacer {
   flex: 1;
 }
+.phase .pl-step {
+  color: var(--zen-accent);
+  font-weight: 600;
+}
+.ph-mid {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  height: 18px; /* the step bar's height: switching between them doesn't move the page */
+  min-width: 0;
+}
+.ph-text {
+  font-size: 11px;
+  color: var(--zen-muted);
+  line-height: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bar.thin {
+  height: 3px;
+}
 .progline {
   display: grid;
   grid-template-columns: 11ch minmax(0, 1fr) 20ch;
@@ -782,7 +861,7 @@ dd {
 }
 .tile {
   position: relative;
-  aspect-ratio: 1;
+  aspect-ratio: var(--ar, 1);
   border-radius: var(--r-lg);
   overflow: hidden;
   background: var(--zen-surface-2);
@@ -796,8 +875,26 @@ dd {
   inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
+}
+.play-badge {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-size: 14px;
+  pointer-events: none;
+  transition: opacity var(--zen-dur-fast);
+}
+.tile-btn:hover .play-badge {
+  opacity: 0;
 }
 .tile-btn {
   position: absolute;
@@ -1003,7 +1100,7 @@ dd {
 .mcell video {
   width: var(--t);
   height: var(--t);
-  object-fit: cover;
+  object-fit: contain;
   display: block;
   transition: transform 0.15s ease;
 }

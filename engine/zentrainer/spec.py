@@ -128,6 +128,9 @@ class MemorySpec:
     # cheapest place to trade memory for speed.
     checkpoint_skip: int = 0
     offloading: bool = False
+    # With offloading: VRAM kept free for activations, the LoRA and its optimizer (GB);
+    # the rest holds as much of the model as fits. 0 = auto: 8 GB, more for long video clips.
+    vram_headroom: float = 0.0
     quantized_backward: bool = False
     bypass_mode: bool = False
     # Attention backend while training. Flash and sage have no backward pass, so the

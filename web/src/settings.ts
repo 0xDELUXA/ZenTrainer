@@ -22,6 +22,16 @@ export interface SettingDef<T = unknown> {
 const def = <T>(d: SettingDef<T>) => d
 
 export const SETTINGS = {
+  mode: def<'simple' | 'advanced'>({
+    category: 'Appearance',
+    label: 'Mode',
+    description: 'Simple: train from ready-made recipes and see just the progress. Advanced: every setting, the loss, the captions.',
+    default: 'advanced',
+    options: [
+      { value: 'simple', label: 'Simple', icon: 'mdi mdi-sprout-outline' },
+      { value: 'advanced', label: 'Advanced', icon: 'mdi mdi-tune-variant' },
+    ],
+  }),
   motion: def<'system' | 'reduce' | 'full'>({
     category: 'Appearance',
     label: 'Motion',
