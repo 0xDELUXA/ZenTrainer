@@ -186,6 +186,10 @@ class SampleSpec:
     model_name: str | None = None
     model_weight_dtype: str = "default"
     lora_strength: float = 1.0
+    # A turbo LoRA under every sample (not training, not the saved LoRA): few-step previews,
+    # e.g. MiniMax H3's minimax_h3_turbo_v4_step600_ema at 0.75 with 6 steps, CFG 1.
+    turbo_lora: str | None = None
+    turbo_strength: float = 0.75
     # Skip-layer guidance, as ComfyUI's SkipLayerGuidanceDiT nodes do it. "uncond" skips the
     # layers in the negative pass only (no extra cost; MOSS Image's recommended setting);
     # "standard" adds a pass without them and pushes away from it by slg_scale. Layers are

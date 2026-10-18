@@ -109,6 +109,9 @@ export interface TrainSpec {
     model_name: string | null
     model_weight_dtype: string
     lora_strength: number
+    /** a turbo LoRA under every sample (few-step previews), and its strength */
+    turbo_lora?: string | null
+    turbo_strength?: number
     /** skip-layer guidance: off, skip the layers in the negative pass, or an extra pass without them */
     slg_mode: 'off' | 'uncond' | 'standard'
     slg_layers: number[]

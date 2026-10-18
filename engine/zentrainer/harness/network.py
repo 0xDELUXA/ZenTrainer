@@ -114,19 +114,23 @@ class _Assisted(torch.nn.Module):
 
     _BYPASS_ATTRS = ("multiplier", "is_conv", "conv_dim", "kernel_size", "in_channels", "out_channels", "kw_dict")
 
-    def __init__(self, trained, assist, switch):
+    def __init__(self, trained, assist, switch, preview=None, preview_strength: float = 1.0):
         super().__init__()
         self.trained = trained
-        self.assist = assist
+        self.assist = assist  # on while training (switch.on)
+        self.preview = preview  # on while sampling: a turbo LoRA for few-step previews
+        self.preview_strength = preview_strength
         self.switch = switch
 
     def __call__(self, w):
-        if self.switch.on:
+        if self.switch.on and self.assist is not None:
             w = self.assist(w)
+        elif not self.switch.on and self.preview is not None:
+            w = w + self.preview_strength * (self.preview(w) - w)
         return self.trained(w) if self.trained is not None else w
 
     def _share(self) -> None:  # bypass sets layer info on the adapter it holds: pass it on
-        for child in (self.trained, self.assist):
+        for child in (self.trained, self.assist, self.preview):
             if child is not None:
                 for a in self._BYPASS_ATTRS:
                     if hasattr(self, a):
@@ -135,8 +139,10 @@ class _Assisted(torch.nn.Module):
     def h(self, x, base_out):
         self._share()
         out = self.trained.h(x, base_out) if self.trained is not None else 0
-        if self.switch.on:
+        if self.switch.on and self.assist is not None:
             out = out + self.assist.h(x, base_out)
+        elif not self.switch.on and self.preview is not None:
+            out = out + self.preview_strength * self.preview.h(x, base_out)
         return out
 
     def g(self, y):
@@ -174,7 +180,8 @@ def load_training_adapter(patcher, path: str, device, dtype) -> dict:
 
 class Network:
     def __init__(self, patcher, spec: NetworkSpec, device: torch.device, *, bypass: bool = False,
-                 init_weights: dict | None = None, assist: dict | None = None):
+                 init_weights: dict | None = None, assist: dict | None = None,
+                 preview: dict | None = None, preview_strength: float = 1.0):
         from comfy.weight_adapter import BypassInjectionManager, adapter_maps, adapters
 
         self.spec = spec
@@ -185,7 +192,9 @@ class Network:
         self._injections: list = []
         init_weights = init_weights or {}
         assist = dict(assist or {})  # weight key -> frozen training adapter
+        preview = dict(preview or {})  # weight key -> frozen preview (turbo) adapter
         self.assisted = len(assist)
+        self.previewed = len(preview)
         self._switch = _Switch()
 
         alpha = float(spec.alpha if spec.alpha is not None else spec.rank)
@@ -208,8 +217,9 @@ class Network:
                     adapter = adapter_maps[spec.algorithm].create_train(m.weight, rank=spec.rank, alpha=alpha)
                 adapter = adapter.to(device=device, dtype=self.dtype).train().requires_grad_(True)
                 self._own(name, adapter)
-                frozen = assist.pop(key, None)
-                attached = _Assisted(adapter, frozen, self._switch) if frozen is not None else adapter
+                frozen, fast = assist.pop(key, None), preview.pop(key, None)
+                attached = (_Assisted(adapter, frozen, self._switch, fast, preview_strength)
+                            if frozen is not None or fast is not None else adapter)
                 if self._bypass is not None:
                     self._bypass.add_adapter(key, attached, strength=1.0)
                 else:
@@ -220,8 +230,8 @@ class Network:
                 self._own_delta(patcher, f"{name}.bias", f"{name}.diff_b", m.bias.shape, device)
 
         # training-adapter layers this network doesn't train still get it (e.g. the text refiner)
-        for key, frozen in assist.items():
-            attached = _Assisted(None, frozen, self._switch)
+        for key in set(assist) | set(preview):
+            attached = _Assisted(None, assist.get(key), self._switch, preview.get(key), preview_strength)
             if self._bypass is not None:
                 self._bypass.add_adapter(key, attached, strength=1.0)
             else:

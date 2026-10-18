@@ -260,3 +260,16 @@ def test_locked_changes_at_resume():
     new["network"]["rank"] = 32
     new["optim"]["optimizer"] = "Prodigy"
     assert locked_changes(old, new) == ["network.rank", "optim.optimizer"]
+
+
+def test_preview_adapter_only_while_sampling():
+    from zentrainer.harness.network import _Assisted, _Switch
+
+    sw = _Switch()
+    assist = lambda w: w + 1  # training adapter: +1
+    turbo = lambda w: w + 10  # preview adapter: +10, used at 0.5
+    a = _Assisted(None, assist, sw, turbo, 0.5)
+    w = torch.zeros(2)
+    assert torch.all(a(w) == 1)  # training: the training adapter only
+    sw.on = False
+    assert torch.all(a(w) == 5)  # sampling: half the turbo, no training adapter

@@ -774,6 +774,12 @@ async function start(position: 'next' | 'end' = 'next') {
                 <ZenNumber :model-value="spec.samples.fps ?? 24" :min="1" :max="60" :step="1" :precision="0" @update:model-value="spec.samples.fps = $event" />
               </div>
             </ZenField>
+            <ZenField label="Turbo LoRA" stack tip="Rides under every sample (never training or the saved LoRA) so previews take a few steps: MiniMax H3's minimax_h3_turbo_v4_step600_ema at 0.75, 6 steps, CFG 1">
+              <div class="inline">
+                <ZenCombo :model-value="spec.samples.turbo_lora ?? ''" :items="[{ value: '', label: 'None' }, ...items(choices.loras)]" :item-height="30" @update:model-value="spec.samples.turbo_lora = String($event) || null" />
+                <ZenNumber v-if="spec.samples.turbo_lora" :model-value="spec.samples.turbo_strength ?? 0.75" :min="0" :max="1.5" :step="0.05" :precision="2" @update:model-value="spec.samples.turbo_strength = $event" />
+              </div>
+            </ZenField>
             <ZenField label="Steps / CFG" stack>
               <div class="inline">
                 <ZenNumber v-model="spec.samples.steps" :min="1" :step="1" :precision="0" />
