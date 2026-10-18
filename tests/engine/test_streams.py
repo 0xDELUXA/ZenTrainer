@@ -182,3 +182,14 @@ def test_network_disabled_zeroes_then_restores():
     with Network.disabled(net):
         assert torch.all(p == 0)
     assert torch.all(p == 1)
+
+
+def test_released_text_encoder_loads_again():
+    from zentrainer.harness.models import Models
+
+    loads = []
+    m = Models(patcher=None, _clip=None, vae=None, _clip_loader=lambda: loads.append(1) or "clip")
+    assert m.clip == "clip"
+    m.release_clip()
+    assert m._clip is None
+    assert m.clip == "clip" and len(loads) == 2  # a later prompt can still be encoded

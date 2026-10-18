@@ -294,10 +294,9 @@ class Trainer:
         GB for most models, tens for the big VLM encoders)."""
         import comfy.model_management as mm
 
-        if self.models._clip is None:  # never loaded (everything was cached): just forget how to
-            self.models.clip = None
+        if self.models._clip is None:  # never loaded (everything was cached)
             return
-        self.models.clip = None
+        self.models.release_clip()
         mm.cleanup_models_gc()
         mm.soft_empty_cache()
         logging.info("[ZenTrainer] text encoder released: captions and sample prompts are encoded")

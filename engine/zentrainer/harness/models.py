@@ -33,8 +33,13 @@ class Models:
     @clip.setter
     def clip(self, value):
         self._clip = value
-        if value is None:
-            self._clip_loader = None  # released for good
+
+    def release_clip(self) -> None:
+        """Free the loaded text encoder; it loads again if something needs it later (a manual
+        sample's new prompt). A checkpoint's built-in encoder can't be reloaded alone, so it's
+        only freed for split models."""
+        if self._clip_loader is not None:
+            self._clip = None
 
 
 _WEIGHT_DTYPES = {"fp8_e4m3fn": "float8_e4m3fn", "fp8_e4m3fn_fast": "float8_e4m3fn", "fp8_e5m2": "float8_e5m2"}
