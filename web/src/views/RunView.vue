@@ -568,14 +568,6 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
           </section>
         </div>
         <aside class="rail">
-          <section v-if="runLoaded.length" class="card loaded-card">
-            <div class="eyebrow">Loaded now</div>
-            <div v-for="m in runLoaded" :key="m.file ?? m.name" class="lrow" :title="`${m.file}: ${gb(m.vram)} of ${gb(m.bytes)} GB in VRAM`">
-              <span class="lname ellipsis">{{ (m.file ?? m.name).replace(/\.safetensors$/, '') }}</span>
-              <span class="mono small muted">{{ gb(m.vram) }}/{{ gb(m.bytes) }} GB</span>
-              <div class="lbar"><span :style="{ width: `${m.bytes ? (m.vram / m.bytes) * 100 : 0}%` }" /></div>
-            </div>
-          </section>
           <section class="card">
             <div v-for="g in statGroups" :key="g.title" class="sgroup">
               <div class="sg-title">{{ g.title }}</div>
@@ -589,6 +581,14 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
               </dl>
             </div>
             <button class="link spec-link" @click="specOpen = true"><i class="mdi mdi-code-json" /> Full spec</button>
+          </section>
+          <section v-if="runLoaded.length" class="card loaded-card">
+            <div class="eyebrow">Loaded now</div>
+            <div v-for="m in runLoaded" :key="m.file ?? m.name" class="lrow" :title="`${m.file}: ${gb(m.vram)} of ${gb(m.bytes)} GB in VRAM`">
+              <span class="lname ellipsis">{{ (m.file ?? m.name).replace(/\.safetensors$/, '') }}</span>
+              <span class="mono small muted">{{ gb(m.vram) }}/{{ gb(m.bytes) }} GB</span>
+              <div class="lbar"><span :style="{ width: `${m.bytes ? (m.vram / m.bytes) * 100 : 0}%` }" /></div>
+            </div>
           </section>
 
           <section class="card">
