@@ -524,6 +524,15 @@ async function start(position: 'next' | 'end' = 'next') {
                   <button v-for="r in [256, 384, 512, 640, 768]" :key="r" class="chip-btn" :class="{ on: spec.dataset.video_resolution === r }" @click="spec.dataset.video_resolution = r">{{ r }}</button>
                 </div>
               </ZenField>
+              <ZenField label="Stay inside a shot" stack tip="Finds hard cuts and keeps every clip within one shot. Leave off for edits where the cutting is the point (music videos)">
+                <div class="sw-row"><ZenSwitch :model-value="!!spec.dataset.video_avoid_cuts" @update:model-value="spec.dataset.video_avoid_cuts = $event" /><span class="sw-state">{{ spec.dataset.video_avoid_cuts ? 'Split at cuts' : 'Clips may cross cuts' }}</span></div>
+              </ZenField>
+              <ZenField label="Train on sound" stack tip="Joint audio-video models (MiniMax H3): each clip's soundtrack joins the loss, so motion and cuts can learn the beat. Needs the model's audio VAE">
+                <div class="sw-row"><ZenSwitch :model-value="!!spec.dataset.video_audio" @update:model-value="spec.dataset.video_audio = $event" /><span class="sw-state">{{ spec.dataset.video_audio ? 'On' : 'Off' }}</span></div>
+              </ZenField>
+              <ZenField v-if="spec.dataset.video_audio" label="Audio VAE" stack tip="The model's audio VAE (MiniMax H3: minimax_h3_audio_vae)">
+                <ZenCombo :model-value="spec.model.audio_vae_name ?? ''" :items="items(choices.vae ?? [])" placeholder="Pick the audio VAE…" :item-height="30" @update:model-value="spec.model.audio_vae_name = String($event) || null" />
+              </ZenField>
             </div>
           </div>
         </section>

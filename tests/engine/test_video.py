@@ -90,3 +90,28 @@ def test_write_and_read_back_sound(tmp_path):
     assert sr == 32000 and a.shape == (2, 16000)
     assert a.abs().max() > 0.2  # the tone is there, not silence
     assert video.read_audio(tmp_path / "s.mp4", 0, 0.1)[0].shape[1] == 3200
+
+
+def test_cuts_found_and_clips_stay_inside_shots(tmp_path):
+    av = pytest.importorskip("av")
+    import numpy as np
+
+    path = tmp_path / "cut.mp4"
+    with av.open(str(path), "w") as c:
+        s = c.add_stream("libx264", rate=24)
+        s.width, s.height, s.pix_fmt = 64, 48, "yuv420p"
+        for i in range(60):  # a slow fade, then a hard cut at 30 to a different picture
+            v = (i % 30) * 2 + (0 if i < 30 else 160)
+            frame = np.full((48, 64, 3), v, dtype=np.uint8)
+            for pkt in s.encode(av.VideoFrame.from_ndarray(frame, format="rgb24")):
+                c.mux(pkt)
+        for pkt in s.encode():
+            c.mux(pkt)
+    found = video.cuts(path)
+    assert found == [30]
+    p = video.probe(path)
+    spans = video.shots(p, found)
+    assert spans == [(0, 30), (30, 60)]
+    wins = video.plan_shots(p, 0, 22, "uniform", 3, video.valid_lengths(H3, 60), spans)
+    assert wins and all(len(w) == 22 for w in wins)
+    assert all((w[0] < 30) == (w[-1] < 30) for w in wins)  # none crosses the cut

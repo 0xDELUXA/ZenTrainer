@@ -15,6 +15,8 @@ export interface TrainSpec {
     clip_name?: string | null
     clip_type?: string | null
     vae_name?: string | null
+    /** joint audio-video models: the audio VAE (sound in training and samples) */
+    audio_vae_name?: string | null
   }
   dataset: {
     folder: string
@@ -31,6 +33,10 @@ export interface TrainSpec {
     video_mode: 'uniform' | 'head' | 'chunks'
     video_clips: number
     video_resolution: number
+    /** keep clips inside one shot (hard cuts detected) */
+    video_avoid_cuts?: boolean
+    /** train on each clip's soundtrack (joint audio-video models) */
+    video_audio?: boolean
     caption_set: string
     caption_mix: string[]
     trigger: string

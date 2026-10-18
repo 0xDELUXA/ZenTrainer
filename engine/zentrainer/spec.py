@@ -67,6 +67,9 @@ class DatasetSpec:
     # Train on each clip's soundtrack too (joint audio-video models with model.audio_vae_name):
     # the audio stream joins the loss instead of being left out, so cuts can learn the beat.
     video_audio: bool = False
+    # Keep clips inside one shot: hard cuts are detected and no clip spans one. Off for edits
+    # where the cutting is the point (music videos, PMVs).
+    video_avoid_cuts: bool = False
 
 
 @dataclass

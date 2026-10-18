@@ -88,6 +88,58 @@ def plan(p: Probe, fps: float, frames: int, mode: str, clips: int, lengths: list
     return [[min(int(round((s + i) * step)), p.frames - 1) for i in range(n)] for s in starts]
 
 
+def cuts(path: Path, threshold: float = 4.0) -> list[int]:
+    """Frames where a new shot starts (hard cuts), from how much each frame differs from the
+    last on a tiny greyscale copy: a cut is a jump well above the video's usual motion."""
+    import av
+    import numpy as np
+
+    diffs, prev = [], None
+    with av.open(str(path)) as c:
+        stream = c.streams.video[0]
+        stream.thread_type = "AUTO"
+        for frame in c.decode(stream):
+            g = frame.reformat(width=64, height=36, format="gray").to_ndarray().astype(np.float32)
+            diffs.append(0.0 if prev is None else float(np.abs(g - prev).mean()))
+            prev = g
+    if len(diffs) < 3:
+        return []
+    d = np.array(diffs)
+    floor = max(12.0, float(np.median(d[1:])) * threshold)
+    return [i for i in range(1, len(d)) if d[i] > floor and d[i] >= d[max(0, i - 1)] and d[i] >= d[min(len(d) - 1, i + 1)]]
+
+
+def shots(p: Probe, cut_frames: list[int]) -> list[tuple[int, int]]:
+    """[start, end) source-frame ranges between cuts."""
+    bounds = [0, *[c for c in cut_frames if 0 < c < p.frames], p.frames]
+    return [(a, b) for a, b in zip(bounds, bounds[1:]) if b > a]
+
+
+def plan_shots(p: Probe, fps: float, frames: int, mode: str, clips: int, lengths: list[int],
+               spans: list[tuple[int, int]]) -> list[list[int]]:
+    """As plan(), but no clip crosses a cut: windows only inside one shot. The clip length is
+    the longest valid one the longest shot can fill."""
+    rate = fps or p.fps
+    step = p.fps / rate
+    out_spans = [(int(a / step), int(b / step)) for a, b in spans]  # in output frames
+    longest = max((b - a for a, b in out_spans), default=0)
+    fit = [n for n in lengths if n <= min(frames, longest)]
+    if not fit:
+        return []
+    n = max(fit)
+    cand = [s for a, b in out_spans for s in range(a, b - n + 1)]  # every start that fits in a shot
+    if not cand:
+        return []
+    if mode == "head":
+        starts = [cand[0]]
+    elif mode == "chunks":
+        starts = [s for a, b in out_spans for s in range(a, b - n + 1, n)][: max(1, clips)]
+    else:  # uniform over the positions that fit
+        k = max(1, min(clips, len(cand)))
+        starts = sorted({cand[round((len(cand) - 1) * i / (k - 1))] for i in range(k)}) if k > 1 else [cand[len(cand) // 2]]
+    return [[min(int(round((s + i) * step)), p.frames - 1) for i in range(n)] for s in starts]
+
+
 def read(path: Path, indices: list[int], size: tuple[int, int]) -> torch.Tensor:
     """These source frames, resized to cover `size` (w, h) and center-cropped: (T, H, W, 3) in [0, 1]."""
     import av

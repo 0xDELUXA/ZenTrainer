@@ -176,6 +176,8 @@ def cache_key(items: list[Item], spec: DatasetSpec, encoder_id: str) -> str:
                              spec.video_resolution]).encode())
         if spec.video_audio:
             h.update(b"audio")
+        if spec.video_avoid_cuts:
+            h.update(b"avoid_cuts")
     for it in items:
         st = it.path.stat()
         h.update(f"{it.path}|{st.st_mtime_ns}|{st.st_size}|{it.caption}".encode())
@@ -237,7 +239,11 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
                 continue
             if lengths is None:
                 lengths = video.valid_lengths(vae, max(spec.video_frames, 1))
-            windows = video.plan(p, spec.video_fps, spec.video_frames, spec.video_mode, spec.video_clips, lengths)
+            if spec.video_avoid_cuts:
+                spans = video.shots(p, video.cuts(it.path))
+                windows = video.plan_shots(p, spec.video_fps, spec.video_frames, spec.video_mode, spec.video_clips, lengths, spans)
+            else:
+                windows = video.plan(p, spec.video_fps, spec.video_frames, spec.video_mode, spec.video_clips, lengths)
             if not windows:
                 logging.warning("[ZenTrainer] %s is too short for a clip; skipping it", it.path.name)
             size = pick_bucket(p.width, p.height, video_sizes)
