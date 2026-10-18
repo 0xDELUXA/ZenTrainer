@@ -386,13 +386,19 @@ const sampleAspect = computed(() => {
   const sp = detail.value?.spec.samples
   return sp?.width && sp?.height ? `${sp.width} / ${sp.height}` : '1'
 })
-function openManual(i: number) {
-  // the viewer pages through every try: its no-LoRA render first, then each step
+function openManual(i: number, row?: SampleRow | null) {
+  // the viewer pages through every try (its no-LoRA render first, then each step) and opens on
+  // the render that was clicked
   const rows = (g: (typeof manualGroups.value)[number]) => [...(g.base ? [g.base] : []), ...g.steps]
   const flat = manualGroups.value.flatMap(rows)
-  const at = manualGroups.value.slice(0, i).reduce((n, g) => n + rows(g).length, 0)
+  const start = manualGroups.value.slice(0, i).reduce((n, g) => n + rows(g).length, 0)
+  const own = rows(manualGroups.value[i]!)
+  const at = start + Math.max(0, row ? own.indexOf(row) : own.length - 1)
   lb.value = { items: flat.map((x) => ({ ...sampleItem(x), label: x.base ? 'Without the LoRA' : `Step ${x.step}` })), index: at }
 }
+// a tile shaped like its render (pairs side by side: twice as wide), so nothing letterboxes
+const shapeOf = (x: SampleRow | null | undefined, pair = false) =>
+  x?.width && x?.height ? { aspectRatio: `${x.width * (pair ? 2 : 1)} / ${x.height}` } : undefined
 const isVideo = (x: SampleRow) => /\.(mp4|webm)$/i.test(x.filename)
 const sampleItem = (x: SampleRow): LightboxItem => ({
   src: viewUrl(x),
@@ -582,13 +588,13 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
               <div class="mtiles">
                 <div v-for="(g, gi) in manualGroups" :key="g.index" class="mtile" :class="{ pair: g.base && shownStep(g) }">
                   <!-- with a base render: images as a before/after slider, videos side by side -->
-                  <div v-if="g.base && shownStep(g) && !isVideo(g.base)" class="mmedia" @click="openManual(gi)">
+                  <div v-if="g.base && shownStep(g) && !isVideo(g.base)" class="mmedia" :style="shapeOf(g.base)" @click="openManual(gi, shownStep(g))">
                     <ZenCompare :before="viewUrl(g.base)" :after="viewUrl(shownStep(g)!)" before-label="No LoRA" :after-label="`Step ${shownStep(g)!.step}`" />
                   </div>
-                  <div v-else-if="g.base && shownStep(g)" class="mmedia two">
-                    <video v-for="x in [g.base, shownStep(g)!]" :key="x.filename" :src="viewUrl(x)" muted loop playsinline preload="metadata" @mouseenter="($event.target as HTMLVideoElement).play()" @mouseleave="($event.target as HTMLVideoElement).pause()" @click="openManual(gi)" />
+                  <div v-else-if="g.base && shownStep(g)" class="mmedia two" :style="shapeOf(g.base, true)">
+                    <video v-for="x in [g.base, shownStep(g)!]" :key="x.filename" :src="viewUrl(x)" muted loop playsinline preload="metadata" @mouseenter="($event.target as HTMLVideoElement).play()" @mouseleave="($event.target as HTMLVideoElement).pause()" @click="openManual(gi, x)" />
                   </div>
-                  <div v-else class="mmedia" @click="openManual(gi)">
+                  <div v-else class="mmedia" :style="shapeOf(shownStep(g) ?? g.base)" @click="openManual(gi, shownStep(g) ?? g.base)">
                     <video v-if="isVideo((shownStep(g) ?? g.base)!)" :src="viewUrl((shownStep(g) ?? g.base)!)" muted loop playsinline preload="metadata" @mouseenter="($event.target as HTMLVideoElement).play()" @mouseleave="($event.target as HTMLVideoElement).pause()" />
                     <img v-else :src="viewUrl((shownStep(g) ?? g.base)!)" loading="lazy" alt="" />
                   </div>
@@ -1052,8 +1058,10 @@ dd {
   gap: 8px;
 }
 .try-in {
+  display: block;
   width: 100%;
   resize: none;
+  overflow-y: auto;
   font: inherit;
   font-size: 13px;
   line-height: 1.5;
@@ -1100,11 +1108,7 @@ dd {
   background: var(--zen-surface-2);
   cursor: pointer;
 }
-.pair .mmedia:not(.two) {
-  aspect-ratio: 2 / 1;
-}
 .mmedia.two {
-  aspect-ratio: 2 / 1;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 2px;

@@ -168,3 +168,17 @@ a {
     scroll-behavior: auto !important;
   }
 }
+
+/* Themed, thin scrollbars everywhere (page, panels, textareas): never the browser's default.
+   scrollbar-width isn't inherited, so it goes on every element, at zero specificity so a
+   component that hides its scrollbar still wins. */
+html {
+  scrollbar-color: var(--zen-scrollbar, color-mix(in srgb, var(--zen-text) 24%, transparent)) transparent;
+}
+:where(*) {
+  scrollbar-width: thin;
+}
+textarea {
+  scrollbar-color: color-mix(in srgb, var(--zen-text) 28%, transparent) transparent;
+}
+
