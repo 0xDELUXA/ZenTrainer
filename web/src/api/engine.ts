@@ -30,6 +30,7 @@ export interface TrainSpec {
     edit_method?: string
     edit_template?: string
     edit_grounded?: boolean
+    keyframes?: string
     unmasked_weight: number
     /** videos: longest clip (snapped to the VAE), fps (0 = source), which windows, how many, size */
     video_frames: number

@@ -585,6 +585,15 @@ async function start(position: 'next' | 'end' = 'next') {
               <ZenField label="Stay inside a shot" stack tip="Finds hard cuts and keeps every clip within one shot. Leave off for edits where the cutting is the point (music videos)">
                 <div class="sw-row"><ZenSwitch :model-value="!!spec.dataset.video_avoid_cuts" @update:model-value="spec.dataset.video_avoid_cuts = $event" /><span class="sw-state">{{ spec.dataset.video_avoid_cuts ? 'Split at cuts' : 'Clips may cross cuts' }}</span></div>
               </ZenField>
+              <ZenField label="Image to video" stack tip="MiniMax H3 fl2va: each clip is conditioned on its own first frame (or first and last), as the model is at inference when you give it a start image. Trains the LoRA for image-to-video; samples use their input picture as the first frame">
+                <ZenCombo
+                  :model-value="spec.dataset.keyframes ?? ''"
+                  :items="items(['', 'first', 'first_last'], { '': 'Off: text to video', first: 'First frame', first_last: 'First and last frame' })"
+                  :searchable="false"
+                  :sorted="false"
+                  @update:model-value="spec.dataset.keyframes = String($event)"
+                />
+              </ZenField>
               <ZenField label="Train on sound" stack tip="Joint audio-video models (MiniMax H3): each clip's soundtrack joins the loss, so motion and cuts can learn the beat. Needs the model's audio VAE">
                 <div class="sw-row"><ZenSwitch :model-value="!!spec.dataset.video_audio" @update:model-value="spec.dataset.video_audio = $event" /><span class="sw-state">{{ spec.dataset.video_audio ? 'On' : 'Off' }}</span></div>
               </ZenField>
