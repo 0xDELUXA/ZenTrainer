@@ -477,3 +477,19 @@ def test_sharpest_frame_picks_the_detailed_one(tmp_path):
     video.write(path, torch.from_numpy(np.stack(frames)), 12)
     p = video.probe(path)
     assert abs(video.sharpest_frame(path, p, look=12) - 7) <= 0
+
+
+def test_image_flags_rules():
+    from zentrainer.dataset_stats import image_flags
+
+    ok = {"hash": 0, "bright": 0.5, "contrast": 0.2, "sharp": 10.0, "sat": 0.3, "border": 0.0}
+    looks = {
+        "a": ok,
+        "b": {**ok, "hash": 0b1, "bright": 0.08},              # dark, and a near-twin of a (1 bit)
+        "c": {**ok, "hash": 2**63 - 1, "sharp": 1.0},          # blurry against the set's median
+        "d": {**ok, "hash": 2**40 + 2**50 + 2**60 + 2**30 + 2**20 + 2**10 + 7, "border": 0.2, "sat": 0.01},
+    }
+    flags = image_flags(looks, {"a": 1024, "b": 1024, "c": 600, "d": 1024})
+    assert "dark" in flags["b"] and "near-duplicate" in flags["b"] and "near-duplicate" in flags["a"]
+    assert "blurry" in flags["c"] and "small" in flags["c"]
+    assert "bars" in flags["d"] and "greyscale" in flags["d"]
