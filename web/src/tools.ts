@@ -22,6 +22,14 @@ export const TOOLS: Tool[] = [
     accent: '#a855f7',
   },
   {
+    id: 'compact',
+    name: 'Compact a LoRA',
+    description: 'Shrink one LoRA to a smaller rank, keeping the share of each layer’s change you choose (Frobenius). Smaller files, faster to run, a little noise dropped.',
+    icon: 'mdi mdi-arrow-collapse-all',
+    category: 'loras',
+    accent: '#22c55e',
+  },
+  {
     id: 'split-videos',
     name: 'Split videos into clips',
     description: 'Cut a dataset’s long videos into short clips spread through each one, soundtrack kept. The originals move aside, so training uses the clips.',
