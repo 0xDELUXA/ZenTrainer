@@ -170,3 +170,15 @@ def test_lora_plus_groups_keep_their_ratio_through_set_lr():
     assert [g["lr"] for g in opt.param_groups] == [1e-4, 4e-4]
     optim.set_lr(opt, sched, 2e-4)
     assert [round(g["lr"], 12) for g in opt.param_groups] == [2e-4, 8e-4]
+
+
+def test_network_disabled_zeroes_then_restores():
+    import types
+
+    from zentrainer.harness.network import Network
+
+    p = torch.nn.Parameter(torch.ones(3))
+    net = types.SimpleNamespace(params={"a.lora_up.weight": p})
+    with Network.disabled(net):
+        assert torch.all(p == 0)
+    assert torch.all(p == 1)

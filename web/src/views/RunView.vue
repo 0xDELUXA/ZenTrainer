@@ -2,7 +2,7 @@
 // One run. Header with the controls; progress beside the latest samples; the loss and
 // validation curves; then samples as a prompt × step grid, so a prompt's row reads as
 // its training progression (click a cell to page through that row in the lightbox).
-import { ZenButton, ZenCombo, ZenLightbox, ZenModal, ZenNumber, ZenSlider } from '@nynxz/zenkit-ui'
+import { ZenButton, ZenCombo, ZenCompare, ZenLightbox, ZenModal, ZenNumber, ZenSlider, ZenSwitch } from '@nynxz/zenkit-ui'
 import type { LightboxItem } from '@nynxz/zenkit-ui'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -179,7 +179,11 @@ const valFirst = computed(() => detail.value?.validation[0])
 // ---- samples: prompt × step grid ---------------------------------------------------------------
 // the run's own samples (its prompts at its steps) vs one-off "Try a prompt" renders
 const runSamples = computed(() => (detail.value?.samples ?? []).filter((x) => !x.manual))
-const manualSamples = computed(() => (detail.value?.samples ?? []).filter((x) => x.manual).sort((a, b) => b.index - a.index))
+const manualSamples = computed(() => (detail.value?.samples ?? []).filter((x) => x.manual && !x.base).sort((a, b) => b.index - a.index))
+// each try: its render with the LoRA and, when asked for, the same prompt and seed without it
+const manualPairs = computed(() =>
+  manualSamples.value.map((x) => ({ lora: x, base: (detail.value?.samples ?? []).find((b) => b.manual && b.base && b.index === x.index) ?? null })),
+)
 const steps = computed(() => [...new Set(runSamples.value.map((x) => x.step))].sort((a, b) => a - b))
 const prompts = computed(() => {
   const by = new Map<number, string>()
@@ -210,10 +214,11 @@ const sampleView = ref<'latest' | 'grid' | 'manual'>('latest')
 const tryPrompt = ref('')
 const trySize = ref('')
 const tryFrames = ref<number | null>(null)
+const tryBase = ref(true)
 async function renderTry() {
   if (!tryPrompt.value.trim()) return
   const [w, h] = trySize.value ? trySize.value.split('x').map(Number) : [undefined, undefined]
-  await send('sample', { prompt: tryPrompt.value.trim(), width: w, height: h, frames: tryFrames.value ?? undefined })
+  await send('sample', { prompt: tryPrompt.value.trim(), width: w, height: h, frames: tryFrames.value ?? undefined, base: tryBase.value })
 }
 const trySizes = computed(() => {
   const sp = detail.value?.spec.samples
@@ -361,7 +366,10 @@ const sampleAspect = computed(() => {
   return sp?.width && sp?.height ? `${sp.width} / ${sp.height}` : '1'
 })
 function openManual(i: number) {
-  lb.value = { items: manualSamples.value.map(sampleItem), index: i }
+  // the viewer pages through every try; a pair shows as two, base first
+  const flat = manualPairs.value.flatMap((p) => (p.base ? [p.base, p.lora] : [p.lora]))
+  const at = manualPairs.value.slice(0, i).reduce((n, p) => n + (p.base ? 2 : 1), 0)
+  lb.value = { items: flat.map((x) => ({ ...sampleItem(x), label: x.base ? 'Without the LoRA' : `Step ${x.step}` })), index: at }
 }
 const isVideo = (x: SampleRow) => /\.(mp4|webm)$/i.test(x.filename)
 const sampleItem = (x: SampleRow): LightboxItem => ({
@@ -533,16 +541,26 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
                 <div class="try-opts">
                   <ZenCombo v-model="trySize" :items="trySizes" :sorted="false" :searchable="false" size="sm" />
                   <ZenNumber v-if="(detail.spec.samples.frames ?? 1) > 1" :model-value="tryFrames ?? detail.spec.samples.frames ?? 1" :min="1" :max="361" :step="17" :precision="0" size="sm" title="Frames" @update:model-value="tryFrames = $event" />
+                  <label class="base-sw small" title="Also render the same prompt and seed without the LoRA, to compare"><ZenSwitch v-model="tryBase" size="sm" /> Compare with base</label>
                   <ZenButton size="sm" variant="primary" icon="mdi mdi-creation-outline" :disabled="!!busy || status !== 'training' || !tryPrompt.trim() || !!sampling" :title="status !== 'training' ? 'Only while it trains' : 'Ctrl+Enter'" @click="renderTry">Render</ZenButton>
                 </div>
               </div>
               <div v-if="!manualSamples.length" class="muted small empty-manual">Prompts you try here render with the LoRA as it is now, at the step it's on. They don't join the run's samples.</div>
               <div class="mtiles">
-                <button v-for="(x, i) in manualSamples" :key="x.filename" class="mtile" @click="openManual(i)">
-                  <video v-if="isVideo(x)" :src="viewUrl(x)" muted loop playsinline preload="metadata" @mouseenter="($event.target as HTMLVideoElement).play()" @mouseleave="($event.target as HTMLVideoElement).pause()" />
-                  <img v-else :src="viewUrl(x)" loading="lazy" alt="" />
-                  <span class="mcap"><b class="mono">step {{ x.step }}</b> {{ x.prompt }}</span>
-                </button>
+                <div v-for="(pr, i) in manualPairs" :key="pr.lora.filename" class="mtile" :class="{ pair: pr.base }">
+                  <!-- with a base render: images as a before/after slider, videos side by side -->
+                  <div v-if="pr.base && !isVideo(pr.lora)" class="mmedia" @click="openManual(i)">
+                    <ZenCompare :before="viewUrl(pr.base)" :after="viewUrl(pr.lora)" before-label="No LoRA" :after-label="`Step ${pr.lora.step}`" />
+                  </div>
+                  <div v-else-if="pr.base" class="mmedia two">
+                    <video v-for="x in [pr.base, pr.lora]" :key="x.filename" :src="viewUrl(x)" muted loop playsinline preload="metadata" @mouseenter="($event.target as HTMLVideoElement).play()" @mouseleave="($event.target as HTMLVideoElement).pause()" @click="openManual(i)" />
+                  </div>
+                  <div v-else class="mmedia" @click="openManual(i)">
+                    <video v-if="isVideo(pr.lora)" :src="viewUrl(pr.lora)" muted loop playsinline preload="metadata" @mouseenter="($event.target as HTMLVideoElement).play()" @mouseleave="($event.target as HTMLVideoElement).pause()" />
+                    <img v-else :src="viewUrl(pr.lora)" loading="lazy" alt="" />
+                  </div>
+                  <span class="mcap"><b class="mono">{{ pr.base ? `no LoRA / step ${pr.lora.step}` : `step ${pr.lora.step}` }}</b> {{ pr.lora.prompt }}</span>
+                </div>
               </div>
             </div>
             <div v-else-if="sampleView === 'latest'" class="tiles" :style="{ '--cols': latestCols, '--ar': sampleAspect }">
@@ -1022,21 +1040,43 @@ dd {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  border: none;
-  background: none;
-  padding: 0;
-  text-align: left;
-  color: var(--zen-text);
+  min-width: 0;
+}
+.mtile.pair {
+  grid-column: span 2;
+}
+.mmedia {
+  aspect-ratio: 1;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--zen-surface-2);
   cursor: pointer;
 }
-.mtile img,
-.mtile video {
+.pair .mmedia:not(.two) {
+  aspect-ratio: 2 / 1;
+}
+.mmedia.two {
+  aspect-ratio: 2 / 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+}
+.mmedia img,
+.mmedia video {
   width: 100%;
-  aspect-ratio: 1;
+  height: 100%;
   object-fit: contain;
-  border-radius: var(--r-md);
-  background: var(--zen-surface-2);
   display: block;
+}
+.mmedia :deep(.zen-compare img) {
+  object-fit: contain;
+}
+.base-sw {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--zen-muted);
+  white-space: nowrap;
 }
 .mcap {
   font-size: 11px;

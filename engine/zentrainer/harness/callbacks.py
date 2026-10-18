@@ -241,7 +241,7 @@ class Samples(Callback):
         return conds
 
     def render_manual(self, t, prompt: str, width: int | None = None, height: int | None = None,
-                      frames: int | None = None, seed: int | None = None) -> list[dict]:
+                      frames: int | None = None, seed: int | None = None, base: bool = False) -> list[dict]:
         """One sample of any prompt at the current step ("Try a prompt"): rendered like the
         run's samples but kept apart from them (manual rows, their own files)."""
         from ..spec import SamplePrompt
@@ -255,13 +255,17 @@ class Samples(Callback):
             conds = self._encode_texts(t, [text], apply_trigger(s.negative, trig, False))
         if hasattr(t, "_drop_text_encoder"):
             t._drop_text_encoder()  # don't keep a big encoder beside training for one prompt
-        n = sum(1 for _ in Path(_out_dir(t)).glob("manual_*"))
+        n = len({f.name.split("_")[1] for f in Path(_out_dir(t)).glob("manual_*")})
         item = SamplePrompt(prompt, width or s.width, height or s.height, frames or s.frames,
                             int(time.time()) % 100000 if seed is None else seed)
         saved = (self.items, self.prompts, self._conds)
         self.items, self.prompts, self._conds = [item], [text], conds
         try:
-            return self.render(t, manual=n)
+            rows = []
+            if base:  # the same prompt and seed without the LoRA first, to compare against
+                with t.network.disabled():
+                    rows += self.render(t, manual=n, base=True)
+            return rows + self.render(t, manual=n)
         finally:
             self.items, self.prompts, self._conds = saved
 
@@ -269,7 +273,7 @@ class Samples(Callback):
         if self.every and t.step % self.every == 0:
             self.render(t)
 
-    def render(self, t: Trainer, manual: int | None = None) -> list[dict]:
+    def render(self, t: Trainer, manual: int | None = None, base: bool = False) -> list[dict]:
         if self._conds is None:
             self.on_start(t)
         if not self._conds:
@@ -352,10 +356,10 @@ class Samples(Callback):
                     if t_lat:
                         from . import video
 
-                        name = f"manual_{manual:03d}_step{t.step:06d}.mp4" if manual is not None else f"step{t.step:06d}_{i:02d}.mp4"
+                        name = f"manual_{manual:03d}_{'base' if base else f'step{t.step:06d}'}.mp4" if manual is not None else f"step{t.step:06d}_{i:02d}.mp4"
                         video.write(Path(out_dir) / name, img, s.fps, _sound(t, out))
                     else:
-                        name = f"manual_{manual:03d}_step{t.step:06d}.png" if manual is not None else f"step{t.step:06d}_{i:02d}.png"
+                        name = f"manual_{manual:03d}_{'base' if base else f'step{t.step:06d}'}.png" if manual is not None else f"step{t.step:06d}_{i:02d}.png"
                         Image.fromarray((img[0].clamp(0, 1).cpu().numpy() * 255).astype("uint8")).save(
                             os.path.join(out_dir, name))
                     if t.step == 0 and manual is None:
@@ -366,7 +370,8 @@ class Samples(Callback):
                         "model": s.model_name or None,
                     }
                     if manual is not None:
-                        row.update(manual=True, index=manual, width=self.items[i].width, height=self.items[i].height)
+                        row.update(manual=True, index=manual, width=self.items[i].width, height=self.items[i].height,
+                                   seed=self.items[i].seed, base=base)
                     # recorded as each one lands, so the UI swaps that tile now, not after the pass
                     rows.append(row)
                     t.emit(events.SAMPLE, row)

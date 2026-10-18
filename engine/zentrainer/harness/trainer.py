@@ -492,7 +492,7 @@ class Trainer:
                 if cmd.args.get("prompt"):  # "Try a prompt": one sample, kept apart from the run's
                     a = cmd.args
                     self._samples.render_manual(self, str(a["prompt"]), a.get("width"), a.get("height"),
-                                                a.get("frames"), a.get("seed"))
+                                                a.get("frames"), a.get("seed"), bool(a.get("base")))
                 else:
                     self._samples.render(self)
             elif cmd.name == "set_lr":

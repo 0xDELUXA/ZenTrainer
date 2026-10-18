@@ -11,6 +11,7 @@ must not move the parameters the optimizer holds state for.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
 
@@ -248,6 +249,22 @@ class Network:
     @assist.setter
     def assist(self, on: bool) -> None:
         self._switch.on = on
+
+    @contextlib.contextmanager
+    def disabled(self):
+        """The base model for a moment (a "without the LoRA" sample): every trained tensor is
+        zeroed, which makes each adapter add nothing (LoRA, LoHa, LoKr, OFT, diffs), then
+        restored exactly."""
+        saved = {k: p.detach().clone() for k, p in self.params.items()}
+        try:
+            with torch.no_grad():
+                for p in self.params.values():
+                    p.zero_()
+            yield
+        finally:
+            with torch.no_grad():
+                for k, p in self.params.items():
+                    p.copy_(saved[k])
 
     def trainable(self) -> list[torch.nn.Parameter]:
         return [p for p in self.params.values() if p.requires_grad]

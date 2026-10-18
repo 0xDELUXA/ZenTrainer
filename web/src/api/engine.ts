@@ -182,6 +182,9 @@ export interface SampleRow {
   model?: string | null
   /** a "Try a prompt" render, apart from the run's samples (index counts them) */
   manual?: boolean
+  /** a manual render without the LoRA, to compare with the one at the same index */
+  base?: boolean
+  seed?: number
 }
 
 export interface RunDetail {
