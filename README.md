@@ -77,7 +77,23 @@ nodes can't break a training run. Your models stay where they are, read through
 `extra_model_paths.yaml`. Themes come from [ZenKit](https://github.com/Nynxz/ZenKit), so it matches
 the rest of your setup.
 
-## Run it
+## Install
+
+Two ways in, same engine:
+
+**Into your ComfyUI, as a node pack** (the simple way). Install ZenTrainer from ComfyUI Manager or
+the Registry, or clone this repository into `ComfyUI/custom_nodes/`, then restart ComfyUI and open
+`/zentrainer/` on its port (e.g. http://127.0.0.1:8188/zentrainer/). It uses that ComfyUI's
+models, `input/` and `output/`; it needs ComfyUI 0.41 or newer and says so if yours is older.
+Nothing extra to install: everything it needs ships with ComfyUI (optional optimizers:
+`pip install -r requirements-optional.txt`). A Registry/Manager install includes the built app; a
+git clone needs it built once (`cd web && pnpm install && pnpm build`).
+
+**Its own pinned ComfyUI, with `scripts/zt`** (for keeping training separate, below): a
+dedicated ComfyUI at the tested commit with its own venv, reading your existing models in place.
+Updating your main ComfyUI or its custom nodes can't break a run.
+
+## Run it (scripts/zt)
 
 ```sh
 scripts/zt setup --models-from /path/to/your/ComfyUI   # clone pinned ComfyUI, install, link the engine
