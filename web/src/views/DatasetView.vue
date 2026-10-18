@@ -4,7 +4,7 @@
 // to upload: images, same-name .txt captions, and masks (<name>-masklabel.png).
 import { ZenButton, ZenCombo, ZenCompare, ZenContextMenu, ZenEmpty, ZenInput, ZenLightbox, ZenSlider, ZenSwitch } from '@nynxz/zenkit-ui'
 import type { ContextMenuItem, LightboxItem } from '@nynxz/zenkit-ui'
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { engine, thumbUrl, viewUrl, type CaptionJob, type DatasetFaces, type DatasetItem } from '@/api/engine'
 import { activeCaptions } from '@/captions'
@@ -30,6 +30,33 @@ const zoom = ref<number>(saved.zoom ?? 200)
 const fit = ref<'cover' | 'contain'>(saved.fit ?? 'cover')
 const showMasks = ref<boolean>(saved.masks ?? false) // dim what each mask leaves out, on the grid
 const sideOpen = ref<boolean>(saved.side ?? true) // the side panel: health, faces, auto-caption, bulk edit, display
+// the side panel changes the grid's columns: the cards on screen glide to their new places (FLIP)
+// instead of jumping there
+async function toggleSide() {
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  const vh = window.innerHeight
+  const cards = reduce ? [] : [...document.querySelectorAll<HTMLElement>('.ds-main .card-item')]
+  const before = new Map<HTMLElement, DOMRect>()
+  for (const el of cards) {
+    const r = el.getBoundingClientRect()
+    if (r.bottom > -100 && r.top < vh + 100) before.set(el, r)
+  }
+  sideOpen.value = !sideOpen.value
+  await nextTick()
+  for (const [el, a] of before) {
+    const b = el.getBoundingClientRect()
+    if (!b.width || !b.height) continue
+    const dx = a.left - b.left
+    const dy = a.top - b.top
+    const sx = a.width / b.width
+    const sy = a.height / b.height
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(sx - 1) < 0.01) continue
+    el.animate(
+      [{ transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})` }, { transform: 'none' }],
+      { duration: 240, easing: 'cubic-bezier(0.2, 0.7, 0.2, 1)' },
+    )
+  }
+}
 watch([view, zoom, fit, showMasks, sideOpen], () => {
   try {
     localStorage.setItem(PREFS, JSON.stringify({ view: view.value, zoom: zoom.value, fit: fit.value, masks: showMasks.value, side: sideOpen.value }))
@@ -477,7 +504,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
         <ZenCombo v-model="filter" :items="filterItems" :sorted="false" :searchable="false" size="sm" />
       </div>
       <div class="search"><ZenInput v-model="query" placeholder="Search captions or names" size="sm" /></div>
-      <button class="icon-btn" :class="{ on: sideOpen }" :title="sideOpen ? 'Hide the side panel' : 'Show the side panel: health, faces, auto-caption, bulk edit, display'" @click="sideOpen = !sideOpen">
+      <button class="icon-btn" :class="{ on: sideOpen }" :title="sideOpen ? 'Hide the side panel' : 'Show the side panel: health, faces, auto-caption, bulk edit, display'" @click="toggleSide">
         <i class="mdi mdi-dock-right" />
       </button>
     </div>
@@ -1014,7 +1041,19 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
   gap: 12px;
   align-items: start;
 }
+@keyframes side-in {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ds-side {
+    animation: none;
+  }
+}
 .card-item {
+  transform-origin: top left;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -1022,10 +1061,13 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
   border: 1px solid color-mix(in srgb, var(--zen-border) 70%, transparent);
   background: color-mix(in srgb, var(--zen-surface) 60%, transparent);
   overflow: hidden;
-  transition: border-color 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
+/* hover in the primary colour, softer than a selection's full accent ring */
 .card-item:hover {
-  border-color: var(--zen-muted);
+  border-color: color-mix(in srgb, var(--zen-accent) 60%, transparent);
 }
 .card-item.sel {
   border-color: var(--zen-accent);
@@ -1592,6 +1634,7 @@ dd {
 }
 .ds-side {
   /* scrolls with the page: no scrollbar of its own */
+  animation: side-in 0.24s cubic-bezier(0.2, 0.7, 0.2, 1);
   display: flex;
   flex-direction: column;
   gap: 10px;
