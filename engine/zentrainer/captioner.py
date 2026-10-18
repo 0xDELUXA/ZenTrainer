@@ -142,28 +142,42 @@ def update(job: CaptionJob, **kw) -> None:
 
 
 GENERIC_TYPE = "stable_diffusion"  # CLIPLoader type that loads a Qwen-VL file as the stock chat model
-_vision_cache: dict[str, tuple[float, bool]] = {}
+_senses_cache: dict[str, tuple[float, tuple[bool, bool]]] = {}
 
 
-def _has_vision(path: str) -> bool:
-    """Whether a text encoder file carries a vision tower (it can see the picture): read from
-    its safetensors header, cached by mtime."""
+def _senses(path: str) -> tuple[bool, bool]:
+    """Whether a text encoder file carries a vision tower (it can see the picture) and an audio
+    one (it can hear a video's sound: Gemma 4 E2B/E4B/12B): read from its safetensors header,
+    cached by mtime."""
     import os
     import struct
 
     try:
         mtime = os.path.getmtime(path)
-        hit = _vision_cache.get(path)
+        hit = _senses_cache.get(path)
         if hit and hit[0] == mtime:
             return hit[1]
         with open(path, "rb") as f:
             n = struct.unpack("<Q", f.read(8))[0]
             header = f.read(min(n, 64 << 20)).decode("utf-8", "replace")
-        ok = '"model.visual.' in header or '"visual.' in header
-        _vision_cache[path] = (mtime, ok)
-        return ok
+        hears = any(k in header for k in ('"audio_model.', '"audio_tower.'))
+        # Qwen-VL towers, or Gemma 4's (told apart from Gemma 3, whose chat format isn't wired, by its audio tower)
+        sees = '"model.visual.' in header or '"visual.' in header or (hears and '"vision_model.' in header)
+        _senses_cache[path] = (mtime, (sees, hears))
+        return sees, hears
     except (OSError, struct.error):
-        return False
+        return False, False
+
+
+def _has_vision(path: str) -> bool:
+    return _senses(path)[0]
+
+
+def hearing_models() -> list[str]:
+    """The captioning models that also hear a video's soundtrack."""
+    import folder_paths
+
+    return [n for n in models() if (p := folder_paths.get_full_path("text_encoders", n)) and _senses(p)[1]]
 
 
 def models() -> list[str]:
@@ -250,8 +264,14 @@ VIDEO_NOTE = (f"These are {VIDEO_FRAMES} frames, in order, from one short video 
               "overlays, text, effects), if it is. Treat \"image\" in what follows as the clip.\n")
 
 
-def instruction(job: CaptionJob, is_video: bool = False) -> str:
-    text = (VIDEO_NOTE if is_video else "") + job.prompt
+SOUND_NOTE = ("This is a short video clip, with its soundtrack. Describe the clip as a whole: what is in it, how "
+              "it moves (subject and camera) and how it is edited (cuts, split screens, overlays, text, effects). "
+              "Also describe what you hear: the music (genre, tempo, energy, drops), voices or other sounds, and how "
+              "the cuts and motion follow the beat. Treat \"image\" in what follows as the clip.\n")
+
+
+def instruction(job: CaptionJob, is_video: bool = False, hears: bool = False) -> str:
+    text = (SOUND_NOTE if is_video and hears else VIDEO_NOTE if is_video else "") + job.prompt
     if not job.subject:
         return text
     return (f"{text}\nRefer to the main subject as \"{job.subject}\" (exactly that, not a description "
@@ -287,6 +307,7 @@ def run(job: CaptionJob) -> None:
     """Caption the job's images. Runs inside a ComfyUI prompt."""
     import comfy.model_management as mm
     import comfy.utils
+    import folder_paths
     import nodes
     import torch
 
@@ -318,13 +339,22 @@ def run(job: CaptionJob) -> None:
             if not hasattr(clip, "generate"):
                 raise RuntimeError(f"{job.clip_name} can't generate text; pick a vision-language model (Qwen-VL, Gemma)")
             from .harness import video
+            # Gemma 4 takes a clip as a timestamped video and can hear it (its own chat template
+            # carries the media tokens); the others see VIDEO_FRAMES stills
+            gemma4 = "gemma4" in getattr(clip.tokenizer, "clip_name", "")
+            hears = gemma4 and _senses(folder_paths.get_full_path("text_encoders", job.clip_name) or "")[1]
+            if hears:
+                log(job, "this model hears: videos are captioned with their sound")
             pbar = comfy.utils.ProgressBar(len(items))
             for it in items:
                 if job.status != "running":  # cancelled
                     break
                 is_video = video.is_video(it.path)
-                image = _picture(it.path)  # (1 or VIDEO_FRAMES, H, W, 3) in [0, 1]
-                tokens = clip.tokenize(instruction(job, is_video), image=image, min_length=1)
+                if gemma4:
+                    tokens = _gemma4_tokens(clip, job, it.path, is_video, hears)
+                else:
+                    image = _picture(it.path)  # (1 or VIDEO_FRAMES, H, W, 3) in [0, 1]
+                    tokens = clip.tokenize(instruction(job, is_video), image=image, min_length=1)
                 ids = clip.generate(tokens, do_sample=False, max_length=job.max_length)
                 text = clean(clip.decode(ids))
                 rel = str(it.path.relative_to(root))
@@ -351,6 +381,30 @@ def run(job: CaptionJob) -> None:
             raise
     finally:
         _comfy_compiler(True)
+
+
+GEMMA_FPS = 2  # frames a second Gemma 4 sees of a clip (it subsamples whatever it's given to `fps`)
+
+
+def _gemma4_tokens(clip, job: CaptionJob, path: Path, is_video: bool, hears: bool):
+    """Gemma 4's prompt: the picture, or the clip as frames at GEMMA_FPS with its soundtrack."""
+    from .harness import video
+
+    if not is_video:
+        return clip.tokenize(instruction(job), image=_picture(path), skip_template=False, min_length=1)
+    p = video.probe(path)
+    n = max(p.frames, 1)
+    step = max(1.0, p.fps / GEMMA_FPS)
+    idx = sorted({min(n - 1, round(i * step)) for i in range(max(1, int(n / step)))})[:40]
+    w, h = p.width, p.height
+    scale = min(1.0, 640 / max(w, h))
+    frames = video.read(path, idx, (max(32, round(w * scale / 32) * 32), max(32, round(h * scale / 32) * 32)))
+    sound = None
+    if hears and (got := video.read_audio(path, 0.0, n / p.fps)) is not None:
+        wave, sr = got
+        sound = {"waveform": wave[None], "sample_rate": sr}
+    return clip.tokenize(instruction(job, True, sound is not None), video=frames, fps=1, audio=sound,
+                         skip_template=False, min_length=1)
 
 
 def _picture(path: Path):

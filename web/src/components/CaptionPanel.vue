@@ -13,6 +13,8 @@ const emit = defineEmits<{ changed: [set: string]; review: [job: CaptionJob] }>(
 
 const styles = ref<CaptionStyle[]>([])
 const models = ref<string[]>([])
+const hearing = ref<string[]>([]) // models that also hear a video's soundtrack (Gemma 4)
+const hasVideo = computed(() => props.items.some((it) => it.kind === 'video'))
 const jobs = ref<CaptionJob[]>([])
 const error = ref<string | null>(null)
 const PREFS = 'zentrainer.caption'
@@ -42,6 +44,7 @@ onMounted(async () => {
   const info = await engine.captionInfo(props.dataset)
   styles.value = info.styles
   models.value = info.models // loadable only, vision-language first
+  hearing.value = info.hearing ?? []
   jobs.value = info.jobs.filter((j) => !j.preview)
   preview.value = info.jobs.find((j) => j.preview) ?? null // a try-on still running, or just done
   if (!models.value.includes(form.clip_name))
@@ -196,7 +199,22 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
   <div class="cp card">
     <div class="row">
       <label class="f model"><span class="eyebrow">Model</span>
-        <ZenCombo v-model="form.clip_name" :items="models.map((n) => ({ value: n, label: n }))" :sorted="false" :item-height="30" placeholder="A vision-language model (Qwen-VL, Qwen3.5)" size="sm" />
+        <ZenCombo
+          v-model="form.clip_name"
+          :items="models.map((n) => ({ value: n, label: hearing.includes(n) ? `${n} · hears sound` : n }))"
+          :sorted="false"
+          :item-height="30"
+          placeholder="A vision-language model (Qwen-VL, Qwen3.5, Gemma 4)"
+          size="sm"
+        />
+        <button
+          v-if="hasVideo && hearing.length && !hearing.includes(form.clip_name)"
+          class="hear-tip"
+          :title="`${hearing[0]} hears each clip's soundtrack too: captions can describe the music and how the edit follows the beat`"
+          @click="form.clip_name = hearing[0]!"
+        >
+          <i class="mdi mdi-music-note" /> Caption with sound
+        </button>
       </label>
       <div class="f"><span class="eyebrow">Style</span>
         <div class="seg">
@@ -478,5 +496,19 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.hear-tip {
+  margin-top: 4px;
+  align-self: flex-start;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 11px;
+  color: var(--zen-accent);
+  cursor: pointer;
+}
+.hear-tip:hover {
+  text-decoration: underline;
 }
 </style>
