@@ -543,12 +543,15 @@ def cmd_control(a) -> None:
 
 
 def cmd_resume(a) -> None:
-    if a.set:  # settings that may change before it continues (memory, samples, LR, length...)
-        spec = _apply_sets(_api(a, "GET", f"/runs/{a.run}")["spec"], a.set)
-        _api(a, "PUT", f"/runs/{a.run}/spec", {"spec": spec})
     _ensure_server(a)
-    _api(a, "POST", f"/runs/{a.run}/resume", {})
-    say(f"resumed {a.run}")
+    d = _api(a, "GET", f"/runs/{a.run}")
+    if a.set:  # settings that may change before it continues (memory, samples, LR, length...)
+        _api(a, "PUT", f"/runs/{a.run}/spec", {"spec": _apply_sets(d["spec"], a.set)})
+    if d["run"].get("status") == "queued":  # waiting its turn already: the edit is all it needs
+        say(f"{a.run} is queued; settings updated")
+    else:
+        _api(a, "POST", f"/runs/{a.run}/resume", {})
+        say(f"resumed {a.run}")
     if a.follow:
         _follow(a, a.run)
 
