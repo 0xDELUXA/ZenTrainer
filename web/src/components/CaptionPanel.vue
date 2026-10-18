@@ -6,7 +6,7 @@ import { ZenButton, ZenCombo, ZenInput, ZenNumber } from '@nynxz/zenkit-ui'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { onComfyMessage } from '@/api/comfy'
 import { setSetting, settings } from '@/settings'
-import { EVENTS, EngineError, engine, thumbUrl, type CaptionJob, type CaptionMode, type CaptionStyle, type DatasetItem, type ModelSenses } from '@/api/engine'
+import { EVENTS, EngineError, engine, thumbUrl, type CaptionJob, type CaptionLora, type CaptionMode, type CaptionStyle, type DatasetItem, type ModelSenses } from '@/api/engine'
 
 const props = defineProps<{ dataset: string; items: DatasetItem[]; sets: string[]; selected: string[] }>()
 const emit = defineEmits<{ changed: [set: string]; review: [job: CaptionJob] }>()
@@ -60,6 +60,32 @@ watch(
   },
   { deep: true },
 )
+// the catalog's LoRAs that fit the selected model
+const catalog = ref<CaptionLora[]>([])
+const suggested = computed(() => catalog.value.filter((e) => new RegExp(e.base, 'i').test(form.clip_name)))
+const sizeOf = (n: number) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(n / 1e6))} MB`)
+const isOn = (e: CaptionLora) => loras.value.some((l) => l.name.split('/').at(-1) === e.file.split('/').at(-1))
+async function useSuggested(e: CaptionLora) {
+  if (isOn(e)) {
+    loras.value = loras.value.filter((l) => l.name.split('/').at(-1) !== e.file.split('/').at(-1))
+    return
+  }
+  if (e.installed) {
+    loras.value.push({ name: e.installed, strength: 1 })
+    return
+  }
+  loraNote.value = ''
+  try {
+    const r = await engine.addCaptionLora('', undefined, e.id)
+    if (r.name) {
+      if (!teLoras.value.includes(r.name)) teLoras.value = [...teLoras.value, r.name]
+      loras.value.push({ name: r.name, strength: 1 })
+      loraNote.value = `downloading ${e.label} (${sizeOf(e.size)}): ready when the download finishes`
+    }
+  } catch (err) {
+    loraNote.value = err instanceof Error ? err.message : String(err)
+  }
+}
 const addLora = () => loras.value.push({ name: teLoras.value.find((n) => !loras.value.some((l) => l.name === n)) ?? '', strength: 1 })
 async function fetchLora(file?: string) {
   loraNote.value = ''
@@ -112,6 +138,7 @@ onMounted(async () => {
   hearing.value = info.hearing ?? []
   senses.value = info.senses ?? {}
   teLoras.value = info.loras ?? []
+  catalog.value = info.lora_catalog ?? []
   jobs.value = info.jobs.filter((j) => !j.preview)
   preview.value = info.jobs.find((j) => j.preview) ?? null // a try-on still running, or just done
   if (!models.value.includes(form.clip_name))
@@ -307,6 +334,13 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
             <button class="hear-tip" title="Patch the captioning model with a text-encoder LoRA (captioning only, never training)" @click="addLora"><i class="mdi mdi-plus" /> LoRA</button>
             <ZenInput v-model="loraLink" placeholder="or a Hugging Face link" size="sm" @keydown.enter="fetchLora()" />
             <ZenButton v-if="loraLink" size="sm" icon="mdi mdi-download-outline" @click="fetchLora()">Get</ZenButton>
+          </div>
+          <div v-if="suggested.length" class="suggested">
+            <span class="muted small">For this model:</span>
+            <button v-for="e in suggested" :key="e.id" class="chip-s" :class="{ on: isOn(e) }" :title="`${e.note}. ${e.repo}`" @click="useSuggested(e)">
+              <i :class="isOn(e) ? 'mdi mdi-check' : e.installed ? 'mdi mdi-plus' : 'mdi mdi-download-outline'" />
+              {{ e.label }}<span v-if="!e.installed" class="muted"> · {{ sizeOf(e.size) }}</span>
+            </button>
           </div>
           <div v-if="loraChoices.length" class="choices">
             <button v-for="c in loraChoices" :key="c.file" class="hear-tip" @click="fetchLora(c.file)">{{ c.file }}</button>
@@ -615,6 +649,29 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
 .lora-add > :nth-child(2) {
   flex: 1;
   min-width: 0;
+}
+.suggested {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.chip-s {
+  font: inherit;
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--zen-border) 85%, transparent);
+  background: none;
+  color: var(--zen-text);
+  cursor: pointer;
+}
+.chip-s:hover,
+.chip-s.on {
+  border-color: var(--zen-accent);
+}
+.chip-s.on i {
+  color: var(--zen-accent);
 }
 .choices {
   display: flex;

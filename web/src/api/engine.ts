@@ -236,6 +236,20 @@ export interface DatasetInfo {
   thumbs: { subfolder: string; filename: string; path?: string }[]
 }
 
+/** a curated captioning LoRA (engine captioner.TE_LORA_CATALOG) */
+export interface CaptionLora {
+  id: string
+  label: string
+  repo: string
+  file: string
+  size: number
+  /** regex on the captioning model's file name: the base it was extracted from */
+  base: string
+  note: string
+  /** its loras/ name when downloaded */
+  installed: string | null
+}
+
 /** what a captioning model takes in (engine captioner.model_senses) */
 export interface ModelSenses {
   image: boolean
@@ -672,10 +686,10 @@ export const engine = {
       method: 'POST',
       body: JSON.stringify({ link, family, file }),
     }),
-  addCaptionLora: (link: string, file?: string) =>
+  addCaptionLora: (link: string, file?: string, id?: string) =>
     call<{ download?: ModelDownload; name?: string; choices?: { file: string; size: number | null }[]; repo?: string }>('/caption/loras', {
       method: 'POST',
-      body: JSON.stringify({ link, file }),
+      body: JSON.stringify({ link, file, id }),
     }),
   downloadAdapter: (id: string) => call<ModelDownload>('/adapters/download', { method: 'POST', body: JSON.stringify({ id }) }),
   removeAdapter: (id: string) => call<{ removed: boolean }>(`/adapters?id=${encodeURIComponent(id)}`, { method: 'DELETE' }),
@@ -745,7 +759,7 @@ export const engine = {
   bulkCaptions: (name: string, op: 'prefix' | 'suffix' | 'replace', text: string, find = '', set = 'default') =>
     call<{ changed: number }>(`${dsPath(name)}/bulk`, { method: 'POST', body: JSON.stringify({ op, text, find, set }) }),
   captionInfo: (dataset?: string) =>
-    call<{ styles: CaptionStyle[]; models: string[]; hearing?: string[]; loras?: string[]; senses?: Record<string, ModelSenses>; jobs: CaptionJob[] }>(`/caption${dataset ? `?dataset=${encodeURIComponent(dataset)}` : ''}`),
+    call<{ styles: CaptionStyle[]; models: string[]; hearing?: string[]; loras?: string[]; lora_catalog?: CaptionLora[]; senses?: Record<string, ModelSenses>; jobs: CaptionJob[] }>(`/caption${dataset ? `?dataset=${encodeURIComponent(dataset)}` : ''}`),
   startCaption: (name: string, body: CaptionRequest) =>
     call<{ job: CaptionJob }>(`${dsPath(name)}/caption`, { method: 'POST', body: JSON.stringify({ ...body, client_id: getClientId() }) }),
   captionJobs: () => call<{ jobs: CaptionJob[] }>('/caption?all=1').then((r) => r.jobs),

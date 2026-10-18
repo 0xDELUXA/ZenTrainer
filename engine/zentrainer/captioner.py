@@ -417,6 +417,39 @@ def _with_loras(clip, job: CaptionJob):
 
 
 TE_LORA_SUBDIR = "text_encoder_loras"
+
+# LoRAs worth having on a captioner, each for the base it was extracted from (matched against
+# the selected model's file name). Add one: an entry here.
+TE_LORA_CATALOG = [
+    {"id": "qwen3vl-8b-abliterated-v3", "label": "Abliterated v3", "repo": "nynxz/Qwen3-VL-8B-ComfyUI",
+     "file": "loras/qwen3vl-8b-c_abliterated-v3_lora_rank1_fp32.safetensors", "size": 3559416,
+     "base": r"qwen3[-_.]?vl[-_]?8b", "note": "Describes everything it sees instead of refusing or softening it"},
+    {"id": "qwen3vl-8b-h3-rewriter", "label": "MiniMax H3 prompt style", "repo": "nynxz/Qwen3-VL-8B-ComfyUI",
+     "file": "loras/minimax-h3-prompt-rewriter-8b_lora_rank256_bf16.safetensors", "size": 1396778384,
+     "base": r"qwen3[-_.]?vl[-_]?8b", "note": "Writes in the style of H3's own prompts: captions for H3 training"},
+    {"id": "qwen35-9b-uncensored", "label": "Uncensored", "repo": "nynxz/Qwen3.5-9b",
+     "file": "loras/qwen35-9b-hauhaucs_uncensored_lora_rank4_fp32.safetensors", "size": 14044264,
+     "base": r"qwen3\.?5[-_]9b", "note": "Describes everything it sees instead of refusing or softening it"},
+]
+
+
+def te_lora_catalog() -> list[dict]:
+    """The catalog with where each one is if it's already downloaded (its loras/ name)."""
+    have = {Path(n).name: n for n in te_loras()}
+    return [{**e, "installed": have.get(Path(e["file"]).name)} for e in TE_LORA_CATALOG]
+
+
+def download_te_lora(entry_id: str) -> dict:
+    """Download a catalog LoRA into loras/text_encoder_loras/."""
+    from . import downloads
+
+    e = next((e for e in TE_LORA_CATALOG if e["id"] == entry_id), None)
+    if e is None:
+        raise ValueError(f"no catalog LoRA {entry_id!r}")
+    name = Path(e["file"]).name
+    url = f"https://huggingface.co/{e['repo']}/resolve/main/{e['file']}"
+    job = downloads.manager().enqueue("caption", "loras", name, url, downloads.target_dir("loras") / TE_LORA_SUBDIR, e["size"])
+    return {"download": job.public(), "name": f"{TE_LORA_SUBDIR}/{name}"}
 _te_cache: dict[str, tuple[float, bool]] = {}
 
 

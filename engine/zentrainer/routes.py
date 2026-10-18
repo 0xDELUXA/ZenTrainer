@@ -111,6 +111,7 @@ def register(server) -> None:
             "hearing": await asyncio.to_thread(captioner.hearing_models),
             "senses": await asyncio.to_thread(captioner.model_senses),
             "loras": await asyncio.to_thread(captioner.te_loras),
+            "lora_catalog": await asyncio.to_thread(captioner.te_lora_catalog),
             "jobs": captioner.recent(request.query.get("dataset") or None),
         })
 
@@ -121,6 +122,8 @@ def register(server) -> None:
 
         b = await request.json()
         try:
+            if b.get("id"):  # a catalog entry
+                return web.json_response(await asyncio.to_thread(captioner.download_te_lora, str(b["id"])))
             return web.json_response(await asyncio.to_thread(captioner.add_te_lora, str(b.get("link", "")), b.get("file")))
         except (ValueError, OSError) as e:
             return _bad(str(e))
