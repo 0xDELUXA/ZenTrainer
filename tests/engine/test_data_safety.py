@@ -83,3 +83,35 @@ def test_run_streams_survive_a_cut_short_line(tmp_path):
     assert store.read("r1", "checkpoints") == [{"step": 250, "path": "a"}]
     store.truncate("r1", "checkpoints", 1000)
     assert store.read("r1", "checkpoints") == [{"step": 250, "path": "a"}]
+
+
+def test_clearing_caches_only_touches_zentrainers_own(tmp_path, monkeypatch):
+    import json as _json
+
+    from zentrainer import storage
+    from zentrainer.harness import data
+
+    monkeypatch.setattr(datasets, "root", lambda: (tmp_path / "input").resolve())
+    (tmp_path / "input").mkdir()
+    datasets.create("cats")
+    theirs = tmp_path / "input" / "cats" / "_latent_cache"  # another trainer's
+    theirs.mkdir()
+    (theirs / "x.npz").write_bytes(b"theirs")
+    cache = tmp_path / "cache"
+    for i, folder in enumerate(["cats", "cats", "cats", "cats", "dogs"]):
+        d = cache / f"k{i}"
+        d.mkdir(parents=True)
+        (d / "dataset.pt").write_bytes(b"x")
+        (d / data.CACHE_SOURCE).write_text(_json.dumps({"folder": folder}))
+        __import__("os").utime(d / "dataset.pt", (i, i))
+    data.prune_caches(cache, "cats")  # the 3 most recent stay
+    assert sorted(p.name for p in cache.iterdir()) == ["k1", "k2", "k3", "k4"]
+
+    class Store:
+        def list(self):
+            return []
+
+    monkeypatch.setattr(storage, "_roots", lambda: {"cache": cache})
+    storage.clean_cache(Store(), "cats")
+    assert sorted(p.name for p in cache.iterdir()) == ["k4"]  # dogs' stays
+    assert (theirs / "x.npz").is_file()

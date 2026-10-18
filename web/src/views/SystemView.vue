@@ -41,7 +41,7 @@ const usage = computed(() => {
     { label: 'Resume states', bytes: sum((r) => r.states), hint: 'Optimizer state saved with every checkpoint; only stopped runs need it' },
     { label: 'Samples', bytes: sum((r) => r.samples) },
     { label: 'Dataset images', bytes: st.datasets.reduce((n, d) => n + d.images, 0) },
-    { label: 'Dataset caches', bytes: st.datasets.reduce((n, d) => n + d.cache, 0), hint: 'Latents, text embeddings and thumbnails: rebuilt when needed' },
+    { label: 'Dataset caches', bytes: st.datasets.reduce((n, d) => n + d.cache, 0), hint: 'Latents and text embeddings training made from your datasets: rebuilt when needed' },
     { label: 'App outputs', bytes: st.apps },
   ]
   const max = Math.max(1, ...rows.map((r) => r.bytes))
@@ -223,7 +223,7 @@ async function restart() {
                     v-if="d.cache"
                     class="chip-btn quiet"
                     :disabled="anyActive"
-                    :title="anyActive ? 'Wait for training to finish' : 'Delete the cached latents, text embeddings and thumbnails'"
+                    :title="anyActive ? 'Wait for training to finish' : 'Delete the latents and text embeddings training cached from this dataset'"
                     @click="clean({ kind: 'cache', folder: d.folder }, `Clear ${d.folder}'s caches (${fmtBytes(d.cache)})`, 'Your images and captions stay. The next run on this dataset re-encodes them, which takes a little longer.')"
                   >
                     Clear caches

@@ -18,6 +18,7 @@ import math
 import os
 import random
 import re
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -279,8 +280,15 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
     key = cache_key(items, spec, encoder_id + ("|h3" if h3 and (spec.edit or spec.keyframes) else ""))
     path = cache_dir / key
     if (path / "dataset.pt").is_file():
-        logging.info("[ZenTrainer] dataset cache hit %s (%d images)", key, len(items))
-        return _expand_repeats(_from_plain(torch.load(path / "dataset.pt", weights_only=False)), items)
+        try:
+            ds = _from_plain(torch.load(path / "dataset.pt", weights_only=False))
+        except Exception as e:  # noqa: BLE001 - cut short or from an older build: rebuild it
+            logging.warning("[ZenTrainer] dataset cache %s couldn't be read (%s); rebuilding it", key, e)
+            shutil.rmtree(path, ignore_errors=True)
+        else:
+            logging.info("[ZenTrainer] dataset cache hit %s (%d images)", key, len(items))
+            os.utime(path / "dataset.pt")  # recently used: kept by prune_caches
+            return _expand_repeats(ds, items)
 
     sizes = bucket_sizes(spec.resolution, spec.bucket_step) if spec.buckets else [(spec.resolution, spec.resolution)]
     captions = sorted({t for v in variants for t in v} | {""})
@@ -405,8 +413,32 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
 
     ds = Dataset(samples, conditionings, captions, cap_index[""], owners=owners)
     path.mkdir(parents=True, exist_ok=True)
-    torch.save(_to_plain(ds), path / "dataset.pt")
+    tmp = path / ".dataset.pt.tmp"  # whole or not at all: a cut-short cache would fail every later run
+    torch.save(_to_plain(ds), tmp)
+    os.replace(tmp, path / "dataset.pt")
+    (path / CACHE_SOURCE).write_text(json.dumps({"folder": spec.folder}))
+    prune_caches(cache_dir, spec.folder)
     return _expand_repeats(ds, items)
+
+
+# Each caption or mask edit makes a new cache (the key covers them); the older ones are kept for a
+# few edits back, then dropped. CACHE_SOURCE says which dataset a cache belongs to.
+CACHE_SOURCE = "source.json"
+CACHES_PER_DATASET = 3
+
+
+def cache_folder(path: Path) -> str | None:
+    try:
+        return json.loads((path / CACHE_SOURCE).read_text()).get("folder")
+    except (OSError, ValueError, AttributeError):
+        return None  # from before caches recorded it
+
+
+def prune_caches(cache_dir: Path, folder: str, keep: int = CACHES_PER_DATASET) -> None:
+    mine = [p for p in cache_dir.iterdir() if p.is_dir() and (p / "dataset.pt").is_file() and cache_folder(p) == folder]
+    mine.sort(key=lambda p: (p / "dataset.pt").stat().st_mtime, reverse=True)
+    for old in mine[keep:]:
+        shutil.rmtree(old, ignore_errors=True)
 
 
 def _encode(vae, pixels: torch.Tensor, path: Path) -> torch.Tensor:

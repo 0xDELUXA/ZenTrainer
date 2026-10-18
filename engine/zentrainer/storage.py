@@ -2,7 +2,7 @@
 
 Per run: its LoRA checkpoints, its resume states (optimizer state saved beside every
 checkpoint: often bigger than the LoRAs) and its samples. Per dataset: the images and the
-latent / text-embedding caches training builds from them. Plus app outputs and free space on
+latent / text-embedding caches training builds from them (in user/zentrainer/cache). Plus app outputs and free space on
 each disk involved.
 
 Cleaning is limited to what can't lose work: a finished run's resume states (only needed
@@ -16,7 +16,6 @@ import os
 import shutil
 from pathlib import Path
 
-CACHES = ("_latent_cache", "_t_e_cache", ".thumbs")  # all rebuilt on demand
 ACTIVE = ("queued", "loading", "training", "paused")
 # resume states matter for these: they can still continue
 RESUMABLE = ("stopped", "error", "interrupted", "rejected")
@@ -54,8 +53,21 @@ def _roots() -> dict[str, Path]:
     import folder_paths
 
     out = Path(folder_paths.get_output_directory()) / "zentrainer"
+    user = Path(folder_paths.get_user_directory()) / "zentrainer"
     return {"loras": out / "loras", "samples": out / "samples", "apps": out / "apps",
-            "states": Path(folder_paths.get_user_directory()) / "zentrainer" / "states"}
+            "states": user / "states", "cache": user / "cache"}
+
+
+def _caches(folder: str, include_unknown: bool = False) -> list[Path]:
+    """ZenTrainer's training caches (latents and conditioning) built from one dataset. Only ever
+    these: other trainers' folders inside a dataset (_latent_cache/, .thumbs/...) aren't ours."""
+    from .harness.data import cache_folder
+
+    root = _roots()["cache"]
+    if not root.is_dir():
+        return []
+    return [p for p in root.iterdir() if p.is_dir()
+            and (cache_folder(p) == folder or (include_unknown and cache_folder(p) is None))]
 
 
 def disks() -> list[dict]:
@@ -100,9 +112,8 @@ def report(store) -> dict:
     runs.sort(key=lambda r: -(r["checkpoints"] + r["states"] + r["samples"]))
     sets = []
     for d in datasets.summary():
-        folder = datasets.root() / d["folder"]
-        cache = sum(size(folder / c) for c in CACHES)
-        sets.append({"folder": d["folder"], "count": d["images"], "images": size(folder) - cache, "cache": cache})
+        cache = sum(size(p) for p in _caches(d["folder"]))
+        sets.append({"folder": d["folder"], "count": d["images"], "images": size(datasets.root() / d["folder"]), "cache": cache})
     sets.sort(key=lambda d: -(d["images"] + d["cache"]))
     return {"disks": disks(), "runs": runs, "datasets": sets, "apps": size(roots["apps"])}
 
@@ -147,15 +158,14 @@ def clean_all_states(store) -> tuple[int, int]:
 
 
 def clean_cache(store, folder: str) -> int:
-    """Delete a dataset's latent, text-embedding and thumbnail caches; they're rebuilt on demand."""
+    """Delete the training caches built from a dataset (and any from before caches recorded their
+    dataset); the next run rebuilds what it needs. Nothing inside the dataset folder is touched."""
     from . import datasets
 
     _no_active(store)
-    root = datasets.folder(folder)  # validates the name, stays inside the datasets root
+    datasets.folder(folder)  # must be a real dataset
     freed = 0
-    for c in CACHES:
-        d = root / c
-        if d.is_dir():
-            freed += size(d)
-            shutil.rmtree(d)
+    for d in _caches(folder, include_unknown=True):
+        freed += size(d)
+        shutil.rmtree(d)
     return freed
