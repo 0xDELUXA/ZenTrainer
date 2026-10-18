@@ -4,7 +4,7 @@
 // review what it wrote or undo it. It never rewrites captions in "default" without asking.
 import { ZenButton, ZenCombo, ZenInput } from '@nynxz/zenkit-ui'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { inputChoices, onComfyMessage } from '@/api/comfy'
+import { onComfyMessage } from '@/api/comfy'
 import { setSetting, settings } from '@/settings'
 import { EVENTS, EngineError, engine, thumbUrl, type CaptionJob, type CaptionMode, type CaptionStyle, type DatasetItem } from '@/api/engine'
 
@@ -13,11 +13,10 @@ const emit = defineEmits<{ changed: [set: string]; review: [job: CaptionJob] }>(
 
 const styles = ref<CaptionStyle[]>([])
 const models = ref<string[]>([])
-const types = ref<string[]>([])
 const jobs = ref<CaptionJob[]>([])
 const error = ref<string | null>(null)
 const PREFS = 'zentrainer.caption'
-const form = reactive({ clip_name: '', clip_type: 'krea2', style: 'nl', prompt: '', set: 'nl', mode: 'missing' as CaptionMode, subject: '' })
+const form = reactive({ clip_name: '', style: 'nl', prompt: '', set: 'nl', mode: 'missing' as CaptionMode, subject: '' })
 try {
   Object.assign(form, JSON.parse(localStorage.getItem(PREFS) ?? '{}'), { mode: 'missing' })
 } catch {
@@ -40,11 +39,11 @@ watch(
 )
 
 onMounted(async () => {
-  const [info, t] = await Promise.all([engine.captionInfo(props.dataset), inputChoices('CLIPLoader', 'type')])
+  const info = await engine.captionInfo(props.dataset)
   styles.value = info.styles
   models.value = info.models // loadable only, vision-language first
-  types.value = t
-  jobs.value = info.jobs
+  jobs.value = info.jobs.filter((j) => !j.preview)
+  preview.value = info.jobs.find((j) => j.preview) ?? null // a try-on still running, or just done
   if (!models.value.includes(form.clip_name))
     form.clip_name = models.value.find((n) => /qwen3vl_4b/i.test(n)) ?? models.value.find((n) => /qwen3vl/i.test(n)) ?? models.value[0] ?? ''
 })
@@ -118,7 +117,7 @@ const busy = ref(false)
 function body(extra: Record<string, unknown> = {}) {
   return {
     clip_name: form.clip_name,
-    clip_type: form.clip_type,
+    clip_type: 'auto', // the engine loads it as the plain chat model
     set: form.set,
     mode: form.mode,
     paths: form.mode === 'selected' ? props.selected : undefined,
@@ -167,6 +166,7 @@ async function review(j: CaptionJob) {
 function upsert(j: CaptionJob) {
   if (j.preview) {
     if (preview.value?.job_id === j.job_id) preview.value = { ...preview.value, ...j }
+    else if (!preview.value && ['queued', 'running'].includes(j.status)) preview.value = j
     return
   }
   const i = jobs.value.findIndex((x) => x.job_id === j.job_id)
@@ -196,10 +196,7 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
   <div class="cp card">
     <div class="row">
       <label class="f model"><span class="eyebrow">Model</span>
-        <ZenCombo v-model="form.clip_name" :items="models.map((n) => ({ value: n, label: n }))" :sorted="false" :item-height="30" placeholder="A vision-language text encoder" size="sm" />
-      </label>
-      <label class="f type"><span class="eyebrow">Type</span>
-        <ZenCombo v-model="form.clip_type" :items="types.map((n) => ({ value: n, label: n }))" size="sm" />
+        <ZenCombo v-model="form.clip_name" :items="models.map((n) => ({ value: n, label: n }))" :sorted="false" :item-height="30" placeholder="A vision-language model (Qwen-VL, Qwen3.5)" size="sm" />
       </label>
       <div class="f"><span class="eyebrow">Style</span>
         <div class="seg">
@@ -254,7 +251,7 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
     <div v-if="preview" class="preview">
       <div class="line">
         <b class="small">Preview</b>
-        <span class="muted small">{{ preview.status === 'done' ? 'not saved: run it to write them' : preview.status === 'running' ? `${preview.done}/${preview.total || 3}` : preview.status }}</span>
+        <span class="muted small">{{ preview.status === 'done' ? 'not saved: run it to write them' : preview.status === 'running' ? `${preview.done}/${preview.total || 3}${preview.message ? ` · ${preview.message}` : ''}` : preview.status === 'queued' && preview.message ? preview.message : preview.status }}</span>
         <span class="spacer" />
         <button class="x" title="Close the preview" @click="preview = null"><i class="mdi mdi-close" /></button>
       </div>
@@ -275,7 +272,7 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
     <div v-if="active" class="job live">
       <div class="line">
         <b class="small">{{ active.status === 'queued' ? 'Queued' : `Captioning ${active.done}/${active.total || '…'}` }}</b>
-        <span class="muted small">into “{{ active.set_name }}”</span>
+        <span class="muted small">into “{{ active.set_name }}”<template v-if="active.message"> · {{ active.message }}</template></span>
         <span class="spacer" />
         <ZenButton size="sm" icon="mdi mdi-stop" title="Stop at the next image; what's written stays (and can be undone)" @click="act(active, 'cancel')">Cancel</ZenButton>
       </div>

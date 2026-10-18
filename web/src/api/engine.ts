@@ -647,6 +647,7 @@ export const engine = {
     call<{ styles: CaptionStyle[]; models: string[]; jobs: CaptionJob[] }>(`/caption${dataset ? `?dataset=${encodeURIComponent(dataset)}` : ''}`),
   startCaption: (name: string, body: CaptionRequest) =>
     call<{ job: CaptionJob }>(`${dsPath(name)}/caption`, { method: 'POST', body: JSON.stringify({ ...body, client_id: getClientId() }) }),
+  captionActive: () => call<{ jobs: CaptionJob[] }>('/caption?active=1').then((r) => r.jobs),
   captionJob: (id: string) => call<{ job: CaptionJob }>(`/caption/${encodeURIComponent(id)}`).then((r) => r.job),
   captionAction: (id: string, action: 'cancel' | 'undo') =>
     call<{ job: CaptionJob; restored?: number }>(`/caption/${encodeURIComponent(id)}/${action}`, { method: 'POST' }),

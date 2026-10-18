@@ -1,7 +1,8 @@
 <script setup lang="ts">
-// The models ComfyUI holds right now and how much of each sits in VRAM: one cell per
-// transformer block (blocks.N, double_blocks.N, ...), filled by its share on the GPU. With
-// offloading you see blocks stream in and out. Polls while shown.
+// The models ComfyUI holds right now and how much of each sits in VRAM: one strip per numbered
+// list of blocks (blocks.N, double_blocks.N, layers.N, ...), one cell per block filled by its
+// share on the GPU, then the weights outside any list (embeddings, heads). With offloading
+// you see blocks stream in and out. Polls while shown.
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { engine, type LoadedModel } from '@/api/engine'
 import { gb } from '@/system'
@@ -21,7 +22,7 @@ async function poll() {
 onMounted(poll)
 onUnmounted(() => clearTimeout(timer))
 
-const BLOCK = /^(.*\.)?([a-z_]*blocks?)\.(\d+)$/
+const BLOCK = /^(?:(.*)\.)?([^.]+)\.(\d+)$/ // "....visual.blocks.3" -> prefix, list, index
 const rows = computed(() =>
   models.value
     .filter((m) => m.bytes > 0)
@@ -32,17 +33,28 @@ const rows = computed(() =>
       for (const g of m.groups ?? []) {
         const hit = g.name.match(BLOCK)
         if (hit) {
-          const key = hit[2]!
+          const key = hit[1] ? `${hit[1]}.${hit[2]}` : hit[2]!
           lists.set(key, [...(lists.get(key) ?? []), { i: Number(hit[3]), bytes: g.bytes, vram: g.vram, name: g.name }])
         } else other = { bytes: other.bytes + g.bytes, vram: other.vram + g.vram }
       }
       return {
         ...m,
-        lists: [...lists.entries()].map(([k, v]) => ({ name: k, cells: v.sort((a, b) => a.i - b.i) })).filter((l) => l.cells.length > 1),
+        lists: [...lists.entries()]
+          .map(([k, v]) => ({ name: label(k), cells: v.sort((a, b) => a.i - b.i) }))
+          .sort((a, b) => sum(b.cells) - sum(a.cells)),
         other,
       }
     }),
 )
+const sum = (cells: { bytes: number }[]) => cells.reduce((n, c) => n + c.bytes, 0)
+// the list's own name, plus what it belongs to when that tells lists apart
+// (transformer.model.layers -> layers; visual.blocks -> visual blocks)
+function label(key: string) {
+  const parts = key.split('.').filter((p) => !/^(model|diffusion_model|transformer|clip_[lg]|encoder|decoder)$/.test(p))
+  const last = parts.pop() ?? key
+  const owner = parts.pop()
+  return (owner && !/^\d+$/.test(owner) ? `${owner} ${last}` : last).replace(/_/g, ' ')
+}
 const pct = (v: number, b: number) => (b ? Math.round((v / b) * 100) : 0)
 </script>
 
@@ -61,16 +73,22 @@ const pct = (v: number, b: number) => (b ? Math.round((v / b) * 100) : 0)
         <span class="spacer" />
         <span class="mono small">{{ gb(m.vram) }} / {{ gb(m.bytes) }} GB · {{ pct(m.vram, m.bytes) }}%</span>
       </div>
-      <div v-for="l in m.lists" :key="l.name" class="strip" :title="l.name">
-        <span
-          v-for="c in l.cells"
-          :key="c.i"
-          class="cell"
-          :style="{ '--f': c.bytes ? c.vram / c.bytes : 0 }"
-          :title="`${c.name}: ${pct(c.vram, c.bytes)}% in VRAM (${gb(c.bytes)} GB)`"
-        />
+      <div v-for="l in m.lists" :key="l.name" class="list">
+        <span class="lbl small muted ellipsis" :title="l.name">{{ l.name }} <span class="mono">{{ l.cells.length }}</span></span>
+        <div class="strip">
+          <span
+            v-for="c in l.cells"
+            :key="c.i"
+            class="cell"
+            :style="{ '--f': c.bytes ? c.vram / c.bytes : 0 }"
+            :title="`${c.name}: ${pct(c.vram, c.bytes)}% in VRAM (${gb(c.bytes)} GB)`"
+          />
+        </div>
       </div>
-      <div v-if="!m.lists.length" class="bar"><span :style="{ width: `${pct(m.vram, m.bytes)}%` }" /></div>
+      <div v-if="m.other.bytes" class="list" :title="`Weights outside the block lists: ${pct(m.other.vram, m.other.bytes)}% in VRAM`">
+        <span class="lbl small muted">{{ m.lists.length ? 'other' : 'weights' }} <span class="mono">{{ gb(m.other.bytes) }} GB</span></span>
+        <div class="bar"><span :style="{ width: `${pct(m.other.vram, m.other.bytes)}%` }" /></div>
+      </div>
     </div>
   </section>
 </template>
@@ -107,6 +125,23 @@ const pct = (v: number, b: number) => (b ? Math.round((v / b) * 100) : 0)
   border-radius: var(--r-sm);
   color: var(--zen-muted);
   border: 1px solid color-mix(in srgb, var(--zen-border) 70%, transparent);
+}
+.list {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  align-items: center;
+  gap: 8px;
+}
+.lbl {
+  min-width: 0;
+}
+.ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.muted {
+  color: var(--zen-muted);
 }
 .strip {
   display: grid;

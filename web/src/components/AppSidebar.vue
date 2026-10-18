@@ -8,6 +8,7 @@ import ScrollArea from './ScrollArea.vue'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { activeRuns, latest, lossTrail } from '@/runs'
+import { activeCaptions, startCaptionSync } from '@/captions'
 import { activeDownloads, fmtBytes, startDownloadSync } from '@/downloads'
 import { disks, gb, memLatest, startSystemSync } from '@/system'
 import { drawerOpen, toggleDrawer, unseenErrors } from '@/logs'
@@ -81,6 +82,16 @@ const dl = computed(() => {
   return { name: cur.name, pct: cur.total ? cur.done / cur.total : 0, done: cur.done, total: cur.total, speed: cur.speed, more: list.length - 1 }
 })
 
+// ---- caption jobs: the one running (or first waiting), and how many more ---------------
+const cap = computed(() => {
+  const list = activeCaptions.value
+  const cur = list.find((j) => j.status === 'running') ?? list[0]
+  if (!cur) return null
+  const total = cur.total || cur.preview || 0
+  const meta = cur.status === 'queued' ? 'waiting' : cur.message.startsWith('loading') ? 'loading' : `${cur.done}/${total}`
+  return { job: cur, pct: total ? cur.done / total : 0, meta, more: list.length - 1 }
+})
+
 // ---- folding & keys ------------------------------------------------------------------
 function onKey(e: KeyboardEvent) {
   const t = e.target as HTMLElement
@@ -92,6 +103,7 @@ function onKey(e: KeyboardEvent) {
 onMounted(() => {
   startSystemSync()
   startDownloadSync()
+  startCaptionSync()
   addEventListener('keydown', onKey)
 })
 onUnmounted(() => {
@@ -162,6 +174,22 @@ onUnmounted(() => {
       </span>
     </RouterLink>
 
+
+    <RouterLink
+      v-if="cap"
+      :to="`/datasets/${encodeURIComponent(cap.job.dataset)}`"
+      class="row mem"
+      :title="cap.job.message || `${cap.job.preview ? 'Trying captions on' : 'Captioning'} ${cap.job.dataset}${cap.job.file ? `: ${cap.job.file}` : ''}`"
+      @click="emit('navigate')"
+    >
+      <span class="ic"><i class="mdi mdi-creation-outline" /></span>
+      <span class="lbl mem-body">
+        <span class="mem-row">
+          <span class="mem-head"><span class="ellipsis">{{ cap.job.preview ? 'Try' : 'Caption' }} {{ cap.job.dataset }}</span><span class="mono">{{ cap.meta }}{{ cap.more ? ` +${cap.more}` : '' }}</span></span>
+          <span class="meter"><span :style="{ width: `${cap.pct * 100}%` }" /></span>
+        </span>
+      </span>
+    </RouterLink>
 
     <div v-if="dl" class="row mem" :title="`${dl.name}: ${fmtBytes(dl.done)} of ${fmtBytes(dl.total)} · ${fmtBytes(dl.speed)}/s`">
       <span class="ic"><i class="mdi mdi-download" /></span>

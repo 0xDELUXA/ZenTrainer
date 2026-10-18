@@ -7,7 +7,9 @@ import type { LightboxItem } from '@nynxz/zenkit-ui'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { engine, thumbUrl, viewUrl, type CaptionJob, type DatasetItem } from '@/api/engine'
+import { activeCaptions } from '@/captions'
 import CaptionPanel from '@/components/CaptionPanel.vue'
+import { vAutosize } from '@/autosize'
 
 const props = defineProps<{ name: string }>()
 const router = useRouter()
@@ -184,7 +186,10 @@ async function bulk(op: 'prefix' | 'suffix' | 'replace') {
 }
 
 // ---- auto-caption: CaptionPanel runs it as a job -----------------------------------------
-const capOpen = ref(false)
+// open while this dataset has a caption job going, so coming back to the page shows it
+const capRunning = computed(() => activeCaptions.value.some((j) => j.dataset === props.name))
+const capOpen = ref(capRunning.value)
+watch(capRunning, (v) => v && (capOpen.value = true))
 function onCaptioned(set: string) {
   if (!sets.value.includes(set)) sets.value = [...sets.value, set]
   load()
@@ -418,11 +423,12 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
         <span class="c-bytes mono muted">{{ kb(it.bytes) }}</span>
         <span class="c-mask small" :class="{ warn: it.mask_mismatch }" :title="it.mask_mismatch ? 'Different shape from its image: it won\'t line up' : ''">{{ it.mask ? pct(it.mask_coverage) : '' }}</span>
         <textarea
+          v-autosize
           class="c-cap cap-edit"
           :class="{ empty: !cap(it) && drafts[k(it)] == null }"
           :value="drafts[k(it)] ?? cap(it)"
           placeholder="No caption: add one"
-          rows="2"
+          rows="1"
           @input="drafts[k(it)] = ($event.target as HTMLTextAreaElement).value"
           @blur="save(it)"
           @keydown.ctrl.enter="($event.target as HTMLTextAreaElement).blur()"
@@ -438,10 +444,11 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
         <div v-if="shown[index]" class="side">
           <div class="eyebrow">Caption</div>
           <textarea
+            v-autosize
             class="side-cap"
             :value="drafts[k(shown[index])] ?? cap(shown[index])"
             placeholder="No caption: add one"
-            rows="8"
+            rows="3"
             @input="drafts[k(shown[index])] = ($event.target as HTMLTextAreaElement).value"
             @blur="save(shown[index])"
             @keydown.ctrl.enter="($event.target as HTMLTextAreaElement).blur()"
@@ -824,7 +831,7 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
 }
 .tr {
   display: grid;
-  grid-template-columns: 40px 64px minmax(140px, 1.2fr) 96px 72px 48px minmax(240px, 3fr) 56px;
+  grid-template-columns: 32px 64px minmax(120px, 0.9fr) 84px 64px 44px minmax(280px, 4fr) 48px;
   align-items: center;
   gap: 10px;
   padding: 6px 10px;
@@ -901,21 +908,30 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
   white-space: nowrap;
 }
 .cap-edit {
+  display: block;
   width: 100%;
-  resize: vertical;
+  resize: none;
   font: inherit;
-  font-size: 12px;
-  line-height: 1.4;
-  padding: 6px 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  max-height: calc(4 * 1.5em + 14px); /* 4 whole lines; focus opens it up */
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--zen-text) 25%, transparent) transparent;
+  padding: 6px 10px;
   border-radius: var(--r-md);
   border: 1px solid transparent;
   background: transparent;
   color: var(--zen-text);
 }
+.cap-edit.clamped:not(:focus) {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 2.2em), transparent calc(100% - 4px));
+}
 .cap-edit:hover {
   border-color: color-mix(in srgb, var(--zen-border) 70%, transparent);
 }
 .cap-edit:focus {
+  max-height: calc(14 * 1.5em + 14px);
   outline: none;
   border-color: var(--zen-accent);
   background: var(--zen-field-bg, var(--zen-input));
@@ -945,12 +961,18 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
   align-items: flex-start;
 }
 .side-cap {
+  display: block;
   width: 100%;
-  resize: vertical;
+  resize: none;
   font: inherit;
   font-size: 13px;
-  line-height: 1.5;
-  padding: 10px;
+  line-height: 1.6;
+  min-height: 5em;
+  max-height: 55vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--zen-text) 25%, transparent) transparent;
+  padding: 10px 12px;
   border-radius: var(--r-md);
   border: 1px solid var(--zen-border);
   background: var(--zen-field-bg, var(--zen-input));

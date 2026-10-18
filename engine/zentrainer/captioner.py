@@ -34,6 +34,7 @@ STYLES = {
 CAPTION = "zentrainer.caption"  # {job_id, dataset, set, status, done, total, file, text, message, ...}
 MODES = ("missing", "all", "selected")  # which images: no caption in the set yet / every one / `paths`
 ACTIVE = ("queued", "running")
+PREVIEW_KEEP = 600  # s a finished try-on stays listed
 KEEP = 60  # jobs remembered
 
 
@@ -139,35 +140,86 @@ def update(job: CaptionJob, **kw) -> None:
     _emit(job)
 
 
+GENERIC_TYPE = "stable_diffusion"  # CLIPLoader type that loads a Qwen-VL file as the stock chat model
+_vision_cache: dict[str, tuple[float, bool]] = {}
+
+
+def _has_vision(path: str) -> bool:
+    """Whether a text encoder file carries a vision tower (it can see the picture): read from
+    its safetensors header, cached by mtime."""
+    import os
+    import struct
+
+    try:
+        mtime = os.path.getmtime(path)
+        hit = _vision_cache.get(path)
+        if hit and hit[0] == mtime:
+            return hit[1]
+        with open(path, "rb") as f:
+            n = struct.unpack("<Q", f.read(8))[0]
+            header = f.read(min(n, 64 << 20)).decode("utf-8", "replace")
+        ok = '"model.visual.' in header or '"visual.' in header
+        _vision_cache[path] = (mtime, ok)
+        return ok
+    except (OSError, struct.error):
+        return False
+
+
 def models() -> list[str]:
-    """Text encoders that actually resolve to a file (dangling symlinks are listed by
-    ComfyUI but can't load), vision-language ones first."""
+    """Text encoders that can caption: ones that resolve to a file (dangling symlinks are
+    listed by ComfyUI but can't load) and carry a vision tower."""
     import os
 
     import folder_paths
 
-    names = [n for n in folder_paths.get_filename_list("text_encoders")
-             if (p := folder_paths.get_full_path("text_encoders", n)) and os.path.exists(p)]
-    vl = re.compile(r"vl|gemma", re.I)
-    return [n for n in names if vl.search(n)] + [n for n in names if not vl.search(n)]
+    out = []
+    for n in folder_paths.get_filename_list("text_encoders"):
+        p = folder_paths.get_full_path("text_encoders", n)
+        if p and os.path.exists(p) and p.endswith(".safetensors") and _has_vision(p):
+            out.append(n)
+    return out
 
 
 def recent(dataset: str | None = None) -> list[dict]:
+    """The latest jobs (one dataset's, or all), plus any try-on still running or just
+    finished, so a page opened mid-job (or reopened) picks it up."""
+    now = time.time()
     with _lock:
         _load()
-        jobs = [j for j in _jobs.values() if not j.preview and (dataset is None or j.dataset == dataset)]
+        jobs = [j for j in _jobs.values() if (dataset is None or j.dataset == dataset)
+                and (not j.preview or j.status in ACTIVE or now - (j.finished or j.created) < PREVIEW_KEEP)]
     return [j.public() for j in sorted(jobs, key=lambda j: j.created, reverse=True)[:20]]
 
 
-def _emit(job: CaptionJob) -> None:
+def active() -> list[dict]:
+    """Every queued or running job, try-ons included: what the sidebar shows."""
+    with _lock:
+        _load()
+        return [_light(j) for j in sorted(_jobs.values(), key=lambda j: j.created) if j.status in ACTIVE]
+
+
+def _light(job: CaptionJob) -> dict:
     d = job.public()
     for k in ("prompt", "written", "paths"):
         d.pop(k)
-    events.emit(CAPTION, d)
+    return d
+
+
+def _emit(job: CaptionJob) -> None:
+    events.emit(CAPTION, _light(job))
+    # mirrored so ZenKit's taskbar (in ComfyUI) shows it too, as it does training runs
+    events.emit(events.ZENKIT_JOB, {
+        "id": f"zentrainer:{job.job_id}", "name": f"{'Try captions' if job.preview else 'Caption'} {job.dataset}",
+        "status": {"queued": "start", "running": "progress", "done": "done"}.get(job.status, "error"),
+        "current": job.done, "total": job.total or job.preview or 0, "message": job.message or job.status,
+        "source": "ZenTrainer",
+    })
 
 
 def clean(text: str) -> str:
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.S)
+    if "</think>" in text:  # the template opened the think block: keep what follows it
+        text = text.rsplit("</think>", 1)[1]
     text = re.sub(r"^\s*(caption|description|tags)\s*:\s*", "", text.strip(), flags=re.I)
     return text.strip().strip('"').strip()
 
@@ -216,7 +268,7 @@ def run(job: CaptionJob) -> None:
 
     if job.status != "queued":  # cancelled while it waited
         return
-    update(job, status="running")
+    update(job, status="running", message=f"loading {job.clip_name}")
     # ComfyUI's model compiler (CUDA graphs) breaks token-by-token generation: a device-side
     # assert on the second token that takes the whole server down. Off while captioning, as
     # it is while training.
@@ -229,7 +281,10 @@ def run(job: CaptionJob) -> None:
             if not items:
                 update(job, status="done", message="nothing to caption: every image already has one in this set")
                 return
-            clip = nodes.CLIPLoader().load_clip(job.clip_name, job.clip_type)[0]
+            # the stock chat model, not an image model's conditioning wrapper of the same file
+            # (MOSS's Qwen3.5 drops the picture and leaves a think block open)
+            ctype = GENERIC_TYPE if job.clip_type in ("", "auto") else job.clip_type
+            clip = nodes.CLIPLoader().load_clip(job.clip_name, ctype)[0]
             if not hasattr(clip, "generate"):
                 raise RuntimeError(f"{job.clip_name} can't generate text; pick a vision-language model (Qwen-VL, Gemma)")
             prompt = instruction(job)
@@ -250,7 +305,7 @@ def run(job: CaptionJob) -> None:
                         job.previous[rel] = target.read_text(encoding="utf-8")
                     target.write_text(text + "\n", encoding="utf-8")
                     job.written[rel] = text
-                update(job, done=job.done + 1, file=it.path.name, text=text)
+                update(job, done=job.done + 1, file=it.path.name, text=text, message="")  # loaded: the first one's in
                 pbar.update_absolute(job.done)  # also raises on ComfyUI interrupt
                 mm.throw_exception_if_processing_interrupted()
         if job.status == "running":

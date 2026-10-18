@@ -93,6 +93,8 @@ def register(server) -> None:
         """Styles, models, and the recent jobs (?dataset= for one dataset's)."""
         from . import captioner
 
+        if request.query.get("active") == "1":
+            return web.json_response({"jobs": captioner.active()})
         return web.json_response({
             "styles": [{"id": k, "label": v[0], "prompt": v[1]} for k, v in captioner.STYLES.items()],
             "models": await asyncio.to_thread(captioner.models),
@@ -116,8 +118,8 @@ def register(server) -> None:
             return _bad("dataset not found", 404)
         except datasets.DatasetError as e:
             return _bad(str(e))
-        if not b.get("clip_name") or not b.get("clip_type"):
-            return _bad("pick a vision-language text encoder and its type")
+        if not b.get("clip_name"):
+            return _bad("pick a vision-language text encoder")
         mode = str(b.get("mode") or ("all" if b.get("overwrite") else "missing"))
         if mode not in captioner.MODES:
             return _bad(f"mode is one of {', '.join(captioner.MODES)}")
@@ -127,7 +129,7 @@ def register(server) -> None:
         preview = max(0, min(int(b.get("preview") or 0), 8))
         prompt = str(b.get("prompt") or captioner.STYLES.get(str(b.get("style")), captioner.STYLES["nl"])[1])
         job = captioner.CaptionJob(job_id="", dataset=name, set_name=set_name, clip_name=str(b["clip_name"]),
-                                   clip_type=str(b["clip_type"]), prompt=prompt, mode=mode, paths=paths,
+                                   clip_type=str(b.get("clip_type") or "auto"), prompt=prompt, mode=mode, paths=paths,
                                    subject=str(b.get("subject") or "").strip(), preview=preview)
         if not preview and set_name == "default" and not b.get("replace_default"):
             items = await asyncio.to_thread(lambda: captioner.todo(job, scan(root, warn=False)))
@@ -139,7 +141,10 @@ def register(server) -> None:
                                                                "mode", "paths", "subject", "preview")},
                                max_length=int(b.get("max_length") or 300))
         prompt_id = str(uuid.uuid4())
-        captioner.update(job, prompt_id=prompt_id)
+        from . import jobqueue
+
+        busy = jobqueue.get().current
+        captioner.update(job, prompt_id=prompt_id, message="waits for the training run to finish" if busy else "")
         payload = {"prompt": {"cap": {"class_type": "ZenCaptionSession", "inputs": {"job_id": job.job_id},
                                       "_meta": {"title": f"caption {name}"}}},
                    "prompt_id": prompt_id, "client_id": b.get("client_id")}
