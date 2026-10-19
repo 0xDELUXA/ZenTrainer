@@ -173,6 +173,21 @@ onUnmounted(() => {
       </RouterLink>
     </nav></ScrollArea>
 
+    <!-- the queue sits above the running run: it grows and empties, and the run's card stays put -->
+    <RouterLink
+      v-if="waiting.length"
+      to="/jobs"
+      class="row queue"
+      :title="`Queued, in order:\n${waiting.map((r, i) => `${i + 1}. ${r.name}`).join('\n')}`"
+      @click="emit('navigate')"
+    >
+      <span class="ic"><i class="mdi mdi-tray-full" /><span class="q-count">{{ waiting.length }}</span></span>
+      <span class="lbl queue-body">
+        <span class="q-head">{{ waiting.length }} queued</span>
+        <span v-for="(r, i) in waiting.slice(0, WAIT_SHOWN)" :key="r.run_id" class="q-item ellipsis"><span class="q-n">{{ i + 1 }}</span>{{ r.name }}</span>
+        <span v-if="waiting.length > WAIT_SHOWN" class="q-more">+{{ waiting.length - WAIT_SHOWN }} more</span>
+      </span>
+    </RouterLink>
     <!-- what's training, above the memory meters: one click to it -->
     <RouterLink
       v-for="r in running"
@@ -198,20 +213,6 @@ onUnmounted(() => {
       </span>
     </RouterLink>
 
-    <RouterLink
-      v-if="waiting.length"
-      to="/jobs"
-      class="row queue"
-      :title="`Queued, in order:\n${waiting.map((r, i) => `${i + 1}. ${r.name}`).join('\n')}`"
-      @click="emit('navigate')"
-    >
-      <span class="ic"><i class="mdi mdi-tray-full" /><span class="q-count">{{ waiting.length }}</span></span>
-      <span class="lbl queue-body">
-        <span class="q-head">{{ waiting.length }} queued</span>
-        <span v-for="(r, i) in waiting.slice(0, WAIT_SHOWN)" :key="r.run_id" class="q-item ellipsis"><span class="q-n">{{ i + 1 }}</span>{{ r.name }}</span>
-        <span v-if="waiting.length > WAIT_SHOWN" class="q-more">+{{ waiting.length - WAIT_SHOWN }} more</span>
-      </span>
-    </RouterLink>
 
 
     <RouterLink
