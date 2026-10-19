@@ -414,7 +414,13 @@ const setup = computed((): { k: string; v: string; title?: string }[] => {
       k: 'Dataset',
       v: [sp.dataset.folder, sp.dataset.caption_set && sp.dataset.caption_set !== 'default' ? sp.dataset.caption_set : '', sp.dataset.trigger ? `“${sp.dataset.trigger}”` : ''].filter(Boolean).join(' · '),
     },
-    { k: 'Training', v: `${opt.steps} steps · batch ${opt.batch_size} · ${sp.dataset.resolution}px` },
+    {
+      k: 'Training',
+      v: `${opt.steps} steps · batch ${opt.batch_size} · ${[...(sp.dataset.stages ?? []).map((st) => st.resolution), sp.dataset.resolution].join(' → ')}px`,
+      title: sp.dataset.stages?.length
+        ? `${sp.dataset.stages.map((st) => `${st.resolution} px until ${Math.round(st.until * 100)}%`).join(', ')}, then ${sp.dataset.resolution} px; each change blends over ${Math.round((sp.dataset.stage_blend ?? 0.2) * 100)}% of the run`
+        : undefined,
+    },
     {
       k: 'Optimizer',
       v: [OPT_NAMES[opt.optimizer] ?? opt.optimizer, `from ${fmtLr(opt.learning_rate)}`, ADAPTIVE.has(opt.optimizer) ? '' : opt.scheduler].filter(Boolean).join(' · '),

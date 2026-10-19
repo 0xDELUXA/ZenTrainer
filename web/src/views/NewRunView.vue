@@ -282,6 +282,26 @@ const initFrom = computed({
   get: () => spec.network.init_from ?? '',
   set: (v: string) => (spec.network.init_from = v || null),
 })
+// start lower: one earlier stage at a lower resolution (the engine takes several; the form edits one)
+const LOWER = [512, 640, 768, 896]
+const lowerChoices = computed(() => LOWER.filter((r) => r < spec.dataset.resolution))
+const startLower = computed({
+  get: () => !!spec.dataset.stages?.length,
+  set: (on: boolean) => {
+    const pick = lowerChoices.value.filter((r) => r <= spec.dataset.resolution * 0.75).at(-1) ?? lowerChoices.value.at(-1)
+    spec.dataset.stages = on && pick ? [{ resolution: pick, until: 0.6 }] : []
+    if (on) spec.dataset.stage_blend ??= 0.2
+  },
+})
+const stage0 = computed(() => spec.dataset.stages?.[0])
+// a step's cost goes roughly with its pixels (more, with attention): the ratio, to one decimal
+const lowerSpeedup = computed(() => (stage0.value ? (spec.dataset.resolution / stage0.value.resolution) ** 2 : 1).toFixed(1))
+watch(
+  () => spec.dataset.resolution,
+  (r) => {
+    if (spec.dataset.stages?.some((st) => st.resolution >= r)) spec.dataset.stages = spec.dataset.stages.filter((st) => st.resolution < r)
+  },
+)
 const trainingAdapter = computed({
   get: () => spec.network.training_adapter ?? '',
   set: (v: string) => (spec.network.training_adapter = v || null),
@@ -562,6 +582,26 @@ async function start(position: 'next' | 'end' = 'next') {
                 </button>
               </div>
             </ZenField>
+            <ZenField label="Start lower" stack tip="Train at a lower resolution first, then at the run's: most of what a LoRA learns comes early, fine detail last, and lower-resolution steps are much quicker. Each resolution is cached before training; the change blends over a share of the run so nothing switches at once">
+              <div class="sw-row">
+                <ZenSwitch v-model="startLower" :disabled="!lowerChoices.length" />
+                <span class="sw-state">{{ stage0 ? `${stage0.resolution} px for ${Math.round(stage0.until * 100)}%, then ${spec.dataset.resolution}` : 'Off' }}</span>
+              </div>
+            </ZenField>
+            <template v-if="stage0">
+              <ZenField label="Lower resolution" stack :tip="`Steps at ${stage0.resolution} cost about 1/${lowerSpeedup} of one at ${spec.dataset.resolution}`">
+                <div class="chips">
+                  <button v-for="r in lowerChoices" :key="r" class="chip-btn" :class="{ on: stage0.resolution === r }" @click="stage0.resolution = r">{{ r }}</button>
+                </div>
+              </ZenField>
+              <ZenField label="Until / blend" stack tip="The share of the run at the lower resolution, then the share it blends over into the run's (the higher one grows from no steps to every step)">
+                <div class="inline">
+                  <ZenNumber :model-value="Math.round(stage0.until * 100)" :min="5" :max="95" :step="5" :precision="0" @update:model-value="stage0.until = $event / 100" />
+                  <ZenNumber :model-value="Math.round((spec.dataset.stage_blend ?? 0.2) * 100)" :min="0" :max="50" :step="5" :precision="0" @update:model-value="spec.dataset.stage_blend = $event / 100" />
+                </div>
+              </ZenField>
+              <p v-if="(spec.dataset.stages?.length ?? 0) > 1" class="muted small span-2">{{ spec.dataset.stages!.length }} stages from the preset; this edits the first.</p>
+            </template>
             <ZenField label="Caption dropout" stack tip="Share of steps with an empty caption">
               <ZenNumber v-model="spec.dataset.caption_dropout" :min="0" :max="1" :step="0.05" :precision="2" />
             </ZenField>
@@ -959,7 +999,7 @@ async function start(position: 'next' | 'end' = 'next') {
           <dt>Steps</dt><dd class="mono">{{ spec.optim.steps }}<span v-if="epochs != null" class="muted"> · {{ epochs.toFixed(1) }} ep</span></dd>
           <dt>Optimizer</dt><dd>{{ opt?.label ?? spec.optim.optimizer }} <span class="mono muted">{{ spec.optim.learning_rate }}</span></dd>
           <dt>Network</dt><dd class="mono">{{ spec.network.algorithm }} r{{ spec.network.rank }}</dd>
-          <dt>Resolution</dt><dd class="mono">{{ spec.dataset.resolution }}</dd>
+          <dt>Resolution</dt><dd class="mono">{{ stage0 ? `${spec.dataset.stages!.map((st) => st.resolution).join(' → ')} → ${spec.dataset.resolution}` : spec.dataset.resolution }}</dd>
           <dt>Samples</dt><dd>{{ spec.samples.prompts.length }} prompt{{ spec.samples.prompts.length === 1 ? '' : 's' }}{{ spec.samples.every ? ` / ${spec.samples.every} steps` : '' }}</dd>
         </dl>
         <div v-if="applied.length" class="muted small">Presets: {{ applied.join(' + ') }}</div>

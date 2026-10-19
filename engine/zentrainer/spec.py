@@ -35,6 +35,12 @@ class DatasetSpec:
     # kohya-style "N_name" subfolder repeats its images N times.
     folder: str = ""
     resolution: int = 1024
+    # Lower resolutions first: [{"resolution": 768, "until": 0.6}] trains at 768 for the first 60%
+    # of the run, then at `resolution`. Each change blends over `stage_blend` of the run (0.6 ->
+    # 0.8: the next resolution goes from no steps to every step), so nothing switches at once.
+    # Every resolution is cached before training. [] = one resolution throughout.
+    stages: list = field(default_factory=list)
+    stage_blend: float = 0.2
     caption_ext: str = ".txt"
     # Aspect-ratio buckets: images are resized to the closest bucket of ~resolution²
     # pixels, sides multiples of bucket_step. Off = center-crop squares.
@@ -331,6 +337,17 @@ class TrainSpec:
                 raise SpecError(f"split model needs: {', '.join('model.' + k for k in missing)}")
         if not self.dataset.folder:
             raise SpecError("dataset.folder is required")
+        last = 0.0
+        for st in self.dataset.stages:
+            if not isinstance(st, dict) or not isinstance(st.get("resolution"), int) or not isinstance(st.get("until"), (int, float)):
+                raise SpecError('dataset.stages are {"resolution": 768, "until": 0.6}')
+            if not 256 <= st["resolution"] < self.dataset.resolution:
+                raise SpecError(f"a stage's resolution is below the run's ({self.dataset.resolution}) and at least 256")
+            if not last < st["until"] < 1.0:
+                raise SpecError("dataset.stages end in order, each before the run does (until: 0 to 1)")
+            last = st["until"]
+        if not 0.0 <= self.dataset.stage_blend < 1.0:
+            raise SpecError("dataset.stage_blend is a share of the run, 0 to below 1")
         _choice("network.algorithm", self.network.algorithm, ("LoRA", "LoHa", "LoKr", "OFT"))
         if self.network.base_lora and not -4.0 <= self.network.base_strength <= 4.0:
             raise SpecError("network.base_strength is a LoRA strength, between -4 and 4 (usually 1)")

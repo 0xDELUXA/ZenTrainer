@@ -413,6 +413,22 @@ class Trainer:
             logging.warning("[ZenTrainer] %s", msg)
             self._status("loading", message=msg)
         self.batches = data.Batches(self.dataset, s.optim.batch_size, s.seed)
+        # lower-resolution stages, each cached now: (until, resolution, dataset, batches)
+        from dataclasses import replace
+
+        self._stages = []
+        for st in s.dataset.stages:
+            res = int(st["resolution"])
+            ds = data.build(replace(s.dataset, resolution=res, stages=[]), _Lazy(lambda: self.models.clip), self.models.vae,
+                            root, cache, encoder_id, audio_vae=self.models.audio_vae, h3=self.h3,
+                            progress=lambda i, n, msg, r=res: self._status("loading", message=f"{msg} at {r} px ({i}/{n})"))
+            self._stages.append((float(st["until"]), res, ds, data.Batches(ds, s.optim.batch_size, s.seed + res)))
+        self._final_stage = (s.dataset.resolution, self.dataset, self.batches)
+        self._res_seen = 0
+        if self._stages:
+            plan = ", ".join(f"{r} px until {u:.0%}" for u, r, _, _ in self._stages)
+            logging.info("[ZenTrainer] resolution: %s, then %d px; each change blends over %.0f%% of the run",
+                         plan, s.dataset.resolution, s.dataset.stage_blend * 100)
 
         if s.memory.training_dtype != "fp32":
             if any(getattr(m, "layout_type", None) is not None for m in patcher.model.modules()):
@@ -609,6 +625,8 @@ class Trainer:
             mm.load_models_gpu([patcher], memory_required=self.headroom, force_full_load=False)
             self._fit_weights()
             self._pin_offloaded()
+            if not getattr(self, "_first_resident", None):
+                self._first_resident = patcher.loaded_size()  # the safe estimate's load, to return to
         else:
             mm.load_models_gpu([patcher], memory_required=1e20, force_full_load=True)
         patcher.model.requires_grad_(False)
@@ -665,6 +683,13 @@ class Trainer:
                 self._profile_next = False
                 self._profiled_step()
             else:
+                final = getattr(self, "_final_stage", None) or (self.spec.dataset.resolution, self.dataset, self.batches)
+                res, ds, batches = self._stage() if getattr(self, "_stages", None) else final
+                if res > getattr(self, "_res_seen", 0):
+                    if getattr(self, "_res_seen", 0):
+                        self._new_resolution(res)
+                    self._res_seen = res
+                self.dataset, self.batches = ds, batches
                 try:
                     ts = time.perf_counter()
                     self._train_step()
@@ -673,6 +698,8 @@ class Trainer:
                     if not self._back_off(e):
                         raise
                     continue  # that step again, with fewer weights on the card
+                finally:
+                    self.dataset = final[1]  # validation and samples use the run's own resolution
             if torch.cuda.is_available():
                 self._peak = max(self._peak, torch.cuda.max_memory_reserved())
                 self._warm += 1
@@ -688,6 +715,37 @@ class Trainer:
             for cb in self.callbacks:
                 cb.on_step(self)
         return "done"
+
+    def _stage(self):
+        """(resolution, dataset, batches) for this step: the stage the run is in, or while a change
+        blends, the next one with a probability that rises across the blend (seeded by the step,
+        so a resume picks the same)."""
+        if not self._stages:
+            return self._final_stage
+        f = self.step / max(1, self.spec.optim.steps)
+        bounds = [u for u, _, _, _ in self._stages]
+        levels = [(r, ds, b) for _, r, ds, b in self._stages] + [self._final_stage]
+        k = sum(1 for u in bounds if f >= u)
+        blend = self.spec.dataset.stage_blend
+        if k and blend > 0 and f < bounds[k - 1] + blend:
+            if random.Random(self.spec.seed * 1000003 + self.step).random() >= (f - bounds[k - 1]) / blend:
+                k -= 1
+        return levels[k]
+
+    def _new_resolution(self, res: int) -> None:
+        """A higher resolution needs more room for activations: the weights go back to where the
+        first load put them, and the VRAM fit measures again from there."""
+        logging.info("[ZenTrainer] now training at %d px", res)
+        if not self._auto_vram() or not getattr(self, "_first_resident", None):
+            return
+        self._trial = None
+        self.__dict__.pop("_ceiling", None)
+        self._resident = self._first_resident
+        self._fit_weights()
+        self._recompile_if_moved()
+        self._resident = None
+        self._warm = self._peak = 0
+        torch.cuda.reset_peak_memory_stats()
 
     def _recompile_if_moved(self) -> None:
         if getattr(self, "_compiled", 0):

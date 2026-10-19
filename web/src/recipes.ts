@@ -78,10 +78,14 @@ export const RECIPES: Recipe[] = [
     // validated: Automagic v3 at 1e-4 on 37 photos reached likeness 0.53 at 1500 steps and was
     // still climbing, so ~46 a photo (1700 for that set)
     steps: { perPhoto: 46, min: 1000, max: 2000 },
-    secPerStep: 1.45,
+    // 1.45 s a step at 1024 on the validating run; the first 60% at 768 (~0.56 of the cost) and
+    // the blend bring the average to ~1.05
+    secPerStep: 1.05,
     caption: { prompt: NL, subject: true },
     spec: {
-      dataset: { resolution: 1024 },
+      // 768 for the first 60%, blending into 1024 by 80%: identity is learned early, detail last.
+      // Not validated with the stage yet (the 0.53 likeness above was 1024 throughout)
+      dataset: { resolution: 1024, stages: [{ resolution: 768, until: 0.6 }], stage_blend: 0.2 },
       network: { rank: 16 },
       optim: { optimizer: 'Automagic3', learning_rate: 1e-4, scheduler: 'constant' },
       objective: { timesteps: 'uniform', shift: 0 },

@@ -724,3 +724,38 @@ def test_offloaded_weights_get_pinned_copies(monkeypatch):
     assert n == 4 and m[0].weight.is_pinned() and m[1].weight._qdata.is_pinned()
     assert torch.equal(m[0].weight.detach(), before) and torch.equal(m[1].weight._qdata, q)
     assert offload.pin_offloaded(m) == (0, 0)  # already pinned: left alone
+
+
+def test_resolution_stages_blend_into_the_next():
+    from zentrainer.harness import trainer as tr
+    from zentrainer.spec import TrainSpec
+
+    spec = TrainSpec.from_dict({"model": {"kind": "checkpoint", "ckpt_name": "x.safetensors"},
+                                "dataset": {"folder": "d", "resolution": 1024, "stages": [{"resolution": 768, "until": 0.6}],
+                                            "stage_blend": 0.2},
+                                "optim": {"steps": 1000}})
+    t = tr.Trainer.__new__(tr.Trainer)
+    t.spec = spec
+    t._stages = [(0.6, 768, "ds768", "b768")]
+    t._final_stage = (1024, "ds1024", "b1024")
+
+    def res_at(step):
+        t.step = step
+        return t._stage()[0]
+
+    assert {res_at(s) for s in range(0, 600)} == {768}
+    assert {res_at(s) for s in range(800, 1000)} == {1024}
+    early = sum(res_at(s) == 1024 for s in range(600, 650)) / 50
+    late = sum(res_at(s) == 1024 for s in range(750, 800)) / 50
+    assert early < 0.4 < 0.6 < late  # the share rises across the blend
+    assert [res_at(s) for s in range(600, 800)] == [res_at(s) for s in range(600, 800)]  # a resume picks the same
+
+
+def test_resolution_stages_are_checked():
+    from zentrainer.spec import SpecError, TrainSpec
+
+    base = {"model": {"kind": "checkpoint", "ckpt_name": "x.safetensors"}, "dataset": {"folder": "d", "resolution": 1024}}
+    for bad in ([{"resolution": 1024, "until": 0.5}], [{"resolution": 768, "until": 1.0}],
+                [{"resolution": 512, "until": 0.6}, {"resolution": 768, "until": 0.4}]):
+        with pytest.raises(SpecError):
+            TrainSpec.from_dict({**base, "dataset": {**base["dataset"], "stages": bad}})
