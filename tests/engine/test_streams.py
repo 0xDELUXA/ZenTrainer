@@ -649,3 +649,20 @@ def test_old_optimizer_states_resume_without_the_alphas():
     assert [g["params"] for g in out2["param_groups"]] == [[0, 1], [2, 3]]
     assert [out2["state"][i]["tag"] for i in range(4)] == new2[0] + new2[1]
     assert out2["param_groups"][1]["lr"] == 1.6e-3
+
+
+def test_automagic3_lr_floor_holds_its_rate():
+    from zentrainer.harness import optim
+    from zentrainer.spec import OptimSpec
+
+    def run(floor):
+        torch.manual_seed(0)
+        w = torch.nn.Parameter(torch.randn(16, 16) * 0.1)
+        opt, _ = optim.build([w], OptimSpec(optimizer="Automagic3", learning_rate=1e-3, lr_floor=floor))
+        for i in range(40):  # every update flips sign: the vote that walks the rate down
+            w.grad = torch.ones_like(w) * (1 if i % 2 else -1)
+            opt.step()
+        return optim.current_lr(opt)
+
+    assert run(0.0) < 0.5e-3  # without a floor it falls well below half
+    assert run(0.5) >= 0.5e-3 * 0.999  # with one it holds there

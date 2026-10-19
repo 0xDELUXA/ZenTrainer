@@ -157,7 +157,8 @@ OPTIMIZERS: dict[str, OptimizerDef] = {d.id: d for d in [
                  note="Each weight tunes its own LR (1e-7 to 1e-3). Start at 1e-6, constant schedule."),
     OptimizerDef("Automagic3", "Automagic v3 (auto LR)",
                  lambda p, s: importlib.import_module(".automagic3_batched", __package__).Automagic3Batched(
-                     p, lr=s.learning_rate, weight_decay=s.weight_decay, fused=False),
+                     p, lr=s.learning_rate, weight_decay=s.weight_decay, fused=False,
+                     **({"min_lr": s.learning_rate * s.lr_floor} if s.lr_floor > 0 else {})),
                  lr_hint="1e-4 (start)", adaptive=True,
                  note="Ostris's v3: one LR per group that climbs while updates agree and backs off when they "
                       "flip. It moves only on a steady trend, which small batches rarely give, so start near "

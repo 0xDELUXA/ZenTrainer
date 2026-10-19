@@ -138,6 +138,10 @@ class OptimSpec:
     # Weight averaging: checkpoints, samples and the saved LoRA use a running average of the
     # adapter (0.98 = roughly the last 50 steps). 0 = off.
     ema: float = 0.0
+    # Automagic3's adaptive rate never drops below this fraction of its start (0.5 = half). Its
+    # rate peaks early and then decays, and on MOSS-Image runs stalled under-strength (likeness
+    # flat after ~500 steps); a floor keeps it learning. 0 = no floor.
+    lr_floor: float = 0.0
 
 
 @dataclass
@@ -370,6 +374,8 @@ class TrainSpec:
             raise SpecError("dataset.keyframes is first, first_last or empty")
         if self.dataset.edit_template and "{}" not in self.dataset.edit_template:
             raise SpecError("dataset.edit_template needs {} where the instruction goes")
+        if not 0.0 <= self.optim.lr_floor <= 1.0:
+            raise SpecError("optim.lr_floor is a fraction of the start learning rate, 0 (off) to 1")
         if not 0.0 <= self.optim.ema < 1.0:
             raise SpecError("optim.ema is a decay between 0 (off) and below 1, e.g. 0.98")
         if self.optim.lora_plus < 0:
