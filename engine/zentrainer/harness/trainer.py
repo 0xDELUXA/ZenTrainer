@@ -242,6 +242,9 @@ class Trainer:
                         self.network.eject(self.models.patcher)
                         self.models.patcher.cleanup()
                         _comfy_compiler(True)  # after on_end: its final samples run without it too
+                        from .offload import overlap
+
+                        overlap(False)
                         if getattr(self, "_compiled", 0):
                             torch.compiler.set_stance("default")  # the final samples left it eager
             except BaseException as e:
@@ -598,6 +601,10 @@ class Trainer:
             optim.set_mode(self.optimizer, training=True)
         mm.in_training = True
         _comfy_compiler(False)
+        if self.spec.memory.offloading:
+            from .offload import overlap
+
+            overlap(True)
         if getattr(self, "_compiled", 0):
             torch.compiler.set_stance("default")
         self._recompile_if_moved()
@@ -606,6 +613,9 @@ class Trainer:
         import comfy.model_management as mm
 
         mm.in_training = False
+        from .offload import overlap
+
+        overlap(False)  # samples load models of their own: ComfyUI's streams as they are
         # the compiler stays off for samples too: models that drive it from their own forward
         # (MiniMax H3's malloc graphs) abort the process on a partly offloaded, LoRA-wrapped
         # model. It's back to the launch setting when the run ends.
