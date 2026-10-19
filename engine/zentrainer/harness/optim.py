@@ -156,7 +156,7 @@ OPTIMIZERS: dict[str, OptimizerDef] = {d.id: d for d in [
                  lr_hint="1e-6 (start)",
                  note="Each weight tunes its own LR (1e-7 to 1e-3). Start at 1e-6, constant schedule."),
     OptimizerDef("Automagic3", "Automagic v3 (auto LR)",
-                 lambda p, s: importlib.import_module(".automagic3", __package__).Automagic3(
+                 lambda p, s: importlib.import_module(".automagic3_batched", __package__).Automagic3Batched(
                      p, lr=s.learning_rate, weight_decay=s.weight_decay, fused=False),
                  lr_hint="1e-4 (start)", adaptive=True,
                  note="Ostris's v3: one LR per group that climbs while updates agree and backs off when they "
@@ -238,3 +238,22 @@ def set_lr(opt: torch.optim.Optimizer, sched, lr: float) -> None:
     sched.base_lrs = [lr * g.get("lr_mult", 1.0) for g in opt.param_groups]  # LoRA+ keeps its ratio
     for group, base, f in zip(opt.param_groups, sched.base_lrs, sched.lr_lambdas):
         group["lr"] = base * f(sched.last_epoch)
+
+
+def remap_state(state: dict, old_names: list[list[str]], new_names: list[list[str]]) -> dict:
+    """An optimizer state_dict saved over one set of named tensors, renumbered for another: what
+    the new set lacks is dropped (states saved while LoRA alphas still trained). Torch numbers a
+    state's tensors across its groups in order; `old_names`/`new_names` name them, per group."""
+    if [len(g) for g in old_names] == [len(g) for g in new_names] and old_names == new_names:
+        return state
+    old_idx = {n: i for i, n in enumerate(n for g in old_names for n in g)}
+    new_idx = {n: i for i, n in enumerate(n for g in new_names for n in g)}
+    per_param = {}
+    for name, i in new_idx.items():
+        o = old_idx.get(name)
+        if o is not None and o in state["state"]:
+            per_param[i] = state["state"][o]
+    groups = []
+    for saved, names in zip(state["param_groups"], new_names):
+        groups.append({**saved, "params": [new_idx[n] for n in names]})
+    return {"state": per_param, "param_groups": groups}

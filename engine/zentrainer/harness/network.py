@@ -238,6 +238,10 @@ class Network:
                 if adapter is None:
                     adapter = adapter_maps[spec.algorithm].create_train(m.weight, rank=spec.rank, alpha=alpha)
                 adapter = adapter.to(device=device, dtype=self.dtype).train().requires_grad_(True)
+                # alpha is the LoRA's fixed scale, a Parameter only so it saves: requires_grad_(True)
+                # above made it trainable, and the optimizer drifted it (16 -> 15.99..16.03)
+                if isinstance(getattr(adapter, "alpha", None), torch.nn.Parameter):
+                    adapter.alpha.requires_grad_(False)
                 self._own(name, adapter)
                 frozen, fast = assist.pop(key, None), preview.pop(key, None)
                 attached = (_Assisted(adapter, frozen, self._switch, fast, preview_strength)

@@ -4,6 +4,7 @@ import math
 import sys
 import types
 
+import pytest
 import torch
 
 from zentrainer.harness.streams import Streams, first_stream
@@ -550,3 +551,67 @@ def test_stopping_right_after_a_save_writes_no_copy():
     t.step = 1000
     cb.on_end(t, "done")
     assert saved[-1] == "final"
+
+
+def _automagic3_run(cls, dtype, steps=30, **kw):
+    torch.manual_seed(0)
+    # LoRA-like: repeated shapes, one odd element count (21, not a multiple of 8), a 1-D tensor
+    shapes = [(4, 16), (4, 16), (16, 4), (16, 4), (3, 7), (5,)]
+    ps = [torch.nn.Parameter((torch.randn(s) * 0.1).to(dtype)) for s in shapes]
+    targets = [torch.randn(s) for s in shapes]
+    opt = cls(ps, lr=1e-3, weight_decay=0.01, fused=False, **kw)
+    torch.manual_seed(1)
+    for _ in range(steps):
+        loss = sum(((p.float() - t) ** 2).mean() for p, t in zip(ps, targets))
+        loss.backward()
+        opt.step()
+    return ps, opt
+
+
+def test_automagic3_batched_matches_the_vendored_step():
+    from zentrainer.harness.automagic3 import Automagic3
+    from zentrainer.harness.automagic3_batched import Automagic3Batched
+
+    # 12 steps: the sign window (8) fills and the lr vote runs; far longer and the toy's lr grows
+    # until reduction-order rounding (~1e-7) compounds visibly
+    a, oa = _automagic3_run(Automagic3, torch.float32, steps=12)
+    b, ob = _automagic3_run(Automagic3Batched, torch.float32, steps=12)
+    for pa, pb in zip(a, b):
+        assert torch.allclose(pa, pb, rtol=1e-5, atol=1e-7)
+    assert oa.get_learning_rates() == pytest.approx(ob.get_learning_rates(), rel=1e-5)
+    assert oa.get_learning_rates()[0] != 1e-3  # the window filled and the lr moved: the vote is compared too
+    for pa, pb in zip(a, b):
+        sa, sb = oa.state[pa], ob.state[pb]
+        assert sa.keys() == sb.keys()  # same state layout: states save and resume either way
+        assert sa["hist_idx"] == sb["hist_idx"] and sa["step"] == sb["step"]
+        assert torch.equal(sa["sign_history"], sb["sign_history"])
+
+
+def test_automagic3_batched_bf16_trains():
+    from zentrainer.harness.automagic3_batched import Automagic3Batched
+
+    ps, _ = _automagic3_run(Automagic3Batched, torch.bfloat16, steps=60)
+    assert all(p.dtype == torch.bfloat16 and torch.isfinite(p).all() for p in ps)
+
+
+def test_old_optimizer_states_resume_without_the_alphas():
+    from zentrainer.harness.optim import remap_state
+
+    # saved while alphas trained: each adapter's alpha, up, down, numbered across the run's groups
+    names = ["a.alpha", "a.lora_up.weight", "a.lora_down.weight", "b.alpha", "b.lora_up.weight", "b.lora_down.weight"]
+    saved = {"state": {i: {"tag": n} for i, n in enumerate(names)},
+             "param_groups": [{"lr": 1e-4, "params": list(range(6))}]}
+    new = [[n for n in names if not n.endswith(".alpha")]]
+    out = remap_state(saved, [names], new)
+    assert out["param_groups"][0]["params"] == [0, 1, 2, 3] and out["param_groups"][0]["lr"] == 1e-4
+    assert [out["state"][i]["tag"] for i in range(4)] == new[0]
+
+    # LoRA+: (rest, up) groups, numbered across both
+    old = [[n for n in names if "lora_up" not in n], [n for n in names if "lora_up" in n]]
+    saved2 = {"state": {i: {"tag": n} for i, n in enumerate(old[0] + old[1])},
+              "param_groups": [{"lr": 1e-4, "params": [0, 1, 2, 3]}, {"lr": 1.6e-3, "params": [4, 5]}]}
+    new2 = [[n for n in old[0] if not n.endswith(".alpha")], old[1]]
+    out2 = remap_state(saved2, old, new2)
+    assert [g["params"] for g in out2["param_groups"]] == [[0, 1], [2, 3]]
+    assert [out2["state"][i]["tag"] for i in range(4)] == new2[0] + new2[1]
+    assert out2["param_groups"][1]["lr"] == 1.6e-3

@@ -472,11 +472,30 @@ class Trainer:
         if self.resume_from:
             self._restore(Path(self.resume_state or state_for({"path": self.resume_from}, self.run_id) or ""))
 
+    def _saved_optimizer_state(self, saved: dict) -> dict:
+        """States saved before LoRA alphas stopped training numbered every adapter tensor; now
+        alphas are frozen and left out. Renumber those by name (LoRA+ splits the up matrices into
+        a second group, as it did then)."""
+        groups = self.optimizer.param_groups
+        if [len(g["params"]) for g in saved["param_groups"]] == [len(g["params"]) for g in groups]:
+            return saved
+        names = {id(p): k for k, p in self.network.params.items()}
+        new = [[names[id(p)] for p in g["params"]] for g in groups]
+        everything = list(self.network.params)
+        if len(new) == 2:  # LoRA+: (rest, up)
+            old = [[k for k in everything if ".lora_up." not in f"{k}."], [k for k in everything if ".lora_up." in f"{k}."]]
+        else:
+            old = [everything]
+        if [len(g) for g in old] != [len(g["params"]) for g in saved["param_groups"]]:
+            return saved  # not that layout: let load_state_dict say what doesn't match
+        logging.info("[ZenTrainer] optimizer state from before alphas were frozen: renumbered")
+        return optim.remap_state(saved, old, new)
+
     def _restore(self, state_path: Path) -> None:
         """Continue from a checkpoint: adapters were loaded from its LoRA file above;
         this brings back optimizer moments, the LR schedule position, step and RNG."""
         state = torch.load(str(state_path), map_location="cpu", weights_only=False)  # our own file
-        self.optimizer.load_state_dict(state["optimizer"])
+        self.optimizer.load_state_dict(self._saved_optimizer_state(state["optimizer"]))
         self.scheduler.load_state_dict(state["scheduler"])
         self.step = int(state["step"])
         if state.get("live"):  # the checkpoint's LoRA file holds the average; training goes on from these
