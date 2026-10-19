@@ -3,11 +3,14 @@
 // left keeps, right excludes), touch it up with a brush, then grow/shrink and feather it, and
 // save it as the image's mask (<name>-masklabel.png; white trains at full weight).
 // Grow/shrink and feather apply on top of the raw mask, so they can be changed freely.
-// Keys: [ / ] brush size, B brush, E eraser, P points, ←/→ previous/next image, Ctrl+S save.
-import { ZenButton, ZenInput, ZenSlider } from '@nynxz/zenkit-ui'
+// A box (R) takes a region out, e.g. a watermark; the list on the left selects images, and "Apply to
+// selected" writes the mask to every selected image of this size (cut out of masks they already
+// have), with a preview first and an undo after.
+// Keys: [ / ] brush size, B brush, E eraser, P points, R box, ←/→ previous/next image, Ctrl+S save.
+import { ZenButton, ZenInput, ZenModal, ZenSlider } from '@nynxz/zenkit-ui'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { EngineError, engine, type DatasetItem } from '@/api/engine'
+import { EngineError, engine, thumbUrl, type DatasetItem } from '@/api/engine'
 
 const props = defineProps<{ name: string }>()
 const route = useRoute()
@@ -36,7 +39,7 @@ const loaded = ref(false)
 const dirty = ref(false)
 const hasMask = ref(false)
 
-const tool = ref<'points' | 'brush' | 'erase'>('points')
+const tool = ref<'points' | 'brush' | 'erase' | 'rect'>('points')
 const brush = ref(40)
 const grow = ref(0) // px, negative shrinks
 const feather = ref(0) // px
@@ -169,6 +172,14 @@ function render() {
     c.strokeStyle = '#fff'
     c.stroke()
   }
+  const r = dragRect.value
+  if (r) {
+    c.setLineDash([6, 4])
+    c.lineWidth = 1.5
+    c.strokeStyle = '#fff'
+    c.strokeRect(x + Math.min(r.x0, r.x1) * s, y + Math.min(r.y0, r.y1) * s, Math.abs(r.x1 - r.x0) * s, Math.abs(r.y1 - r.y0) * s)
+    c.setLineDash([])
+  }
 }
 watch([grow, feather, show], render)
 
@@ -207,6 +218,11 @@ function down(e: PointerEvent) {
     detect()
     return
   }
+  if (tool.value === 'rect') {
+    dragRect.value = { x0: p.x, y0: p.y, x1: p.x, y1: p.y }
+    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+    return
+  }
   painting = true
   last = null
   ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
@@ -215,10 +231,44 @@ function down(e: PointerEvent) {
 function move(e: PointerEvent) {
   cursor.value = { x: e.offsetX, y: e.offsetY }
   if (painting) stroke(toImage(e))
+  if (dragRect.value) {
+    const p = toImage(e)
+    dragRect.value = { ...dragRect.value, x1: Math.max(0, Math.min(W.value, p.x)), y1: Math.max(0, Math.min(H.value, p.y)) }
+    render()
+  }
 }
 function up() {
   painting = false
   last = null
+  if (dragRect.value) boxOut()
+}
+
+// ---- box: take a region out (a watermark) ----------------------------------------------------
+const dragRect = ref<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
+function isEmpty() {
+  const d = wctx().getImageData(0, 0, W.value, H.value).data
+  for (let i = 0; i < d.length; i += 4 * 7) if (d[i]! > 0) return false
+  return true
+}
+function boxOut() {
+  const r = dragRect.value!
+  dragRect.value = null
+  const x = Math.round(Math.min(r.x0, r.x1))
+  const y = Math.round(Math.min(r.y0, r.y1))
+  const w = Math.round(Math.abs(r.x1 - r.x0))
+  const h = Math.round(Math.abs(r.y1 - r.y0))
+  if (w < 2 || h < 2) return render()
+  const c = wctx()
+  if (isEmpty()) {
+    // a box out of nothing means nothing: start from the whole picture
+    c.fillStyle = '#fff'
+    c.fillRect(0, 0, W.value, H.value)
+    status.value = 'The whole picture trains except the box.'
+  }
+  c.fillStyle = '#000'
+  c.fillRect(x, y, w, h)
+  dirty.value = true
+  render()
 }
 const cursor = ref<{ x: number; y: number } | null>(null)
 
@@ -301,6 +351,7 @@ async function save() {
     grow.value = 0
     feather.value = 0
     status.value = 'Saved'
+    bust.value++
     await refresh()
   } catch (e) {
     error.value = e instanceof EngineError ? e.message : String(e)
@@ -324,6 +375,159 @@ function go(by: number) {
   router.replace({ query: { path: next.path } })
 }
 
+// ---- the list: pick images; masks of this size; apply to selected ----------------------------
+const bust = ref(0) // thumbnails of masks that just changed
+const thumb = (rel: string, size = 160) => `${thumbUrl(props.name, rel, size)}&v=${bust.value}`
+const selected = ref<Set<string>>(new Set())
+let anchor: string | null = null
+const sameSize = computed(() => (item.value ? items.value.filter((i) => i.width === item.value!.width && i.height === item.value!.height) : []))
+const selectedSame = computed(() => sameSize.value.filter((i) => selected.value.has(i.path)))
+const sameMasks = computed(() => sameSize.value.filter((i) => i.mask && i.path !== item.value?.path))
+function pick(it: DatasetItem, e: MouseEvent, viaBox = false) {
+  if (!viaBox && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+    if (it.path === path.value) return
+    if (dirty.value && !confirm('Leave without saving this mask?')) return
+    router.replace({ query: { path: it.path } })
+    return
+  }
+  const next = new Set(selected.value)
+  if (e.shiftKey && anchor) {
+    const a = items.value.findIndex((i) => i.path === anchor)
+    const b = items.value.findIndex((i) => i.path === it.path)
+    for (const i of items.value.slice(Math.min(a, b), Math.max(a, b) + 1)) next.add(i.path)
+  } else if (next.has(it.path)) next.delete(it.path)
+  else next.add(it.path)
+  anchor = it.path
+  selected.value = next
+}
+// the list on the left: search and a filter, like the lightbox's thumbnails
+const search = ref('')
+const filter = ref<'all' | 'size' | 'unmasked' | 'masked' | 'selected'>('all')
+const FILTERS = { all: 'All', size: 'This size', unmasked: 'Unmasked', masked: 'Masked', selected: 'Selected' } as const
+const shown = computed(() => {
+  const q = search.value.trim().toLowerCase()
+  return items.value.filter((it) => {
+    if (q && !it.path.toLowerCase().includes(q) && !(it.caption ?? '').toLowerCase().includes(q)) return false
+    if (filter.value === 'size') return !!item.value && it.width === item.value.width && it.height === item.value.height
+    if (filter.value === 'unmasked') return !it.mask
+    if (filter.value === 'masked') return !!it.mask
+    if (filter.value === 'selected') return selected.value.has(it.path)
+    return true
+  })
+})
+const selectShown = () => (selected.value = new Set([...selected.value, ...shown.value.map((i) => i.path)]))
+const selectSame = (onlyUnmasked = false) =>
+  (selected.value = new Set(sameSize.value.filter((i) => !onlyUnmasked || !i.mask).map((i) => i.path)))
+async function useMask(it: DatasetItem) {
+  const m = new Image()
+  await new Promise<void>((res, rej) => {
+    m.onload = () => res()
+    m.onerror = () => rej(new Error('mask failed to load'))
+    m.src = fileUrl(it.mask!)
+  })
+  wctx().drawImage(m, 0, 0, W.value, H.value)
+  dirty.value = true
+  status.value = `Started from ${it.filename}'s mask.`
+  render()
+}
+
+const loadImg = (src: string) =>
+  new Promise<HTMLImageElement>((res, rej) => {
+    const im = new Image()
+    im.onload = () => res(im)
+    im.onerror = () => rej(new Error(`couldn't load ${src}`))
+    im.src = src
+  })
+const applyOpen = ref(false)
+const applyMode = ref<'cutout' | 'replace'>('cutout')
+const previews = ref<{ path: string; url: string; had: boolean }[]>([])
+const PREVIEW_MAX = 48
+const lastBatch = ref<{ batch: string; count: number } | null>(null)
+// a selected image with the mask as it would be written: its own mask (cut out) or the new one
+async function previewTile(it: DatasetItem, mask: HTMLCanvasElement): Promise<string> {
+  const im = await loadImg(thumb(it.path, 256))
+  const w = im.naturalWidth
+  const h = im.naturalHeight
+  const m = document.createElement('canvas')
+  m.width = w
+  m.height = h
+  const mc = m.getContext('2d', { willReadFrequently: true })!
+  mc.drawImage(mask, 0, 0, w, h)
+  if (applyMode.value === 'cutout' && it.mask) {
+    mc.globalCompositeOperation = 'darken'
+    mc.drawImage(await loadImg(thumb(it.mask, 256)), 0, 0, w, h)
+  }
+  const d = mc.getImageData(0, 0, w, h)
+  for (let i = 0; i < d.data.length; i += 4) {
+    const keep = d.data[i]! / 255
+    d.data[i] = 20
+    d.data[i + 1] = 14
+    d.data[i + 2] = 40
+    d.data[i + 3] = Math.round((1 - keep) * 190)
+  }
+  mc.globalCompositeOperation = 'source-over'
+  mc.putImageData(d, 0, 0)
+  const out = document.createElement('canvas')
+  out.width = w
+  out.height = h
+  const oc = out.getContext('2d')!
+  oc.drawImage(im, 0, 0)
+  oc.drawImage(m, 0, 0)
+  return out.toDataURL('image/jpeg', 0.85)
+}
+async function openApply() {
+  applyOpen.value = true
+  await buildPreviews()
+}
+async function buildPreviews() {
+  previews.value = []
+  const mask = finalMask()
+  for (const it of selectedSame.value.slice(0, PREVIEW_MAX)) {
+    try {
+      previews.value = [...previews.value, { path: it.path, url: await previewTile(it, mask), had: !!it.mask }]
+    } catch {
+      // a thumbnail that won't load just isn't previewed
+    }
+  }
+}
+watch(applyMode, () => applyOpen.value && buildPreviews())
+async function doApply() {
+  busy.value = true
+  error.value = null
+  try {
+    const paths = selectedSame.value.map((i) => i.path)
+    const r = await engine.applyMasks(props.name, paths, finalMask().toDataURL('image/png'), applyMode.value)
+    const done = r.results.filter((x) => x.mask).length
+    const skipped = r.results.filter((x) => x.skipped)
+    lastBatch.value = r.batch ? { batch: r.batch, count: done } : null
+    applyOpen.value = false
+    bust.value++
+    await refresh()
+    if (paths.includes(path.value)) await load()
+    status.value = `Applied to ${done} image${done === 1 ? '' : 's'}` + (skipped.length ? `, ${skipped.length} skipped (${skipped[0]!.skipped})` : '')
+  } catch (e) {
+    error.value = e instanceof EngineError ? e.message : String(e)
+  } finally {
+    busy.value = false
+  }
+}
+async function undoApply() {
+  if (!lastBatch.value) return
+  busy.value = true
+  try {
+    const r = await engine.undoMasks(props.name, lastBatch.value.batch)
+    lastBatch.value = null
+    bust.value++
+    await refresh()
+    await load()
+    status.value = `Put back the masks of ${r.restored} image${r.restored === 1 ? '' : 's'}`
+  } catch (e) {
+    error.value = e instanceof EngineError ? e.message : String(e)
+  } finally {
+    busy.value = false
+  }
+}
+
 function onKey(e: KeyboardEvent) {
   if ((e.target as HTMLElement).closest('input, textarea')) return
   if ((e.ctrlKey || e.metaKey) && e.key === 's') {
@@ -334,6 +538,7 @@ function onKey(e: KeyboardEvent) {
   else if (e.key === 'b') tool.value = 'brush'
   else if (e.key === 'e') tool.value = 'erase'
   else if (e.key === 'p') tool.value = 'points'
+  else if (e.key === 'r') tool.value = 'rect'
   else if (e.key === 'ArrowLeft') go(-1)
   else if (e.key === 'ArrowRight') go(1)
 }
@@ -353,7 +558,7 @@ watch(path, load)
 </script>
 
 <template>
-  <div class="page mask-page">
+  <div class="page full mask-page">
     <div class="page-head">
       <div class="titles">
         <h1>
@@ -367,6 +572,38 @@ watch(path, load)
     </div>
 
     <div class="editor">
+      <aside class="list card">
+        <div class="list-search">
+          <i class="mdi mdi-magnify" />
+          <input v-model="search" placeholder="Search names and captions…" spellcheck="false" />
+        </div>
+        <div class="chips">
+          <button v-for="(label, k) in FILTERS" :key="k" class="chip" :class="{ on: filter === k }" @click="filter = k">
+            {{ label }}<template v-if="k === 'selected' && selected.size"> · {{ selected.size }}</template>
+          </button>
+        </div>
+        <div class="list-tools small">
+          <span class="muted">{{ shown.length }} shown</span>
+          <span class="spacer" />
+          <button class="link" :disabled="!shown.length" @click="selectShown">Select shown</button>
+          <button v-if="selected.size" class="link" @click="selected = new Set()">Clear</button>
+        </div>
+        <div class="tiles">
+          <button
+            v-for="it in shown"
+            :key="it.path"
+            class="tile"
+            :class="{ current: it.path === path, sel: selected.has(it.path), other: item && (it.width !== item.width || it.height !== item.height) }"
+            :title="`${it.filename} · ${it.width}×${it.height}${it.mask ? ' · masked' : ''}. Click opens it; Ctrl/Shift-click or the tick selects`"
+            @click="pick(it, $event)"
+          >
+            <img :src="thumb(it.path, 160)" loading="lazy" alt="" />
+            <img v-if="it.mask" class="tile-mask" :src="thumb(it.mask, 64)" loading="lazy" alt="" />
+            <span class="tick" @click.stop="pick(it, $event, true)"><i :class="selected.has(it.path) ? 'mdi mdi-checkbox-marked' : 'mdi mdi-checkbox-blank-outline'" /></span>
+          </button>
+          <p v-if="!shown.length" class="muted small">Nothing matches.</p>
+        </div>
+      </aside>
       <div ref="stage" class="stage card" :class="tool" @contextmenu.prevent>
         <canvas ref="view" @pointerdown="down" @pointermove="move" @pointerup="up" @pointerleave="(cursor = null), up()" />
         <span
@@ -401,7 +638,9 @@ watch(path, load)
             <button :class="{ on: tool === 'points' }" title="P" @click="tool = 'points'"><i class="mdi mdi-gesture-tap" /> Points</button>
             <button :class="{ on: tool === 'brush' }" title="B" @click="tool = 'brush'"><i class="mdi mdi-brush" /> Brush</button>
             <button :class="{ on: tool === 'erase' }" title="E" @click="tool = 'erase'"><i class="mdi mdi-eraser" /> Erase</button>
+            <button :class="{ on: tool === 'rect' }" title="R: drag a box to take it out (a watermark)" @click="tool = 'rect'"><i class="mdi mdi-selection" /> Box</button>
           </div>
+          <p v-if="tool === 'rect'" class="muted small">Drag a box over what shouldn't train (a watermark, a caption). On an empty mask the rest of the picture is kept.</p>
           <label v-if="tool !== 'points'" class="f small">
             <span class="muted">Brush size {{ brush }} px · [ ]</span>
             <ZenSlider v-model="brush" :min="4" :max="400" :step="2" />
@@ -410,6 +649,32 @@ watch(path, load)
             <button class="mini" @click="invert"><i class="mdi mdi-invert-colors" /> Invert</button>
             <button class="mini" @click="fill(true)">Keep all</button>
             <button class="mini" @click="fill(false)">Clear</button>
+          </div>
+        </section>
+
+        <section v-if="item" class="card grp">
+          <div class="eyebrow">This size · {{ item.width }}×{{ item.height }}</div>
+          <p class="muted small">{{ sameSize.length }} image{{ sameSize.length === 1 ? '' : 's' }} this size, {{ sameSize.filter((i) => i.mask).length }} masked</p>
+          <template v-if="sameMasks.length">
+            <span class="muted small">Start from one of their masks:</span>
+            <div class="mask-picks">
+              <button v-for="it in sameMasks.slice(0, 12)" :key="it.path" class="mask-pick" :title="`Use ${it.filename}'s mask`" @click="useMask(it)">
+                <img :src="thumb(it.mask!, 128)" loading="lazy" alt="" />
+              </button>
+            </div>
+          </template>
+          <div class="row">
+            <button class="mini" @click="selectSame()">Select this size</button>
+            <button class="mini" @click="selectSame(true)">Unmasked only</button>
+            <button v-if="selected.size" class="mini" @click="selected = new Set()">Clear</button>
+          </div>
+          <ZenButton icon="mdi mdi-checkbox-multiple-marked-outline" :disabled="busy || !loaded || !selectedSame.length" @click="openApply">
+            Apply to {{ selectedSame.length }} selected…
+          </ZenButton>
+          <div v-if="selected.size > selectedSame.length" class="muted small">{{ selected.size - selectedSame.length }} selected are another size and are left out</div>
+          <div v-if="lastBatch" class="row small">
+            <span class="muted">Applied to {{ lastBatch.count }}</span>
+            <button class="link" :disabled="busy" @click="undoApply">Undo</button>
           </div>
         </section>
 
@@ -442,15 +707,45 @@ watch(path, load)
         </section>
       </aside>
     </div>
+
+    <ZenModal v-model:open="applyOpen" :title="`Apply this mask to ${selectedSame.length} image${selectedSame.length === 1 ? '' : 's'}`" width="880px">
+      <div class="apply">
+        <div class="seg">
+          <button :class="{ on: applyMode === 'cutout' }" @click="applyMode = 'cutout'">Cut out of their masks</button>
+          <button :class="{ on: applyMode === 'replace' }" @click="applyMode = 'replace'">Replace their masks</button>
+        </div>
+        <p class="muted small">
+          {{ applyMode === 'cutout' ? 'Images with a mask keep it; what this mask leaves out comes out of theirs. Images without one get this mask.' : 'Every selected image gets exactly this mask.' }}
+          Their current masks are kept aside, so Undo puts them back. Shaded areas won't train.
+        </p>
+        <div class="previews">
+          <figure v-for="pv in previews" :key="pv.path" class="pv">
+            <img :src="pv.url" alt="" />
+            <figcaption class="small mono">{{ pv.path.split('/').pop() }}<span v-if="pv.had" class="muted"> · had a mask</span></figcaption>
+          </figure>
+          <div v-if="previews.length < Math.min(selectedSame.length, PREVIEW_MAX)" class="muted small"><i class="mdi mdi-loading mdi-spin" /> Previewing…</div>
+          <div v-if="selectedSame.length > PREVIEW_MAX" class="muted small">and {{ selectedSame.length - PREVIEW_MAX }} more</div>
+        </div>
+      </div>
+      <template #footer>
+        <ZenButton @click="applyOpen = false">Cancel</ZenButton>
+        <ZenButton variant="primary" icon="mdi mdi-check" :disabled="busy" @click="doApply">Apply to {{ selectedSame.length }}</ZenButton>
+      </template>
+    </ZenModal>
   </div>
 </template>
 
 <style scoped>
+/* exactly the window's height (the scroll area's content is as tall as the page, so 100% isn't
+   a bound): the side panels scroll in their columns */
 .mask-page {
-  height: 100%;
+  box-sizing: border-box;
+  height: 100dvh;
+  padding-bottom: 16px;
   display: flex;
   flex-direction: column;
 }
+
 .titles h1 {
   display: flex;
   gap: 6px;
@@ -460,7 +755,8 @@ watch(path, load)
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
+  grid-template-columns: 236px minmax(0, 1fr) 300px;
+  grid-template-rows: minmax(0, 1fr); /* the side panels scroll; they don't stretch the page */
   gap: 14px;
 }
 .stage {
@@ -529,12 +825,17 @@ watch(path, load)
 }
 .seg button {
   flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  white-space: nowrap;
   border: 1px solid color-mix(in srgb, var(--zen-border) 70%, transparent);
   background: none;
   color: var(--zen-muted);
   font: inherit;
   font-size: 12px;
-  padding: 5px 8px;
+  padding: 5px 4px;
   border-radius: var(--r-md);
   cursor: pointer;
 }
@@ -573,9 +874,196 @@ watch(path, load)
 .err {
   color: var(--zen-danger);
 }
+.mask-picks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
+  gap: 6px;
+}
+.mask-pick {
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--zen-border) 70%, transparent);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: #000;
+  cursor: pointer;
+  aspect-ratio: 1;
+}
+.mask-pick:hover {
+  border-color: var(--zen-accent);
+}
+.mask-pick img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  min-height: 0;
+}
+.list-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  height: 30px;
+  border-radius: var(--r-md);
+  background: var(--zen-surface-2);
+  color: var(--zen-muted);
+}
+.list-search:focus-within {
+  outline: 1px solid var(--zen-accent);
+}
+.list-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  outline: none;
+  color: var(--zen-text);
+  font: inherit;
+  font-size: 12px;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.chip {
+  border: 1px solid color-mix(in srgb, var(--zen-border) 70%, transparent);
+  background: none;
+  color: var(--zen-muted);
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.chip.on {
+  background: var(--zen-surface-2);
+  color: var(--zen-text);
+  border-color: var(--zen-accent);
+}
+.list-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.spacer {
+  flex: 1;
+}
+.tiles {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  grid-auto-rows: min-content;
+  gap: 6px;
+  align-content: start;
+}
+.tile {
+  position: relative;
+  aspect-ratio: 1;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--zen-surface-2);
+  cursor: pointer;
+}
+.tile > img:first-child {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.tile.other {
+  opacity: 0.4;
+}
+.tile.current {
+  border-color: var(--zen-accent);
+}
+.tile.sel {
+  border-color: color-mix(in srgb, var(--zen-accent) 55%, transparent);
+}
+.tile.current.sel {
+  border-color: var(--zen-accent);
+}
+.tile-mask {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 24px;
+  height: 24px;
+  object-fit: cover;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+}
+.tick {
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  font-size: 16px;
+  line-height: 1;
+  color: #fff;
+  text-shadow: 0 0 3px rgba(0, 0, 0, 0.8);
+}
+.tile:not(.sel):not(:hover) .tick {
+  opacity: 0.55;
+}
+.apply {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.previews {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  max-height: 56vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.pv {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pv img {
+  width: 100%;
+  border-radius: var(--r-sm);
+  display: block;
+}
+.pv figcaption {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 1180px) {
+  .editor {
+    grid-template-columns: 180px minmax(0, 1fr) 270px;
+  }
+}
 @media (max-width: 900px) {
+  /* one column: the page scrolls as usual, the canvas keeps a usable height */
+  .list {
+    max-height: 260px;
+  }
+  .mask-page {
+    height: auto;
+  }
   .editor {
     grid-template-columns: 1fr;
+    grid-template-rows: none;
+  }
+  .stage {
+    height: 62vh;
   }
 }
 </style>

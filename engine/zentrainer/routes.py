@@ -327,6 +327,20 @@ def register(server) -> None:
         b = await request.json()
         return await _ds(lambda: datasets.save_mask(name, str(b.get("path", "")), str(b.get("png") or "")))
 
+    @routes.post("/zentrainer/api/datasets/{name}/masks/apply")
+    async def apply_masks(request):
+        """One mask onto many images of its size: {paths, png, mode: cutout|replace}.
+        Returns {batch (to undo), results: [{path, mask} | {path, skipped}]}."""
+        name, b = request.match_info["name"], await request.json()
+        paths = [str(p) for p in (b.get("paths") or [])]
+        return await _ds(lambda: datasets.apply_mask(name, paths, str(b.get("png") or ""), str(b.get("mode") or "cutout")))
+
+    @routes.post("/zentrainer/api/datasets/{name}/masks/undo")
+    async def undo_masks(request):
+        """Undo an apply: {batch}."""
+        name, b = request.match_info["name"], await request.json()
+        return await _ds(lambda: datasets.undo_masks(name, str(b.get("batch") or "")))
+
     @routes.get("/zentrainer/api/caption/{job_id}")
     async def caption_job(request):
         from . import captioner

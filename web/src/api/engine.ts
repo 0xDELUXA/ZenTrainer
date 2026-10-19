@@ -733,6 +733,14 @@ export const engine = {
   segmentJob: (id: string) => call<{ job: SegmentJob }>(`/segment/${encodeURIComponent(id)}`).then((r) => r.job),
   saveMask: (name: string, path: string, png: string) =>
     call<{ mask: string | null }>(`${dsPath(name)}/mask`, { method: 'PUT', body: JSON.stringify({ path, png }) }),
+  /** one mask onto many images of its size; cutout keeps each image's own mask and takes the new one's black out of it */
+  applyMasks: (name: string, paths: string[], png: string, mode: 'cutout' | 'replace') =>
+    call<{ batch: string | null; results: { path: string; mask?: string; skipped?: string }[] }>(`${dsPath(name)}/masks/apply`, {
+      method: 'POST',
+      body: JSON.stringify({ paths, png, mode }),
+    }),
+  undoMasks: (name: string, batch: string) =>
+    call<{ restored: number }>(`${dsPath(name)}/masks/undo`, { method: 'POST', body: JSON.stringify({ batch }) }),
   splitVideos: (name: string, body: { seconds: number; count: number; longer_than: number }) =>
     call<{ clips: number; moved: string[] }>(`${dsPath(name)}/split`, { method: 'POST', body: JSON.stringify(body) }),
   mergeLoras: (body: { members: { name: string; strength: number }[]; out_name: string; max_rank?: number; energy?: number }) =>

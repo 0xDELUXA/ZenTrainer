@@ -115,3 +115,45 @@ def test_clearing_caches_only_touches_zentrainers_own(tmp_path, monkeypatch):
     storage.clean_cache(Store(), "cats")
     assert sorted(p.name for p in cache.iterdir()) == ["k4"]  # dogs' stays
     assert (theirs / "x.npz").is_file()
+
+
+def _mask(size, white_box=None, black_box=None, base=0) -> bytes:
+    m = Image.new("L", size, base)
+    if white_box:
+        m.paste(255, white_box)
+    if black_box:
+        m.paste(0, black_box)
+    buf = io.BytesIO()
+    m.save(buf, "PNG")
+    return buf.getvalue()
+
+
+def test_a_watermark_mask_applies_to_same_size_images_and_undoes(ds, tmp_path, monkeypatch):
+    import base64
+
+    monkeypatch.setattr(datasets, "_mask_undo", lambda name: tmp_path / "undo" / name)
+    for n in ("a.png", "b.png", "c.png"):
+        (ds / n).write_bytes(_png("red"))
+    Image.new("RGB", (16, 16), "red").save(ds / "big.png")
+    subject = _mask((8, 8), white_box=(0, 0, 4, 8))  # a's own mask: its left half
+    (ds / "a-masklabel.png").write_bytes(subject)
+    (ds / "_masks").mkdir()
+    (ds / "_masks" / "c.png").write_bytes(_mask((8, 8), white_box=(0, 0, 8, 8)))  # the older layout
+    watermark = "data:image/png;base64," + base64.b64encode(_mask((8, 8), black_box=(2, 6, 4, 8), base=255)).decode()
+
+    out = datasets.apply_mask("cats", ["a.png", "b.png", "c.png", "big.png"], watermark, "cutout")
+    assert [r.get("skipped", "") != "" for r in out["results"]] == [False, False, False, True]
+    with Image.open(ds / "a-masklabel.png") as m:  # the subject stays, the box comes out of it
+        assert m.getpixel((1, 1)) == 255 and m.getpixel((6, 1)) == 0 and m.getpixel((3, 7)) == 0
+    with Image.open(ds / "b-masklabel.png") as m:  # no mask before: the watermark mask itself
+        assert m.getpixel((6, 1)) == 255 and m.getpixel((3, 7)) == 0
+    assert (ds / "c-masklabel.png").is_file() and not (ds / "_masks" / "c.png").exists()
+
+    datasets.undo_masks("cats", out["batch"])
+    assert (ds / "a-masklabel.png").read_bytes() == subject  # exactly as it was
+    assert not (ds / "b-masklabel.png").exists()  # it had none
+    assert (ds / "_masks" / "c.png").is_file() and not (ds / "c-masklabel.png").exists()
+    with pytest.raises(datasets.DatasetError):
+        datasets.undo_masks("cats", out["batch"])  # once
+    with pytest.raises(datasets.DatasetError):
+        datasets.undo_masks("cats", "../../etc")

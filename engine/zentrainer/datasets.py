@@ -314,10 +314,112 @@ def save_mask(name: str, rel: str, data_url: str) -> dict:
             size = src.size
         mask = m.convert("L").resize(size, Image.Resampling.BILINEAR) if m.size != size else m.convert("L")
     target = img.with_name(img.stem + "-masklabel.png")
+    safeio.write_bytes(target, _png(mask))
     if old and old != target:
-        old.unlink()
-    mask.save(target)
+        old.unlink()  # after the new one is in place
     return {"mask": str(target.relative_to(d))}
+
+
+def _png(im) -> bytes:
+    import io
+
+    buf = io.BytesIO()
+    im.save(buf, "PNG")
+    return buf.getvalue()
+
+
+MASK_UNDO_KEEP = 20  # applied batches that can be undone, per dataset
+_BATCH = re.compile(r"^\d{8}-\d{6}-[0-9a-f]{6}$")
+
+
+def _mask_undo(name: str) -> Path:
+    import folder_paths
+
+    return Path(folder_paths.get_user_directory()) / "zentrainer" / "undo" / "masks" / name
+
+
+def apply_mask(name: str, rels: list[str], data_url: str, mode: str = "cutout") -> dict:
+    """One mask onto many images of its size (the mask editor's "apply to selected"): `cutout`
+    keeps each image's own mask and takes the new one's black out of it (a watermark box comes
+    out of a subject mask), `replace` writes it as is. Images of another size are skipped. Every
+    mask it changes is copied aside first, so the batch can be undone (undo_masks)."""
+    import base64
+    import io
+    import secrets
+    import shutil
+    import time
+
+    from PIL import Image, ImageChops
+
+    if mode not in ("cutout", "replace"):
+        raise DatasetError("mode is cutout or replace")
+    d = folder(name)
+    with Image.open(io.BytesIO(base64.b64decode(data_url.split(",", 1)[-1]))) as m:
+        applied = m.convert("L")
+    batch = time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(3)
+    bdir = _mask_undo(name) / batch
+    manifest, results = [], []
+    for rel in rels:
+        img = (d / rel).resolve()
+        if d.resolve() not in img.parents or not img.is_file() or img.suffix.lower() not in IMAGE_EXTS:
+            results.append({"path": rel, "skipped": "not an image in this dataset"})
+            continue
+        with Image.open(img) as src:
+            if src.size != applied.size:
+                results.append({"path": rel, "skipped": f"{src.size[0]}×{src.size[1]}, not {applied.size[0]}×{applied.size[1]}"})
+                continue
+        old = find_mask(img)
+        entry = {"path": rel, "had": None, "backup": None}
+        new = applied
+        if old:
+            bdir.mkdir(parents=True, exist_ok=True)
+            entry["had"] = str(old.relative_to(d))
+            entry["backup"] = f"{len(manifest)}{old.suffix.lower()}"
+            shutil.copy2(old, bdir / entry["backup"])
+            if mode == "cutout":
+                with Image.open(old) as om:
+                    own = om.convert("L")
+                    own = own.resize(applied.size, Image.Resampling.BILINEAR) if own.size != applied.size else own
+                new = ImageChops.darker(own, applied)
+        target = img.with_name(img.stem + "-masklabel.png")
+        safeio.write_bytes(target, _png(new))
+        if old and old != target:
+            old.unlink()  # backed up above
+        entry["wrote"] = str(target.relative_to(d))
+        manifest.append(entry)
+        results.append({"path": rel, "mask": entry["wrote"]})
+    if manifest:
+        bdir.mkdir(parents=True, exist_ok=True)
+        safeio.write_json(bdir / "manifest.json", {"mode": mode, "entries": manifest})
+        done = sorted(p for p in bdir.parent.iterdir() if p.is_dir() and _BATCH.match(p.name))
+        for gone in done[:-MASK_UNDO_KEEP]:
+            shutil.rmtree(gone, ignore_errors=True)
+    return {"batch": batch if manifest else None, "results": results}
+
+
+def undo_masks(name: str, batch: str) -> dict:
+    """Put back the masks an apply_mask batch changed (and remove the ones it added)."""
+    import shutil
+
+    if not _BATCH.match(batch):
+        raise DatasetError("no such batch")
+    d = folder(name)
+    bdir = _mask_undo(name) / batch
+    data = safeio.read_json(bdir / "manifest.json", None)
+    if not data:
+        raise DatasetError("that edit can't be undone any more")
+    restored = 0
+    for e in reversed(data["entries"]):
+        wrote = _inside(d, e["wrote"])
+        if e["had"]:
+            safeio.write_bytes(_inside(d, e["had"]), (bdir / e["backup"]).read_bytes())
+            if wrote != _inside(d, e["had"]) and wrote.is_file():
+                wrote.unlink()
+        elif wrote.is_file():
+            wrote.unlink()
+        restored += 1
+    shutil.rmtree(bdir, ignore_errors=True)
+    return {"restored": restored}
 
 
 def split_videos(name: str, seconds: float = 3.0, count: int = 20, longer_than: float = 20.0) -> dict:
