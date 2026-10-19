@@ -1067,7 +1067,6 @@ h2 {
   border-radius: var(--r-lg);
   border: 1px solid color-mix(in srgb, var(--zen-border) 70%, transparent);
 }
-.seg button,
 .locked {
   opacity: 0.5;
   pointer-events: none;
@@ -1079,6 +1078,7 @@ h2 {
   color: var(--zen-muted);
   line-height: 1.5;
 }
+.seg button,
 .chip-btn {
   border: none;
   background: none;

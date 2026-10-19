@@ -3,7 +3,7 @@
 // from ComfyUI's own templates plus the builds in each family's Hugging Face repo; every part
 // shows whether it's installed and downloads in place if not. "Custom" keeps the manual
 // file-by-file picker for anything the catalog doesn't know.
-import { ZenCombo } from '@nynxz/zenkit-ui'
+import { ZenButton, ZenCombo } from '@nynxz/zenkit-ui'
 import { computed, onMounted, ref, watch } from 'vue'
 import { engine, type ModelFamily, type ModelFile, type ModelFolder, type ModelProfile, type SampleDefaults } from '@/api/engine'
 import { fmtAdded, fmtBytes, finished, hfToken, isNew, startDownloadSync, targets } from '@/downloads'
@@ -289,7 +289,7 @@ defineExpose({ refresh: () => fam.value && open(fam.value.id, true) })
 
       <div class="fp-foot">
         <template v-if="missingParts.length > 1">
-          <button class="chip-btn" @click="downloadAll"><i class="mdi mdi-download-multiple" /> Download all · {{ fmtBytes(missingBytes) }}</button>
+          <ZenButton class="dl-all" size="sm" icon="mdi mdi-download-multiple" @click="downloadAll">Download all · {{ fmtBytes(missingBytes) }}</ZenButton>
         </template>
         <span class="muted small ellipsis" :title="targets[parts[0]?.folder ?? 'diffusion_models']">
           <template v-if="missingParts.length">Downloads go to {{ targets[parts[0]?.folder ?? 'diffusion_models'] ?? 'your models folder' }}</template>
@@ -424,6 +424,11 @@ defineExpose({ refresh: () => fam.value && open(fam.value.id, true) })
   gap: 10px;
   min-height: 26px;
   margin-top: 2px;
+}
+/* one line: the folder path beside it truncates instead */
+.dl-all {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .small {
   font-size: 11px;
