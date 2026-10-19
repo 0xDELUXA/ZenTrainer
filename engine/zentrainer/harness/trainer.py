@@ -344,6 +344,7 @@ class Trainer:
         patcher = self.models.patcher
         compat.prune_unused(patcher)
         self._auto_offload(patcher)
+        self._offload_skip()
         from . import int8_backward
 
         # weight-only int8 layers that need a gradient: int8 forward instead of a dequantized bf16 one
@@ -532,6 +533,15 @@ class Trainer:
             gb = 1024 ** 3
             logging.info("[ZenTrainer] weight offloading on: the model is %.1f GB on a %.1f GB card", weights / gb, total / gb)
             self._status("loading", message=f"Offloading weights: the model ({weights / gb:.0f} GB) doesn't fit beside training in {total / gb:.0f} GB")
+
+    def _offload_skip(self) -> None:
+        """Kept (un-checkpointed) last blocks trade VRAM for speed, but with weights offloaded
+        that VRAM holds weights instead, and is worth as much: measured on Krea 2 int8 at 1024 px,
+        16 GB card, keeping 6 blocks cost 2 GB of weights on the card for no faster steps."""
+        m = self.spec.memory
+        if m.offloading and m.gradient_checkpointing and m.checkpoint_skip > 0:
+            logging.info("[ZenTrainer] keep last blocks %d -> 0: with weights offloaded, that VRAM holds weights instead", m.checkpoint_skip)
+            m.checkpoint_skip = 0
 
     def enter_training(self) -> None:
         """Load for training: everything else out of VRAM, model in train mode."""
