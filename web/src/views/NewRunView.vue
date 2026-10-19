@@ -10,6 +10,7 @@ import { inputChoices } from '@/api/comfy'
 import AdapterPicker from '@/components/AdapterPicker.vue'
 import SamplePromptList from '@/components/SamplePromptList.vue'
 import FamilyPicker, { type SampleSuggestion } from '@/components/FamilyPicker.vue'
+import FocusField from '@/components/FocusField.vue'
 import { downloadFor, fmtBytes } from '@/downloads'
 import { setSetting, settings } from '@/settings'
 import {
@@ -22,6 +23,7 @@ import {
   type DatasetItem,
   type OptimizerInfo,
   type ModelProfile,
+  type NoiseProfile,
   type Preset,
   type TrainSpec,
 } from '@/api/engine'
@@ -380,6 +382,23 @@ const epochs = computed(() => {
   return per ? (spec.optim.steps * spec.optim.batch_size * spec.optim.grad_accumulation_steps) / per : null
 })
 const modelLabel = computed(() => (spec.model.kind === 'checkpoint' ? spec.model.ckpt_name : spec.model.unet_name))
+// the picked model's own noise schedule (read from its file's header), for the Focus control
+const noise = ref<NoiseProfile>({ known: false })
+watch(
+  () => [spec.model.kind, modelLabel.value] as const,
+  async ([kind, name]) => {
+    noise.value = { known: false }
+    if (!name) return
+    const folder = kind === 'checkpoint' ? 'checkpoints' : 'diffusion_models'
+    try {
+      const p = await engine.noise(folder, name)
+      if (modelLabel.value === name) noise.value = p
+    } catch {
+      /* no profile: the plain shift field stays */
+    }
+  },
+  { immediate: true },
+)
 const warnings = computed(() => {
   const w: string[] = []
   if (!spec.dataset.trigger) w.push('No trigger word: the likeness has nothing specific to attach to.')
@@ -813,7 +832,10 @@ async function start(position: 'next' | 'end' = 'next') {
                 <ZenField v-if="spec.objective.timesteps === 'logit_normal'" label="Uniform mix (%)" stack tip="Share of steps drawn uniformly instead: a little training at the extremes logit-normal rarely visits. 1% is plenty">
                   <ZenNumber :model-value="Math.round((spec.objective.uniform_mix ?? 0) * 100)" :min="0" :max="50" :step="1" :precision="0" @update:model-value="spec.objective.uniform_mix = $event / 100" />
                 </ZenField>
-                <ZenField label="Timestep shift" stack tip="Flow models. 0 = the model's own (MOSS 5: composition, colour). 1–3 trains more on fine detail like faces">
+                <ZenField v-if="noise.known && noise.flow" label="Focus" stack class="full-row" tip="What the LoRA spends its steps on. Heavy noise teaches composition (layout, pose, colour), light noise teaches detail (faces, texture). Toward Detail usually helps likeness; the marker is the model's own schedule">
+                  <FocusField :objective="spec.objective" :profile="noise" />
+                </ZenField>
+                <ZenField v-else label="Timestep shift" stack tip="Flow models. 0 = the model's own (MOSS 5: composition, colour). 1–3 trains more on fine detail like faces">
                   <ZenNumber v-model="spec.objective.shift" :min="0" :max="10" :step="0.5" :precision="1" />
                 </ZenField>
                 <ZenField label="Loss" stack><ZenCombo v-model="spec.objective.loss" :items="items(['mse', 'l1', 'huber', 'smooth_l1'])" :searchable="false" :sorted="false" /></ZenField>
@@ -1158,6 +1180,10 @@ h2 {
 }
 .span-2 {
   grid-column: span 2;
+}
+.full-row {
+  grid-column: 1 / -1;
+  min-width: 0;
 }
 @media (max-width: 760px) {
   .span-2 {

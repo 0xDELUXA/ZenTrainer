@@ -57,7 +57,9 @@ def is_flow(model_sampling) -> bool:
     """σ in [0, 1] with x_t = (1-σ)x0 + σ·noise: where a training shift means something."""
     import comfy.model_sampling as cms
 
-    return isinstance(model_sampling, cms.ModelSamplingDiscreteFlow) and isinstance(model_sampling, cms.CONST)
+    # ModelSamplingFlux (Flux, Krea 2, Chroma) is flow matching too, just not a ModelSamplingDiscreteFlow
+    flow = (cms.ModelSamplingDiscreteFlow, cms.ModelSamplingFlux)
+    return isinstance(model_sampling, flow) and isinstance(model_sampling, cms.CONST)
 
 
 class Objective:

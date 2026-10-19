@@ -657,6 +657,14 @@ export interface ModelFamily {
   recommended: { train: Partial<Record<ModelFolder, string | null>>; sample: SampleDefaults | null }
   missing: { folder: ModelFolder; name: string; size: number | null }[]
 }
+/** engine/zentrainer/noise.py profile(): σ from full noise (first) to clean (last), evenly spaced */
+export interface NoiseProfile {
+  known: boolean
+  model?: string
+  flow?: boolean
+  shift?: number | null
+  sigmas?: number[]
+}
 /** training: on while training only; base: on always (training, samples, use) */
 export type AdapterKind = 'training' | 'base'
 /** engine/zentrainer/adapters.py listing() */
@@ -749,6 +757,9 @@ export const engine = {
     call<{ clips: number; moved: string[] }>(`${dsPath(name)}/split`, { method: 'POST', body: JSON.stringify(body) }),
   mergeLoras: (body: { members: { name: string; strength: number }[]; out_name: string; max_rank?: number; energy?: number }) =>
     call<{ lora_name: string; mean_rank?: number; kept_energy?: number; bytes: number }>('/loras/merge', { method: 'POST', body: JSON.stringify(body) }),
+  /** a model's own noise schedule from its file's header (engine/zentrainer/noise.py) */
+  noise: (folder: 'diffusion_models' | 'checkpoints', name: string) =>
+    call<NoiseProfile>(`/noise?${new URLSearchParams({ folder, name })}`),
   adapters: (family?: string | null, kind: AdapterKind = 'training') =>
     call<{ adapters: TrainingAdapter[] }>(
       `/adapters?kind=${kind}${family ? `&family=${encodeURIComponent(family)}` : ''}`,

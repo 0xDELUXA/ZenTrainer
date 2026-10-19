@@ -1070,6 +1070,16 @@ def register(server) -> None:
             return _bad(f"merge failed: {e}")
         return web.json_response({"lora_name": f"merged/{out.name}", **stats})
 
+    @routes.get("/zentrainer/api/noise")
+    async def noise_profile(request):
+        """A model's own noise schedule from its file's header (noise.py): ?folder=&name=."""
+        from . import noise
+
+        folder = request.query.get("folder", "diffusion_models")
+        if folder not in ("diffusion_models", "checkpoints"):
+            return _bad("folder is diffusion_models or checkpoints")
+        return web.json_response(await asyncio.to_thread(noise.profile, folder, request.query.get("name", "")))
+
     @routes.get("/zentrainer/api/adapters")
     async def list_adapters(request):
         """Training adapters (or ?kind=base: base LoRAs) for the picker: the family's known ones
