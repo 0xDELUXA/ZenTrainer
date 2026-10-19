@@ -728,10 +728,13 @@ class Trainer:
     def _tighten(self) -> None:
         """With weights offloaded, everything training wasn't seen to use (bar a margin) holds
         model weights: fewer of them cross PCIe each step. The peak counts PyTorch's whole
-        reservation (weights on the card, LoRA, optimizer, activations); the rest of the card is
-        the CUDA context, the desktop and other processes."""
+        reservation (weights on the card, LoRA, optimizer, activations, and its cache): fitting on
+        what tensors alone took left too little for the cache when shapes change step to step
+        (Krea 2 int8, 16 GB card: two out-of-VRAM steps, settling barely higher). The rest of the
+        card is the CUDA context, the desktop and other processes."""
         if not self._auto_vram():
             return
+        torch.cuda.empty_cache()  # the weights go into clean space, not between cached fragments
         free, total = torch.cuda.mem_get_info()
         others = total - free - torch.cuda.memory_reserved()
         spare = total - others - self._peak - TIGHTEN_MARGIN
