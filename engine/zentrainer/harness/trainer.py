@@ -247,9 +247,10 @@ class Trainer:
                         self.network.eject(self.models.patcher)
                         self.models.patcher.cleanup()
                         _comfy_compiler(True)  # after on_end: its final samples run without it too
-                        from .offload import overlap
+                        from .offload import overlap, watch_pins
 
                         overlap(False)
+                        watch_pins(False)
                         if getattr(self, "_compiled", 0):
                             torch.compiler.set_stance("default")  # the final samples left it eager
             except BaseException as e:
@@ -588,6 +589,17 @@ class Trainer:
 
         patcher = self.models.patcher
         if self.spec.memory.offloading:
+            from .offload import watch_pins
+
+            watch_pins(True)  # before loading: ComfyUI pins the offloaded weights as it loads them
+            if not getattr(self, "_own_ram", False) and torch.cuda.is_available():
+                from .offload import own_ram
+
+                self._own_ram = True  # once: what loads later is already in RAM
+                n, size = own_ram(patcher.model.diffusion_model)
+                if n:
+                    logging.info("[ZenTrainer] the model was in a file mapping CUDA can't pin: %d weights (%.1f GB) "
+                                 "copied to RAM, so ComfyUI pins the offloaded ones", n, size / 1024 ** 3)
             # everything else out, then as much of the model as fits beside training stays in
             # VRAM; only the rest streams. (Asking for "all the memory" here, as before, left a
             # weight budget of nothing: every layer crossed PCIe twice a step.)
@@ -596,6 +608,7 @@ class Trainer:
             logging.info("[ZenTrainer] keeping %.1f GB of VRAM free for training beside the model", self.headroom / 1024 ** 3)
             mm.load_models_gpu([patcher], memory_required=self.headroom, force_full_load=False)
             self._fit_weights()
+            self._pin_offloaded()
         else:
             mm.load_models_gpu([patcher], memory_required=1e20, force_full_load=True)
         patcher.model.requires_grad_(False)
@@ -618,9 +631,10 @@ class Trainer:
         import comfy.model_management as mm
 
         mm.in_training = False
-        from .offload import overlap
+        from .offload import overlap, watch_pins
 
-        overlap(False)  # samples load models of their own: ComfyUI's streams as they are
+        overlap(False)
+        watch_pins(False)  # samples load models of their own: ComfyUI's streams as they are
         # the compiler stays off for samples too: models that drive it from their own forward
         # (MiniMax H3's malloc graphs) abort the process on a partly offloaded, LoRA-wrapped
         # model. It's back to the launch setting when the run ends.
@@ -698,6 +712,18 @@ class Trainer:
             patcher.partially_load(self.device, target - have)
         elif have > target + 64 * 1024 ** 2:
             patcher.partially_unload(patcher.offload_device, have - target)
+            self._pin_offloaded()  # what came off the card is plain RAM again
+
+    def _pin_offloaded(self) -> None:
+        """Pinned copies of offloaded weights ComfyUI couldn't pin in place (see offload.py)."""
+        if not self.spec.memory.offloading or not torch.cuda.is_available():
+            return
+        from .offload import pin_offloaded
+
+        n, size = pin_offloaded(self.models.patcher.model.diffusion_model)
+        if n:
+            logging.info("[ZenTrainer] pinned copies of %d offloaded weights (%.1f GB): they copy to the GPU without "
+                         "blocking, under the previous layer's compute", n, size / 1024 ** 3)
 
     def _tighten(self) -> None:
         """With weights offloaded, everything training wasn't seen to use (bar a margin) holds

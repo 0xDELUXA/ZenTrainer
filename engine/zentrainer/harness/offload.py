@@ -47,3 +47,163 @@ def overlap(on: bool) -> None:
         logging.info("[ZenTrainer] offloaded weights stream under the previous layer's compute")
     elif not on and _original is not None:
         mm.get_offload_stream, _original = _original, None
+
+
+# ComfyUI logs a bare "Pin error." when it can't pin an offloaded weight (and drops CUDA's code).
+# Unpinned weights copy to the GPU synchronously, so offloaded steps slow down and can't overlap.
+# While training, every pin it tries is counted, and a summary with the CUDA codes is logged when
+# training pauses for samples or ends.
+_register = None
+_pins: dict = {}
+
+
+# torch's binding names few of the codes this returns
+_CODES = {1: "invalid value", 2: "out of memory", 712: "already registered", 713: "not registered", 801: "not supported"}
+
+
+def _counted_register(ptr, size, flags):
+    r = _register(ptr, size, flags)
+    code = int(r)
+    key = "ok" if code == 0 else f"CUDA error {code}" + (f": {_CODES[code]}" if code in _CODES else "")
+    _pins[key] = _pins.get(key, 0) + 1
+    return r
+
+
+def watch_pins(on: bool) -> None:
+    """Count ComfyUI's pinning while training (on); log what failed and stop counting (off)."""
+    global _register
+    import torch
+
+    if not torch.cuda.is_available():
+        return
+    rt = torch.cuda.cudart()
+    if on and _register is None:
+        _register, rt.cudaHostRegister = rt.cudaHostRegister, _counted_register
+    elif not on and _register is not None:
+        rt.cudaHostRegister, _register = _register, None
+        failed = {k: v for k, v in _pins.items() if k != "ok"}
+        if failed:
+            logging.warning("[ZenTrainer] ComfyUI pinned %d offloaded weights and couldn't pin %d (%s): those copy to the GPU "
+                            "without overlapping, so offloaded steps are slower", _pins.get("ok", 0), sum(failed.values()),
+                            ", ".join(f"{k} ×{v}" for k, v in failed.items()))
+        elif _pins:
+            logging.info("[ZenTrainer] ComfyUI pinned all %d offloaded weights it tried", _pins.get("ok", 0))
+        _pins.clear()
+
+
+# ComfyUI's server maps model files through comfy-aimdo (comfy.utils.load_safetensors), and CUDA
+# can't pin that memory in place: cudaHostRegister answers 1 "invalid value" (801 "not supported"
+# with the read-only flag), so every offloaded weight copied to the GPU synchronously. A pinned
+# copy (pin_memory) of the same bytes works. Offloaded weights still unpinned get one when training
+# loads them; ComfyUI then sees them pinned and leaves them be. Costs RAM equal to the offloaded
+# part, so it's skipped when that would leave less than this free.
+PIN_RAM_SPARE = 8 * 1024 ** 3
+
+
+def _unpinned(t):
+    """The CPU tensor holding a weight's bytes when it isn't pinned (an int8 weight's storage is its
+    QuantizedTensor's _qdata), else None."""
+    import torch
+
+    if not isinstance(t, torch.Tensor) or t.device.type != "cpu":
+        return None
+    inner = getattr(t, "_qdata", None)
+    data = inner if isinstance(inner, torch.Tensor) else t
+    return None if data.numel() == 0 or data.is_pinned() else data
+
+
+def pin_offloaded(model) -> tuple[int, int]:
+    """Pinned copies of the offloaded (CPU) weights not pinned yet; (tensors, bytes) pinned."""
+    import torch
+
+    todo = []
+    for m in model.modules():
+        for name in ("weight", "bias"):
+            t = getattr(m, name, None)
+            if _unpinned(t) is not None:
+                todo.append((m, name, t))
+    need = sum(_unpinned(t).nbytes for _, _, t in todo)
+    if not todo:
+        return 0, 0
+    try:
+        import comfy.model_management as mm
+
+        free = mm.get_free_memory(torch.device("cpu"))
+    except Exception:
+        free = None
+    if free is not None and free - need < PIN_RAM_SPARE:
+        logging.warning("[ZenTrainer] offloaded weights left unpinned: pinning %.1f GB would leave under %.0f GB of RAM free",
+                        need / 1024 ** 3, PIN_RAM_SPARE / 1024 ** 3)
+        return 0, 0
+    done = 0
+    for m, name, t in todo:
+        inner = getattr(t, "_qdata", None)
+        if isinstance(inner, torch.Tensor):
+            t._qdata = inner.pin_memory()
+        else:
+            t.data = t.data.pin_memory()
+        done += 1
+    _pins.clear()  # ComfyUI's failed attempts on these are moot now: they're pinned
+    return done, need
+
+
+def _cpu_weights(model):
+    """(module, attribute, tensor holding the bytes) for every CPU weight and bias not pinned."""
+    out = []
+    for m in model.modules():
+        for name in ("weight", "bias"):
+            t = getattr(m, name, None)
+            data = _unpinned(t)
+            if data is not None:
+                out.append((m, name, data))
+    return out
+
+
+def _clear_cuda_error() -> None:
+    """Swallow the error a failed cudaHostRegister leaves queued (as ComfyUI does after its own
+    failed pins): left there, the next CUDA call fails with "invalid argument"."""
+    import torch
+
+    try:
+        a = torch.ones(1, dtype=torch.uint8, device="cuda")
+        _ = a + a
+        torch.cuda.synchronize()
+    except Exception:
+        pass
+
+
+def own_ram(model) -> tuple[int, int]:
+    """Before ComfyUI loads the model for training: weights still in memory CUDA can't pin in
+    place (the model file as comfy-aimdo maps it) move to ordinary RAM, which ComfyUI then pins
+    itself as it offloads them, with no errors. One weight is tried first; where that pins (the
+    usual case without aimdo) nothing is copied. Returns (tensors, bytes) copied."""
+    import torch
+
+    weights = _cpu_weights(model)
+    if not weights:
+        return 0, 0
+    rt = torch.cuda.cudart()
+    probe = weights[0][2]
+    if int(rt.cudaHostRegister(probe.data_ptr(), probe.nbytes, 1)) == 0:
+        rt.cudaHostUnregister(probe.data_ptr())
+        return 0, 0
+    _clear_cuda_error()  # a failed register also queues an error the next CUDA call would raise
+    need = sum(d.nbytes for _, _, d in weights)
+    try:
+        import comfy.model_management as mm
+
+        free = mm.get_free_memory(torch.device("cpu"))
+    except Exception:
+        free = None
+    if free is not None and free - need < PIN_RAM_SPARE:
+        logging.warning("[ZenTrainer] the model stays in its file mapping, which CUDA can't pin: copying it to RAM "
+                        "(%.1f GB) would leave under %.0f GB free, so offloaded weights copy to the GPU slower",
+                        need / 1024 ** 3, PIN_RAM_SPARE / 1024 ** 3)
+        return 0, 0
+    for m, name, data in weights:
+        t = getattr(m, name)
+        if isinstance(getattr(t, "_qdata", None), torch.Tensor):
+            t._qdata = data.clone()
+        else:
+            t.data = data.clone()
+    return len(weights), need

@@ -708,3 +708,19 @@ def test_a_fit_that_slows_the_steps_is_undone(monkeypatch):
     t._times = [1.5, 1.5, 1.5, 1.5]
     t._judge()
     assert fits == [] and not hasattr(t, "_ceiling")
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="pinning needs CUDA")
+def test_offloaded_weights_get_pinned_copies(monkeypatch):
+    from zentrainer.harness import offload
+
+    monkeypatch.setattr(offload, "PIN_RAM_SPARE", 0)
+    m = torch.nn.Sequential(torch.nn.Linear(8, 8), torch.nn.Linear(8, 8))
+    q = torch.randint(-127, 127, (8, 8), dtype=torch.int8)
+    m[1].weight = torch.nn.Parameter(torch.zeros(8, 8), requires_grad=False)
+    m[1].weight._qdata = q  # an int8 weight: its bytes live in _qdata
+    before = m[0].weight.detach().clone()
+    n, size = offload.pin_offloaded(m)
+    assert n == 4 and m[0].weight.is_pinned() and m[1].weight._qdata.is_pinned()
+    assert torch.equal(m[0].weight.detach(), before) and torch.equal(m[1].weight._qdata, q)
+    assert offload.pin_offloaded(m) == (0, 0)  # already pinned: left alone
