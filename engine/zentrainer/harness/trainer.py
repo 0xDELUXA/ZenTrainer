@@ -149,6 +149,11 @@ AUTO_OFFLOAD_HEADROOM = 8 * 1024 ** 3
 # activations grow with them, so the headroom does too, beyond this many tokens
 HEADROOM_TOKENS = 2048
 HEADROOM_PER_TOKEN = int(1.0 * 1024 ** 2)  # measured: 73 frames at 512 (~5.3k tokens) peaked ~7 GB of activations
+# that estimate is safe, not tight (Krea 2 at 1024 px needs ~5-6 GB beside its weights, and was
+# given 9.9): once these steps have run, the peak they actually reached sets the headroom, keeping
+# this much spare, and the freed VRAM goes to the model's weights
+TIGHTEN_AFTER = 10
+TIGHTEN_MARGIN = 1536 * 1024 ** 2
 
 
 class _Lazy:
@@ -502,9 +507,11 @@ class Trainer:
     @property
     def headroom(self) -> int:
         """Bytes of VRAM kept free beside the (partly) loaded model: the spec's, or 8 GB plus
-        room for the dataset's longest clip."""
+        room for the dataset's longest clip, until the first steps' measured peak replaces it."""
         if self.spec.memory.vram_headroom > 0:
             return int(self.spec.memory.vram_headroom * 1024 ** 3)
+        if getattr(self, "_measured_headroom", None):
+            return self._measured_headroom
         tokens = 0
         for smp in getattr(getattr(self, "dataset", None), "samples", [])[:2000]:
             lat = smp.latent
@@ -569,6 +576,10 @@ class Trainer:
 
     def loop(self) -> str:
         total = self.spec.optim.steps
+        self._peak = 0  # the most VRAM PyTorch held during training steps (callbacks reset its own counter)
+        self._warm = 0
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
         while self.step < total:
             self._handle_commands()
             t0 = time.perf_counter()
@@ -576,7 +587,17 @@ class Trainer:
                 self._profile_next = False
                 self._profiled_step()
             else:
-                self._train_step()
+                try:
+                    self._train_step()
+                except torch.OutOfMemoryError as e:
+                    if not self._loosen(e):
+                        raise
+                    continue  # that step again, with the first estimate's room
+            if torch.cuda.is_available():
+                self._peak = max(self._peak, torch.cuda.max_memory_reserved())
+                self._warm += 1
+                if self._warm == TIGHTEN_AFTER:
+                    self._tighten()
             self.last_step_seconds = time.perf_counter() - t0
             self.train_seconds += self.last_step_seconds
             self.step += 1
@@ -584,6 +605,45 @@ class Trainer:
             for cb in self.callbacks:
                 cb.on_step(self)
         return "done"
+
+    def _tighten(self) -> None:
+        """With weights offloaded, keep only the room training was seen to use (plus a margin)
+        free, and load more of the model into the rest: fewer weights cross PCIe each step."""
+        m = self.spec.memory
+        if not m.offloading or m.vram_headroom > 0 or getattr(self, "_loosened", False):
+            return
+        import comfy.model_management as mm
+
+        free, total = torch.cuda.mem_get_info()
+        others = total - free - torch.cuda.memory_reserved()  # the CUDA context, the desktop, other processes
+        spare = total - others - self._peak - TIGHTEN_MARGIN
+        if spare < 512 * 1024 ** 2:
+            return
+        before = self.headroom
+        self._measured_headroom = max(1024 ** 3, before - spare)
+        gb = 1024 ** 3
+        logging.info("[ZenTrainer] training peaked at %.1f GB: keeping %.1f GB free instead of %.1f, the rest holds model weights",
+                     self._peak / gb, self._measured_headroom / gb, before / gb)
+        mm.load_models_gpu([self.models.patcher], memory_required=self._measured_headroom, force_full_load=False)
+
+    def _loosen(self, e: BaseException) -> bool:
+        """A step ran out of VRAM after _tighten (a bigger bucket than the first steps saw, say):
+        hand the weights back and go on with the first estimate. Once; a second OOM is real."""
+        if not getattr(self, "_measured_headroom", None):
+            return False
+        import comfy.model_management as mm
+
+        _release_frames(e)
+        del e
+        self.optimizer.zero_grad(set_to_none=True)
+        tight = self._measured_headroom
+        self._measured_headroom, self._loosened = None, True
+        patcher = self.models.patcher
+        patcher.partially_unload(patcher.offload_device, self.headroom - tight)
+        mm.soft_empty_cache()
+        logging.warning("[ZenTrainer] out of VRAM with %.1f GB kept free: back to %.1f GB, retrying the step",
+                        tight / 1024 ** 3, self.headroom / 1024 ** 3)
+        return True
 
     def _profiled_step(self) -> None:
         """One training step under torch.profiler ("profile" command): a table of where the GPU
