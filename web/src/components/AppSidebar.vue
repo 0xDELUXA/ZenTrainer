@@ -7,7 +7,7 @@ import { ZenLotus } from '@nynxz/zenkit-ui'
 import ScrollArea from './ScrollArea.vue'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { activeRuns, latest, lossTrail } from '@/runs'
+import { activeRuns, latest, lossTrail, queue } from '@/runs'
 import { activeCaptions, startCaptionSync } from '@/captions'
 import { settings } from '@/settings'
 import { comfyBehind, comfyOld, engineStale, restartEngine, restarting, startStatusSync } from '@/status'
@@ -54,6 +54,15 @@ const live = computed(() =>
     return { ...r, step: m?.step ?? 0, total: m?.total ?? 0, it_s: m?.it_s, frac, spark: spark(lossTrail[r.run_id]) }
   }),
 )
+
+// the run that's going gets the card; the ones waiting fold into one line each under it, in
+// queue order (a card per queued run was a stack of empty rings)
+const running = computed(() => live.value.filter((r) => r.status !== 'queued'))
+const waiting = computed(() => {
+  const order = queue.value.items.map((i) => i.run_id)
+  return live.value.filter((r) => r.status === 'queued').sort((a, b) => order.indexOf(a.run_id) - order.indexOf(b.run_id))
+})
+const WAIT_SHOWN = 3
 
 function spark(values: number[] | undefined): string {
   if (!values || values.length < 2) return ''
@@ -166,7 +175,7 @@ onUnmounted(() => {
 
     <!-- what's training, above the memory meters: one click to it -->
     <RouterLink
-      v-for="r in live"
+      v-for="r in running"
       :key="r.run_id"
       :to="simple ? `/simple/run/${r.run_id}` : `/runs/${r.run_id}`"
       class="live"
@@ -186,6 +195,21 @@ onUnmounted(() => {
         <span class="live-meta">
           {{ r.status === 'training' ? `${r.step}/${r.total} · ${r.it_s?.toFixed(2) ?? '–'} it/s` : r.status }}
         </span>
+      </span>
+    </RouterLink>
+
+    <RouterLink
+      v-if="waiting.length"
+      to="/jobs"
+      class="row queue"
+      :title="`Queued, in order:\n${waiting.map((r, i) => `${i + 1}. ${r.name}`).join('\n')}`"
+      @click="emit('navigate')"
+    >
+      <span class="ic"><i class="mdi mdi-tray-full" /><span class="q-count">{{ waiting.length }}</span></span>
+      <span class="lbl queue-body">
+        <span class="q-head">{{ waiting.length }} queued</span>
+        <span v-for="(r, i) in waiting.slice(0, WAIT_SHOWN)" :key="r.run_id" class="q-item ellipsis"><span class="q-n">{{ i + 1 }}</span>{{ r.name }}</span>
+        <span v-if="waiting.length > WAIT_SHOWN" class="q-more">+{{ waiting.length - WAIT_SHOWN }} more</span>
       </span>
     </RouterLink>
 
@@ -564,6 +588,55 @@ nav {
 .live-meta {
   font: 10px var(--zen-mono);
   color: var(--sb-muted);
+}
+
+/* the queue: one quiet block, a line per waiting run */
+.queue {
+  align-items: flex-start;
+  margin-bottom: 6px;
+  padding: 6px 0;
+  color: var(--sb-muted);
+}
+.queue:hover {
+  color: var(--zen-text);
+}
+.queue .ic {
+  height: 22px;
+  font-size: 16px;
+}
+.q-count {
+  position: absolute;
+  right: 8px;
+  top: -4px;
+  font: 600 9px var(--zen-mono);
+  color: var(--sb-primary);
+}
+.queue-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-right: 10px;
+  font-size: 11px;
+}
+.q-head {
+  font-weight: 600;
+  font-size: 11px;
+  line-height: 22px;
+}
+.q-item {
+  display: block;
+}
+.q-n {
+  display: inline-block;
+  width: 14px;
+  font: 10px var(--zen-mono);
+  opacity: 0.7;
+}
+.q-more {
+  font-size: 10px;
+  opacity: 0.8;
 }
 
 /* memory */
