@@ -242,6 +242,8 @@ class Trainer:
                         self.network.eject(self.models.patcher)
                         self.models.patcher.cleanup()
                         _comfy_compiler(True)  # after on_end: its final samples run without it too
+                        if getattr(self, "_compiled", 0):
+                            torch.compiler.set_stance("default")  # the final samples left it eager
             except BaseException as e:
                 interrupted = type(e).__name__ == "InterruptProcessingException"
                 self._status("interrupted" if interrupted else "error", message=str(e) or type(e).__name__)
@@ -596,6 +598,8 @@ class Trainer:
             optim.set_mode(self.optimizer, training=True)
         mm.in_training = True
         _comfy_compiler(False)
+        if getattr(self, "_compiled", 0):
+            torch.compiler.set_stance("default")
         self._recompile_if_moved()
 
     def enter_inference(self) -> None:
@@ -607,6 +611,11 @@ class Trainer:
         # model. It's back to the launch setting when the run ends.
         optim.set_mode(self.optimizer, training=False)
         self.models.patcher.model.eval()
+        if getattr(self, "_compiled", 0):
+            # samples run the compiled blocks eager: no grads and other shapes would only add
+            # graphs, and inference may take kernels dynamo can't trace (MOSS int8's Sage
+            # attention: "RuntimeError when making fake tensor call", the run's first sample)
+            torch.compiler.set_stance("force_eager")
 
     def exit_inference(self) -> None:
         # sampling may have loaded the VAE/text encoder and pushed the model out
