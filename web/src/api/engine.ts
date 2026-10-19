@@ -81,6 +81,8 @@ export interface TrainSpec {
     /** LoRA+: up matrices learn this many times faster (0 = off) */
     lora_plus?: number
     ema?: number
+    /** Automagic3's lowest LR, as a fraction of the start LR; 0 = none */
+    lr_floor?: number
   }
   objective: {
     loss: 'mse' | 'l1' | 'huber' | 'smooth_l1'
