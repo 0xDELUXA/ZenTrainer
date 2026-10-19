@@ -155,6 +155,11 @@ HEADROOM_PER_TOKEN = int(1.0 * 1024 ** 2)  # measured: 73 frames at 512 (~5.3k t
 TIGHTEN_AT = (4, 12, 40)
 TIGHTEN_MARGIN = 1024 ** 3
 TIGHTEN_RETRIES = 3
+# each fit is a trial: measured over these steps after it (the recompile it may cause is over by
+# then), it stays only if steps didn't get slower than this and the allocator never had to retry.
+# A card run nearly full can be slower than one streaming more weights.
+TRIAL_STEPS = (4, 7)
+TRIAL_SLOWER = 1.08
 
 
 class _Lazy:
@@ -647,7 +652,9 @@ class Trainer:
                 self._profiled_step()
             else:
                 try:
+                    ts = time.perf_counter()
                     self._train_step()
+                    self._times = (getattr(self, "_times", []) + [time.perf_counter() - ts])[-12:]
                 except torch.OutOfMemoryError as e:
                     if not self._back_off(e):
                         raise
@@ -655,6 +662,9 @@ class Trainer:
             if torch.cuda.is_available():
                 self._peak = max(self._peak, torch.cuda.max_memory_reserved())
                 self._warm += 1
+                trial = getattr(self, "_trial", None)
+                if trial and self._warm == trial["at"] + TRIAL_STEPS[1]:
+                    self._judge()
                 if self._warm in TIGHTEN_AT:
                     self._tighten()
             self.last_step_seconds = time.perf_counter() - t0
@@ -705,6 +715,9 @@ class Trainer:
         if target - have < 256 * 1024 ** 2:
             return
         gb = 1024 ** 3
+        times = getattr(self, "_times", [])[-3:]
+        self._trial = {"at": self._warm, "prev": have, "before": sorted(times)[len(times) // 2] if times else None,
+                       "retries": torch.cuda.memory_stats().get("num_alloc_retries", 0)}
         self._resident = target
         self._fit_weights()
         self._recompile_if_moved()
@@ -713,6 +726,27 @@ class Trainer:
                      self._peak / gb, (total - others) / gb, have / gb, now / gb, patcher.model_size() / gb)
         self._peak = 0  # the next pass measures with these weights in
         torch.cuda.reset_peak_memory_stats()
+
+    def _judge(self) -> None:
+        """Keep the last fit only if it didn't slow the steps (see TRIAL_STEPS)."""
+        trial, self._trial = self._trial, None
+        times = getattr(self, "_times", [])[-(TRIAL_STEPS[1] - TRIAL_STEPS[0] + 1):]
+        after = sorted(times)[len(times) // 2] if times else None
+        retries = torch.cuda.memory_stats().get("num_alloc_retries", 0) - trial["retries"]
+        slower = trial["before"] and after and after > trial["before"] * TRIAL_SLOWER
+        gb = 1024 ** 3
+        if not slower and not retries:
+            if trial["before"] and after:
+                logging.info("[ZenTrainer] with more of the model on the card: %.2f -> %.2f s a step", trial["before"], after)
+            return
+        patcher = self.models.patcher
+        have = patcher.loaded_size()
+        self._resident = self._ceiling = trial["prev"]
+        self._fit_weights()
+        self._recompile_if_moved()
+        why = f"{retries} allocator retries (the card ran too full)" if retries else f"steps {trial['before']:.2f} -> {after:.2f} s"
+        logging.info("[ZenTrainer] more of the model on the card was slower (%s): back to %.1f GB from %.1f, and no higher",
+                     why, trial["prev"] / gb, have / gb)
 
     def _back_off(self, e: BaseException) -> bool:
         """A step ran out of VRAM (a bigger bucket than the first steps saw, say): take the

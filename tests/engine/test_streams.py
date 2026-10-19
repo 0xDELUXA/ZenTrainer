@@ -666,3 +666,45 @@ def test_automagic3_lr_floor_holds_its_rate():
 
     assert run(0.0) < 0.5e-3  # without a floor it falls well below half
     assert run(0.5) >= 0.5e-3 * 0.999  # with one it holds there
+
+
+def test_a_fit_that_slows_the_steps_is_undone(monkeypatch):
+    from zentrainer.harness import trainer as tr
+
+    class Patcher:
+        def __init__(self):
+            self.loaded = 4 << 30
+
+        def loaded_size(self):
+            return self.loaded
+
+    t = tr.Trainer.__new__(tr.Trainer)
+    t.models = types.SimpleNamespace(patcher=Patcher())
+    fits = []
+    t._fit_weights = lambda: (fits.append(t._resident), setattr(t.models.patcher, "loaded", t._resident))
+    t._recompile_if_moved = lambda: None
+    stats = {"num_alloc_retries": 0}
+    monkeypatch.setattr(torch.cuda, "memory_stats", lambda: dict(stats))
+
+    # slower after: back to where it was, and capped there
+    t._trial = {"at": 4, "prev": 4 << 30, "before": 1.5, "retries": 0}
+    t.models.patcher.loaded = 9 << 30
+    t._times = [1.5, 1.5, 1.5, 21.0, 2.0, 2.0, 2.0, 2.0]
+    t._judge()
+    assert t._resident == t._ceiling == 4 << 30 and fits == [4 << 30]
+
+    # as fast, but the allocator had to retry: undone too
+    t._ceiling = 1 << 62
+    t._trial = {"at": 4, "prev": 4 << 30, "before": 1.5, "retries": 0}
+    stats["num_alloc_retries"] = 3
+    t._times = [1.4, 1.4, 1.4, 1.4]
+    t._judge()
+    assert t._ceiling == 4 << 30
+
+    # faster and no retries: kept
+    del t._ceiling
+    fits.clear()
+    t._trial = {"at": 4, "prev": 4 << 30, "before": 1.8, "retries": 3}
+    t._times = [1.5, 1.5, 1.5, 1.5]
+    t._judge()
+    assert fits == [] and not hasattr(t, "_ceiling")
