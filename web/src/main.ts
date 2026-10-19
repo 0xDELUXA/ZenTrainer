@@ -27,6 +27,7 @@ const router = createRouter({
     { path: '/runs/new', component: () => import('./views/NewRunView.vue') },
     { path: '/queue', redirect: '/jobs' },
     { path: '/runs/:id', component: () => import('./views/RunView.vue'), props: true },
+    { path: '/compare', component: () => import('./views/CompareView.vue') },
     { path: '/datasets', component: () => import('./views/DatasetsView.vue') },
     { path: '/datasets/:name', component: () => import('./views/DatasetView.vue'), props: true },
     { path: '/datasets/:name/mask', component: () => import('./views/MaskEditorView.vue'), props: true },

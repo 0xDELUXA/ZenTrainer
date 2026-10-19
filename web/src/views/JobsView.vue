@@ -4,6 +4,7 @@
 // then everything that has finished, newest first. Each opens its own page with its log.
 import { ZenButton, ZenEmpty } from '@nynxz/zenkit-ui'
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { engine, type CaptionJob, type RunMeta } from '@/api/engine'
 import StatusPill from '@/components/StatusPill.vue'
 import { activeCaptions, captionJobs, startCaptionSync } from '@/captions'
@@ -46,6 +47,16 @@ function move(i: number, by: number) {
 const current = computed(() => queue.value.current)
 const queued = computed(() => queue.value.items)
 type Row = { kind: 'train'; t: number; run: RunMeta } | { kind: 'caption'; t: number; job: CaptionJob }
+// two finished runs ticked in History open side by side on the compare page; a third tick replaces
+// the oldest
+const router = useRouter()
+const picked = ref<string[]>([])
+function pick(id: string) {
+  picked.value = picked.value.includes(id) ? picked.value.filter((x) => x !== id) : [...picked.value, id].slice(-2)
+}
+const pickedName = (id: string) => runs.value.find((r) => r.run_id === id)?.name ?? id
+const compare = () => router.push({ path: '/compare', query: { a: picked.value[0], b: picked.value[1] } })
+
 const history = computed<Row[]>(() => {
   const live = new Set([current.value?.run_id, ...queued.value.map((r) => r.run_id)])
   const rows: Row[] = []
@@ -93,6 +104,7 @@ const summary = computed(() => {
         @click="act({ action: queue.paused ? 'resume' : 'pause' })"
         >{{ queue.paused ? 'Resume queue' : 'Pause queue' }}</ZenButton
       >
+      <RouterLink to="/compare"><ZenButton icon="mdi mdi-compare-horizontal" title="Two runs side by side: setup, curves and samples. Or tick two in History">Compare runs</ZenButton></RouterLink>
       <RouterLink to="/runs/new"><ZenButton variant="primary" icon="mdi mdi-plus">New run</ZenButton></RouterLink>
     </div>
     <div v-if="engineError" class="card muted">Can't reach the engine: {{ engineError }}</div>
@@ -158,8 +170,15 @@ const summary = computed(() => {
       <section v-if="history.length" class="sec">
         <div v-if="current || queued.length || liveCaptions.length" class="eyebrow">History</div>
         <template v-for="h in history" :key="h.kind === 'train' ? h.run.run_id : h.job.job_id">
-          <RouterLink v-if="h.kind === 'train'" :to="`/runs/${h.run.run_id}`" class="row card">
+          <RouterLink v-if="h.kind === 'train'" :to="`/runs/${h.run.run_id}`" class="row card" :class="{ picked: picked.includes(h.run.run_id) }">
             <div class="name">
+              <button
+                class="tick"
+                :title="picked.includes(h.run.run_id) ? 'Untick' : 'Tick two runs to compare them'"
+                @click.prevent.stop="pick(h.run.run_id)"
+              >
+                <i :class="picked.includes(h.run.run_id) ? 'mdi mdi-checkbox-marked' : 'mdi mdi-checkbox-blank-outline'" />
+              </button>
               <i class="mdi mdi-chart-timeline-variant kind-ic" />{{ h.run.name }}
               <div class="muted mono small">{{ h.run.run_id }}</div>
             </div>
@@ -176,6 +195,18 @@ const summary = computed(() => {
           </RouterLink>
         </template>
       </section>
+
+      <div v-if="picked.length" class="compare-bar card">
+        <i class="mdi mdi-compare-horizontal" />
+        <span class="small">
+          <b>{{ pickedName(picked[0]!) }}</b>
+          <template v-if="picked[1]"> and <b>{{ pickedName(picked[1]) }}</b></template>
+          <span v-else class="muted"> · tick one more</span>
+        </span>
+        <span class="spacer" />
+        <button class="link small" @click="picked = []">Clear</button>
+        <ZenButton variant="primary" icon="mdi mdi-arrow-right" :disabled="picked.length < 2" @click="compare">Compare</ZenButton>
+      </div>
     </template>
   </div>
 </template>
@@ -226,6 +257,47 @@ a.row:hover,
 }
 a.row:hover {
   color: inherit;
+}
+.tick {
+  border: none;
+  background: none;
+  padding: 0 6px 0 0;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--zen-muted);
+  cursor: pointer;
+  opacity: 0.35;
+  vertical-align: -2px;
+}
+.row:hover .tick,
+.row.picked .tick,
+.tick:focus-visible {
+  opacity: 1;
+}
+.row.picked {
+  border-color: var(--zen-accent);
+}
+.row.picked .tick {
+  color: var(--zen-accent);
+}
+.compare-bar {
+  position: sticky;
+  bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.6);
+}
+.compare-bar .spacer {
+  flex: 1;
+}
+.compare-bar .link {
+  border: none;
+  background: none;
+  color: var(--zen-accent);
+  font: inherit;
+  cursor: pointer;
 }
 .now {
   border-color: color-mix(in srgb, var(--zen-accent) 50%, transparent);
