@@ -64,6 +64,23 @@ def gradient_checkpointing(diffusion_model, enabled: bool, depth: int, offloadin
         patch(m, offloading=offloading)
     logging.info("[ZenTrainer] gradient checkpointing on %d blocks (depth %d%s)", len(blocks), depth,
                  f", last {skip} kept" if skip > 0 else "")
+    if offloading:
+        # An offloaded layer's weight lives in a streaming buffer that the next layers reuse, so
+        # autograd can't keep it for backward ("modified by an inplace operation" on step one).
+        # Layers outside the checkpointed blocks (Krea 2's txtmlp, the final layer, the kept
+        # last blocks) recompute too, then: torch's checkpoint, which unlike the offload one
+        # also works when the input needs no grad. Any leaf with a weight: ComfyUI's quantized
+        # Linear (MixedPrecisionOps) is a plain nn.Module, not an nn.Linear.
+        import torch
+
+        inside = {id(sub) for b in blocks for sub in b.modules()}
+        loose = [m for m in diffusion_model.modules()
+                 if id(m) not in inside and next(m.children(), None) is None
+                 and isinstance(getattr(m, "weight", None), torch.Tensor)]
+        for m in loose:
+            patch(m, offloading=False)
+        if loose:
+            logging.info("[ZenTrainer] %d layers outside the checkpointed blocks recompute too (offloaded weights)", len(loose))
     # ComfyUI's per-layer offload checkpoint (a custom autograd Function, used when a patched
     # module is itself a Linear/Conv) only records when its input requires grad; block-level
     # checkpointing is torch's non-reentrant one, which doesn't. Without that need, the input
