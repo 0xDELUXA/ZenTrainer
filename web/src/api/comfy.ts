@@ -12,7 +12,12 @@ export interface ComfyMessage {
 
 type Listener = (msg: ComfyMessage) => void
 
-const clientId = crypto.randomUUID()
+// crypto.randomUUID exists only in secure contexts (https, localhost): ComfyUI opened by LAN IP has none
+const clientId =
+  crypto.randomUUID?.() ??
+  '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, (c) =>
+    (+c ^ (crypto.getRandomValues(new Uint8Array(1))[0]! & (15 >> (+c / 4)))).toString(16),
+  )
 const listeners = new Set<Listener>()
 let socket: WebSocket | null = null
 
