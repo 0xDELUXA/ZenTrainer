@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ZenLotus } from '@nynxz/zenkit-ui'
-import { nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import AppSidebar from './components/AppSidebar.vue'
 import HoverPeek from './components/HoverPeek.vue'
@@ -27,10 +27,24 @@ watch(collapsed, (v) => {
   }
 })
 
+// a window this narrow (but wider than the mobile bar) shows the sidebar folded whatever was
+// saved: the expanded one takes a third of an 800px window. Expanding it there lasts the session
+const tightQuery = window.matchMedia('(max-width: 1100px) and (min-width: 721px)')
+const tight = ref(tightQuery.matches)
+const tightExpanded = ref(false)
+const onTight = (e: MediaQueryListEvent) => (tight.value = e.matches)
+const folded = computed(() => (tight.value ? !tightExpanded.value : collapsed.value))
+function toggleFold() {
+  if (tight.value) tightExpanded.value = !tightExpanded.value
+  else collapsed.value = !collapsed.value
+}
+
 onMounted(() => {
   startRunSync()
   startLogSync()
+  tightQuery.addEventListener('change', onTight)
 })
+onUnmounted(() => tightQuery.removeEventListener('change', onTight))
 
 // the log drawer docks over the page's bottom. Scrolled to the end, the page rides up with it
 // (its end stays in view above the drawer) and back down when it closes; anywhere else
@@ -75,9 +89,9 @@ watch(
 <template>
   <div class="shell">
     <AppSidebar
-      :collapsed="collapsed"
+      :collapsed="folded"
       :mobile-open="mobileOpen"
-      @toggle="collapsed = !collapsed"
+      @toggle="toggleFold"
       @navigate="mobileOpen = false"
     />
     <div v-if="mobileOpen" class="scrim" @click="mobileOpen = false" />

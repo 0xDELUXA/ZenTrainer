@@ -32,6 +32,15 @@ const zoom = ref<number>(saved.zoom ?? 200)
 const fit = ref<'cover' | 'contain'>(saved.fit ?? 'cover')
 const showMasks = ref<boolean>(saved.masks ?? false) // dim what each mask leaves out, on the grid
 const sideOpen = ref<boolean>(saved.side ?? true) // the side panel: health, faces, auto-caption, bulk edit, display
+// In a narrow window the panel would land under every picture, out of reach: there it's a drawer
+// over the right edge instead, opened by the same button, closed on its own (not remembered)
+const narrowQuery = window.matchMedia('(max-width: 1100px)')
+const narrow = ref(narrowQuery.matches)
+const drawerOpen = ref(false)
+const onNarrow = (e: MediaQueryListEvent) => (narrow.value = e.matches)
+narrowQuery.addEventListener('change', onNarrow)
+onUnmounted(() => narrowQuery.removeEventListener('change', onNarrow))
+const panelShown = computed(() => (narrow.value ? drawerOpen.value : sideOpen.value))
 // The side panel stays pinned without a scrollbar of its own: under the sticky toolbar when it fits
 // the window, or, when it's taller, scrolling with the page until its bottom reaches the window's
 // bottom and staying there (a negative sticky top), so it never scrolls out of sight
@@ -58,6 +67,10 @@ onUnmounted(() => {
 // the side panel changes the grid's columns: each card on screen takes its new place at once and
 // grows or shrinks there from its old size, rather than snapping (no flying across the grid)
 async function toggleSide() {
+  if (narrow.value) {
+    drawerOpen.value = !drawerOpen.value
+    return
+  }
   const reduce = reducedMotion()
   const vh = window.innerHeight
   const cards = reduce ? [] : [...document.querySelectorAll<HTMLElement>('.ds-main .card-item')]
@@ -336,6 +349,10 @@ function onItemMenu(it: DatasetItem, i: number, e: MouseEvent) {
 }
 const allShownSelected = computed(() => shown.value.length > 0 && shown.value.every((r) => selected.has(r.path)))
 function onEsc(e: KeyboardEvent) {
+  if (e.key === 'Escape' && narrow.value && drawerOpen.value && lightbox.value == null) {
+    drawerOpen.value = false
+    return
+  }
   if (e.key !== 'Escape' || lightbox.value != null || !selected.size) return
   if ((e.target as HTMLElement).closest('input, textarea, [contenteditable]')) return
   selected.clear()
@@ -567,13 +584,13 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
         <ZenCombo v-model="filter" :items="filterItems" :sorted="false" :searchable="false" size="sm" />
       </div>
       <div class="search"><ZenInput v-model="query" placeholder="Search captions or names" size="sm" /></div>
-      <button class="icon-btn" :class="{ on: sideOpen }" :title="sideOpen ? 'Hide the side panel' : 'Show the side panel: health, faces, auto-caption, bulk edit, display'" @click="toggleSide">
+      <button class="icon-btn" :class="{ on: panelShown }" :title="panelShown ? 'Hide the side panel' : 'Show the side panel: health, faces, auto-caption, bulk edit, display'" @click="toggleSide">
         <i class="mdi mdi-dock-right" />
       </button>
     </div>
     </StickyBar>
 
-    <div class="ds-body" :class="{ 'with-side': sideOpen }">
+    <div class="ds-body" :class="{ 'with-side': sideOpen && !narrow }">
       <main class="ds-main">
     <div v-if="reviewing" class="reviewing">
       <i class="mdi mdi-filter-outline" />
@@ -736,7 +753,8 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
 
       </main>
 
-      <aside v-if="sideOpen" ref="sideEl" class="ds-side" :style="{ top: `${sideTop}px` }">
+      <div v-if="narrow && drawerOpen" class="drawer-scrim" @click="drawerOpen = false" />
+      <aside v-if="panelShown" ref="sideEl" class="ds-side" :class="{ drawer: narrow }" :style="narrow ? undefined : { top: `${sideTop}px` }">
         <section class="side-sec">
           <header class="side-head"><span>Health</span><span class="muted small">“{{ activeSet }}”</span></header>
           <DatasetStats
@@ -1652,9 +1670,10 @@ dd {
    middle: nothing peeks over the top, and the strip's edge hides behind the toolbar, so below it
    pictures just pass under the bar (no line anywhere). The negative margin cancels the padding,
    so at rest the page lays out as if the strip weren't there */
+/* everything gives way before anything is cut off: the side panel's button is always there */
 .ds-toolbar .zoom {
-  width: 150px;
-  flex: none;
+  flex: 0 1 150px;
+  min-width: 70px;
 }
 .ds-toolbar .zoom.off {
   opacity: 0.35;
@@ -1663,8 +1682,8 @@ dd {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex: none;
-  width: 190px;
+  flex: 0 1 190px;
+  min-width: 110px;
   color: var(--zen-muted);
 }
 .tb-field :deep(.zen-combo) {
@@ -1672,8 +1691,14 @@ dd {
   min-width: 0;
 }
 .ds-toolbar .search {
-  flex: 1;
-  min-width: 120px;
+  flex: 1 1 120px;
+  min-width: 70px;
+}
+@media (max-width: 900px) {
+  .ds-toolbar .zoom,
+  .tb-field > .mdi {
+    display: none;
+  }
 }
 .icon-btn {
   flex: none;
@@ -1704,10 +1729,23 @@ dd {
 .ds-body.with-side {
   grid-template-columns: minmax(0, 1fr) 320px;
 }
-@media (max-width: 1100px) {
-  .ds-body.with-side {
-    grid-template-columns: minmax(0, 1fr);
-  }
+.ds-side.drawer {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 40;
+  width: min(340px, calc(100vw - 24px));
+  overflow-y: auto;
+  scrollbar-width: thin;
+  overscroll-behavior: contain;
+  filter: drop-shadow(0 18px 40px rgba(0, 0, 0, 0.55));
+}
+.drawer-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 39;
+  background: rgba(0, 0, 0, 0.4);
 }
 .ds-main {
   min-width: 0;
