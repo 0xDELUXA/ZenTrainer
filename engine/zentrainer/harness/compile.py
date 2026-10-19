@@ -38,3 +38,24 @@ def compiled_blocks(diffusion_model, enabled: bool):
     finally:
         for m in done:
             m.__dict__.pop("forward", None)
+
+
+def residency(diffusion_model) -> int:
+    """Which weights are on the GPU, as a number to compare: compiled graphs guard on each
+    parameter's device, so a change means recompiles."""
+    return hash(tuple(p.is_cuda for p in diffusion_model.parameters()))
+
+
+def reset_if_moved(diffusion_model, before: int | None) -> int:
+    """Drop the compiled graphs when weights moved between CPU and GPU since `before` (the VRAM
+    fit loading more, a back-off, a reload after samples). Left alone, the next steps recompile
+    beside the old graphs, and a checkpointed block's recompute can run a different one than its
+    forward did: "Recomputed values ... have different metadata" (3 of 3 runs at the first fit,
+    0 of 2 with the weights left in place). Fresh graphs compile like the first steps do."""
+    now = residency(diffusion_model)
+    if before is not None and now != before:
+        import torch._dynamo
+
+        torch._dynamo.reset()
+        logging.info("[ZenTrainer] weights moved between CPU and GPU: compiled blocks recompile")
+    return now

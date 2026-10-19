@@ -209,7 +209,7 @@ class Trainer:
 
                 dm = self.models.patcher.model.diffusion_model
                 # compiled first, so checkpointing wraps the compiled forward
-                with compiled_blocks(dm, self.spec.memory.compile_blocks), \
+                with compiled_blocks(dm, self.spec.memory.compile_blocks) as self._compiled, \
                         gradient_checkpointing(dm, self.spec.memory.gradient_checkpointing,
                                                self.spec.memory.checkpoint_depth, self.spec.memory.offloading,
                                                self.spec.memory.checkpoint_skip) as ckpt:
@@ -596,6 +596,7 @@ class Trainer:
             optim.set_mode(self.optimizer, training=True)
         mm.in_training = True
         _comfy_compiler(False)
+        self._recompile_if_moved()
 
     def enter_inference(self) -> None:
         import comfy.model_management as mm
@@ -645,6 +646,13 @@ class Trainer:
                 cb.on_step(self)
         return "done"
 
+    def _recompile_if_moved(self) -> None:
+        if getattr(self, "_compiled", 0):
+            from .compile import reset_if_moved
+
+            dm = self.models.patcher.model.diffusion_model
+            self._residency = reset_if_moved(dm, getattr(self, "_residency", None))
+
     def _auto_vram(self) -> bool:
         m = self.spec.memory
         return m.offloading and m.vram_headroom <= 0 and torch.cuda.is_available()
@@ -680,6 +688,7 @@ class Trainer:
         gb = 1024 ** 3
         self._resident = target
         self._fit_weights()
+        self._recompile_if_moved()
         now = patcher.loaded_size()
         logging.info("[ZenTrainer] training peaked at %.1f GB of %.1f: model on the card %.1f -> %.1f of %.1f GB",
                      self._peak / gb, (total - others) / gb, have / gb, now / gb, patcher.model_size() / gb)
@@ -701,6 +710,7 @@ class Trainer:
         have = patcher.loaded_size()
         self._resident = self._ceiling = max(0, have - TIGHTEN_MARGIN)
         self._fit_weights()
+        self._recompile_if_moved()
         mm.soft_empty_cache()
         self._peak = 0
         torch.cuda.reset_peak_memory_stats()
