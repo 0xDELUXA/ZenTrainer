@@ -14,7 +14,37 @@ import logging
 
 import torch
 
-from .memory import block_lists
+def main_blocks(diffusion_model) -> list:
+    """The model's main repeated blocks: of its outermost block lists, the one with the most
+    weights. The others (Krea 2's text fusion and refiner blocks) run on a hundred or so caption
+    tokens, so compiling them gains little, and every new caption length recompiles them: often
+    enough that a checkpointed block's recompute ran eager where its forward ran compiled
+    ("Recomputed values ... have different metadata", on those blocks only). They run eager."""
+    lists = []
+
+    def walk(m):
+        for c in m.children():
+            if isinstance(c, torch.nn.ModuleList) and len(c) > 1:
+                lists.append(c)
+            elif not isinstance(c, torch.nn.ModuleList):
+                walk(c)
+
+    walk(diffusion_model)
+    if not lists:
+        return []
+    return list(max(lists, key=lambda l: sum(p.numel() for p in l.parameters())))
+
+
+def _swiglu_out_of_place(m):
+    """Krea 2's SwiGLU, `down(silu(gate(x)).mul_(up(x)))`, without the in-place mul_: dynamo
+    can't trace that mul_ here ("does not know how to trace the builtin Tensor.mul_"), so every
+    block's graph broke at its MLP and the MLP ran eager. Same values."""
+    import torch.nn.functional as F
+
+    def forward(x):
+        return m.down(F.silu(m.gate(x)) * m.up(x))
+
+    return forward
 
 
 @contextlib.contextmanager
@@ -24,20 +54,34 @@ def compiled_blocks(diffusion_model, enabled: bool):
         return
     import torch._dynamo
 
+    import torch._functorch.config as functorch_config
+
     torch._dynamo.config.cache_size_limit = max(torch._dynamo.config.cache_size_limit, 256)
-    blocks = block_lists(diffusion_model, 1)
+    # the on-disk autograd cache needs a stable hash of every tensor: int8 weights (QuantizedTensor)
+    # have none, so each compile warned and skipped it. Off while these blocks are compiled
+    cache_was = getattr(functorch_config, "enable_autograd_cache", None)
+    if cache_was is not None:
+        functorch_config.enable_autograd_cache = False
+    blocks = main_blocks(diffusion_model)
+    mlps = [sub for b in blocks for sub in b.modules()
+            if type(sub).__name__ == "SwiGLU" and all(hasattr(sub, k) for k in ("gate", "up", "down"))
+            and "forward" not in sub.__dict__]
+    for sub in mlps:
+        sub.forward = _swiglu_out_of_place(sub)
     done = []
     for m in blocks:
         if "forward" in m.__dict__:  # already wrapped by someone else: leave it
             continue
         m.forward = torch.compile(m.forward, dynamic=True)
         done.append(m)
-    logging.info("[ZenTrainer] torch.compile on %d blocks (the first steps compile)", len(done))
+    logging.info("[ZenTrainer] torch.compile on the %d main blocks (the first steps compile)", len(done))
     try:
         yield len(done)
     finally:
-        for m in done:
+        for m in done + mlps:
             m.__dict__.pop("forward", None)
+        if cache_was is not None:
+            functorch_config.enable_autograd_cache = cache_was
 
 
 def residency(diffusion_model) -> int:
