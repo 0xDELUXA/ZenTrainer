@@ -110,6 +110,11 @@ class NetworkSpec:
     # e.g. a de-distillation adapter for a guidance-distilled model (MiniMax H3), so training
     # sits on an undistilled base and the result runs on the real one.
     training_adapter: str | None = None
+    # A LoRA (loras folder) the trained one sits on, everywhere: training, samples and use, e.g.
+    # a fix the model always needs (MOSS-Image SFT's destripe LoRA). The saved LoRA leaves it out
+    # and records it (zentrainer.base_lora): load it beside, at this strength.
+    base_lora: str | None = None
+    base_strength: float = 1.0
     # Only these transformer blocks get adapters, e.g. "20-49" (MiniMax H3's identity blocks,
     # Fizgig's default) or "10-": the backward then stops at the first one, so steps are
     # quicker, and the model's early (layout, motion) blocks stay untouched. "" = every block.
@@ -323,6 +328,8 @@ class TrainSpec:
         if not self.dataset.folder:
             raise SpecError("dataset.folder is required")
         _choice("network.algorithm", self.network.algorithm, ("LoRA", "LoHa", "LoKr", "OFT"))
+        if self.network.base_lora and not -4.0 <= self.network.base_strength <= 4.0:
+            raise SpecError("network.base_strength is a LoRA strength, between -4 and 4 (usually 1)")
         _choice("optim.scheduler", self.optim.scheduler, ("constant", "linear", "cosine"))
         _choice("objective.loss", self.objective.loss, ("mse", "l1", "huber", "smooth_l1"))
         _choice("objective.target", self.objective.target, ("native", "x0"))

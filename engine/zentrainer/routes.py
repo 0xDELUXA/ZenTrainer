@@ -1058,21 +1058,23 @@ def register(server) -> None:
 
     @routes.get("/zentrainer/api/adapters")
     async def list_adapters(request):
-        """Training adapters for the picker: the family's known ones first, custom, then local files."""
+        """Training adapters (or ?kind=base: base LoRAs) for the picker: the family's known ones
+        first, custom, then local files."""
         from . import adapters
 
-        rows = await asyncio.to_thread(adapters.listing, request.query.get("family") or None)
+        kind = "base" if request.query.get("kind") == "base" else "training"
+        rows = await asyncio.to_thread(adapters.listing, request.query.get("family") or None, kind)
         return web.json_response({"adapters": rows})
 
     @routes.post("/zentrainer/api/adapters")
     async def add_adapter(request):
-        """Add one from a Hugging Face link: {link, family?, file?}. Returns {adapter} or {choices}."""
+        """Add one from a Hugging Face link: {link, family?, file?, kind?}. Returns {adapter} or {choices}."""
         from . import adapters
 
         body = await request.json()
         try:
             out = await asyncio.to_thread(adapters.add, str(body.get("link", "")), body.get("family") or None,
-                                          body.get("file") or None)
+                                          body.get("file") or None, "base" if body.get("kind") == "base" else "training")
         except ValueError as e:
             return _bad(str(e))
         return web.json_response(out)

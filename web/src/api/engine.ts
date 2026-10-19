@@ -58,6 +58,9 @@ export interface TrainSpec {
     init_from: string | null
     /** a LoRA applied while training only (not in samples or the saved file): a de-distillation adapter */
     training_adapter: string | null
+    /** a LoRA the trained one sits on everywhere (training, samples, use); saved beside, not in */
+    base_lora?: string | null
+    base_strength?: number
     /** only these blocks get adapters, e.g. "20-49" ("" = all): the backward stops at the first */
     blocks?: string
   }
@@ -650,6 +653,8 @@ export interface ModelFamily {
   recommended: { train: Partial<Record<ModelFolder, string | null>>; sample: SampleDefaults | null }
   missing: { folder: ModelFolder; name: string; size: number | null }[]
 }
+/** training: on while training only; base: on always (training, samples, use) */
+export type AdapterKind = 'training' | 'base'
 /** engine/zentrainer/adapters.py listing() */
 export interface TrainingAdapter {
   id: string
@@ -732,12 +737,14 @@ export const engine = {
     call<{ clips: number; moved: string[] }>(`${dsPath(name)}/split`, { method: 'POST', body: JSON.stringify(body) }),
   mergeLoras: (body: { members: { name: string; strength: number }[]; out_name: string; max_rank?: number; energy?: number }) =>
     call<{ lora_name: string; mean_rank?: number; kept_energy?: number; bytes: number }>('/loras/merge', { method: 'POST', body: JSON.stringify(body) }),
-  adapters: (family?: string | null) =>
-    call<{ adapters: TrainingAdapter[] }>(`/adapters${family ? `?family=${encodeURIComponent(family)}` : ''}`).then((r) => r.adapters),
-  addAdapter: (link: string, family?: string | null, file?: string) =>
+  adapters: (family?: string | null, kind: AdapterKind = 'training') =>
+    call<{ adapters: TrainingAdapter[] }>(
+      `/adapters?kind=${kind}${family ? `&family=${encodeURIComponent(family)}` : ''}`,
+    ).then((r) => r.adapters),
+  addAdapter: (link: string, family?: string | null, file?: string, kind: AdapterKind = 'training') =>
     call<{ adapter?: TrainingAdapter; choices?: { file: string; size: number | null }[]; repo?: string }>('/adapters', {
       method: 'POST',
-      body: JSON.stringify({ link, family, file }),
+      body: JSON.stringify({ link, family, file, kind }),
     }),
   datasetStats: (name: string, set = 'default') =>
     call<DatasetStats>(`/datasets/${encodeURIComponent(name)}/stats?set=${encodeURIComponent(set)}`),

@@ -111,19 +111,25 @@ class _Assisted(torch.nn.Module):
     """A layer's trainable adapter (or none) plus a frozen training adapter that's only on
     while training (`switch.on`): e.g. a de-distillation adapter for a guidance-distilled
     model, which training must sit on top of but samples and the saved LoRA must not include.
+    A base LoRA (`base`) is on always, training and samples: the trained one sits on it.
     Speaks both attachment protocols: called on the weight (weight wrapper) and h/g (bypass)."""
 
     _BYPASS_ATTRS = ("multiplier", "is_conv", "conv_dim", "kernel_size", "in_channels", "out_channels", "kw_dict")
 
-    def __init__(self, trained, assist, switch, preview=None, preview_strength: float = 1.0):
+    def __init__(self, trained, assist, switch, preview=None, preview_strength: float = 1.0,
+                 base=None, base_strength: float = 1.0):
         super().__init__()
         self.trained = trained
+        self.base = base  # on always
+        self.base_strength = base_strength
         self.assist = assist  # on while training (switch.on)
         self.preview = preview  # on while sampling: a turbo LoRA for few-step previews
         self.preview_strength = preview_strength
         self.switch = switch
 
     def __call__(self, w):
+        if self.base is not None:
+            w = w + self.base_strength * (self.base(w) - w)
         if self.switch.on and self.assist is not None:
             w = self.assist(w)
         elif not self.switch.on and self.preview is not None:
@@ -131,7 +137,7 @@ class _Assisted(torch.nn.Module):
         return self.trained(w) if self.trained is not None else w
 
     def _share(self) -> None:  # bypass sets layer info on the adapter it holds: pass it on
-        for child in (self.trained, self.assist, self.preview):
+        for child in (self.trained, self.assist, self.preview, self.base):
             if child is not None:
                 for a in self._BYPASS_ATTRS:
                     if hasattr(self, a):
@@ -140,6 +146,8 @@ class _Assisted(torch.nn.Module):
     def h(self, x, base_out):
         self._share()
         out = self.trained.h(x, base_out) if self.trained is not None else 0
+        if self.base is not None:
+            out = out + self.base_strength * self.base.h(x, base_out)
         if self.switch.on and self.assist is not None:
             out = out + self.assist.h(x, base_out)
         elif not self.switch.on and self.preview is not None:
@@ -154,6 +162,41 @@ class _Switch:
     on = True
 
 
+class _Sliced(torch.nn.Module):
+    """Frozen adapters on row slices of one fused weight: a LoRA made for separate q/k/v on a
+    build that fuses them (MOSS-Image int8's proj.qkv). ComfyUI maps those keys to
+    (weight, (dim 0, offset, size)); each adapter acts on its slice. Both protocols, like
+    _Assisted: called on the weight, and h/g (bypass) on the output's last dim."""
+
+    _BYPASS_ATTRS = _Assisted._BYPASS_ATTRS
+
+    def __init__(self):
+        super().__init__()
+        self.parts: list[tuple[int, int, torch.nn.Module]] = []
+
+    def add(self, offset: int, size: int, adapter) -> None:
+        self.parts.append((offset, size, adapter))
+        self.add_module(f"part{len(self.parts)}", adapter)
+
+    def __call__(self, w):
+        out = w.clone()
+        for off, size, a in self.parts:
+            out[off:off + size] = a(w[off:off + size])
+        return out
+
+    def h(self, x, base_out):
+        out = torch.zeros_like(base_out)
+        for off, size, a in self.parts:
+            for k in self._BYPASS_ATTRS:
+                if hasattr(self, k):
+                    setattr(a, k, getattr(self, k))
+            out[..., off:off + size] = a.h(x, base_out[..., off:off + size])
+        return out
+
+    def g(self, y):
+        return y
+
+
 def load_training_adapter(patcher, path: str, device, dtype, skipped: list | None = None) -> dict:
     """A LoRA file as frozen train-form adapters keyed by model weight ("diffusion_model.X.weight"),
     read with ComfyUI's own LoRA key mapping (diffusers, PEFT lora_A/B, kohya names ...)."""
@@ -166,9 +209,18 @@ def load_training_adapter(patcher, path: str, device, dtype, skipped: list | Non
     out = {}
     left_out = []
     for key, adapter in patches.items():
+        sliced = None
+        if isinstance(key, tuple):  # (weight, (dim, offset, size)): a slice of a fused weight
+            key, (dim, offset, size) = key[0], key[1][:3]
+            sliced = (offset, size) if dim == 0 else None
+            if sliced is None:
+                left_out.append(key)
+                continue
         if isinstance(adapter, LoRAAdapter):
             mat1, mat2, alpha, mid, dora, reshape = adapter.weights
-            if not _fits(patcher.model, key, (mat1.shape[0], mat2[0].numel())):
+            fits = (_fits_slice(patcher.model, key, sliced, (mat1.shape[0], mat2[0].numel())) if sliced
+                    else _fits(patcher.model, key, (mat1.shape[0], mat2[0].numel())))
+            if not fits:
                 left_out.append(key)  # same name, different layer (another build of the model): ComfyUI skips these too
                 continue
             alpha = float(alpha) if alpha is not None else float(mat2.shape[0])  # no alpha: scale 1
@@ -177,7 +229,16 @@ def load_training_adapter(patcher, path: str, device, dtype, skipped: list | Non
             module = adapter.to_train()
         else:
             continue
-        out[key] = module.to(device=device, dtype=dtype).requires_grad_(False)
+        module = module.to(device=device, dtype=dtype).requires_grad_(False)
+        if sliced:
+            if not isinstance(out.get(key), _Sliced):
+                if key in out:  # a whole-weight adapter too: unusual, keep the first
+                    left_out.append(key)
+                    continue
+                out[key] = _Sliced()
+            out[key].add(sliced[0], sliced[1], module)
+        else:
+            out[key] = module
     if left_out:
         logging.warning("[ZenTrainer] %s: %d layer(s) don't match this model's shapes and are left out (e.g. %s)",
                         os.path.basename(path), len(left_out), left_out[0])
@@ -186,6 +247,20 @@ def load_training_adapter(patcher, path: str, device, dtype, skipped: list | Non
     if not out:
         raise RuntimeError(f"{path}: no layers of this model in the training adapter")
     return out
+
+
+def _fits_slice(model, key: str, sliced: tuple[int, int], out_in: tuple[int, int]) -> bool:
+    """Whether a LoRA's (out, in) fits rows offset..offset+size of the fused weight it names."""
+    w = model
+    try:
+        for part in key.split("."):
+            w = getattr(w, part)
+    except AttributeError:
+        return False
+    shape = tuple(w.shape)
+    off, size = sliced
+    return (len(shape) >= 2 and out_in[0] == size and off + size <= shape[0]
+            and int(torch.tensor(shape[1:]).prod()) == out_in[1])
 
 
 def _fits(model, key: str, out_in: tuple[int, int]) -> bool:
@@ -203,7 +278,8 @@ def _fits(model, key: str, out_in: tuple[int, int]) -> bool:
 class Network:
     def __init__(self, patcher, spec: NetworkSpec, device: torch.device, *, bypass: bool = False,
                  init_weights: dict | None = None, assist: dict | None = None,
-                 preview: dict | None = None, preview_strength: float = 1.0):
+                 preview: dict | None = None, preview_strength: float = 1.0,
+                 base: dict | None = None, base_strength: float = 1.0):
         from comfy.weight_adapter import BypassInjectionManager, adapter_maps, adapters
 
         self.spec = spec
@@ -215,6 +291,7 @@ class Network:
         init_weights = init_weights or {}
         assist = dict(assist or {})  # weight key -> frozen training adapter
         preview = dict(preview or {})  # weight key -> frozen preview (turbo) adapter
+        base = dict(base or {})  # weight key -> frozen base LoRA adapter (on always)
         self.assisted = len(assist)
         self.previewed = len(preview)
         self._switch = _Switch()
@@ -243,9 +320,9 @@ class Network:
                 if isinstance(getattr(adapter, "alpha", None), torch.nn.Parameter):
                     adapter.alpha.requires_grad_(False)
                 self._own(name, adapter)
-                frozen, fast = assist.pop(key, None), preview.pop(key, None)
-                attached = (_Assisted(adapter, frozen, self._switch, fast, preview_strength)
-                            if frozen is not None or fast is not None else adapter)
+                frozen, fast, under = assist.pop(key, None), preview.pop(key, None), base.pop(key, None)
+                attached = (_Assisted(adapter, frozen, self._switch, fast, preview_strength, under, base_strength)
+                            if frozen is not None or fast is not None or under is not None else adapter)
                 if self._bypass is not None:
                     self._bypass.add_adapter(key, attached, strength=1.0)
                 else:
@@ -256,8 +333,9 @@ class Network:
                 self._own_delta(patcher, f"{name}.bias", f"{name}.diff_b", m.bias.shape, device)
 
         # training-adapter layers this network doesn't train still get it (e.g. the text refiner)
-        for key in set(assist) | set(preview):
-            attached = _Assisted(None, assist.get(key), self._switch, preview.get(key), preview_strength)
+        for key in set(assist) | set(preview) | set(base):
+            attached = _Assisted(None, assist.get(key), self._switch, preview.get(key), preview_strength,
+                                 base.get(key), base_strength)
             if self._bypass is not None:
                 self._bypass.add_adapter(key, attached, strength=1.0)
             else:

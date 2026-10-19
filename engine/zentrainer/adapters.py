@@ -1,15 +1,20 @@
-"""Training adapters: LoRAs applied while training only (harness/network.py load_training_adapter).
+"""LoRAs a run trains on top of (harness/network.py load_training_adapter), two kinds:
 
-Distilled models (turbo, guidance-distilled) train badly on their own: the LoRA spends itself
-undoing the distillation and samples drift. A de-distillation adapter under it absorbs that, and
-is left out of samples and the saved file. This module is the picker's catalog:
+- training adapters, on while training only. Distilled models (turbo, guidance-distilled) train
+  badly on their own: the LoRA spends itself undoing the distillation and samples drift. A
+  de-distillation adapter under it absorbs that, and is left out of samples and the saved file.
+- base LoRAs, on always (training, samples, use): a fix the model always needs, or an edit LoRA a
+  specialist builds on. The trained LoRA learns only what's left; it's saved without the base and
+  records it (network.base_lora).
+
+This module is the pickers' catalog:
 
 - curated: adapters we know, per model family, with their Hugging Face file;
 - custom: ones the user added from a Hugging Face link (kept in <user>/zentrainer/adapters.json);
 - local: anything already in a loras folder's training_adapters/ subfolder.
 
-Downloads land in <loras>/training_adapters/, beside any adapter already installed. Only catalog
-entries download: the user adds a link once (validated against the repo's file list), then picks it.
+Downloads land in <loras>/training_adapters/ (or base_loras/), beside any already installed. Only
+catalog entries download: the user adds a link once (validated against the repo's file list), then picks it.
 """
 
 from __future__ import annotations
@@ -23,6 +28,7 @@ from . import safeio
 from . import families
 
 SUBDIR = "training_adapters"
+SUBDIRS = {"training": SUBDIR, "base": "base_loras"}
 HF = "https://huggingface.co"
 
 
@@ -38,6 +44,7 @@ class Adapter:
     size: int | None = None
     source: str = "curated"  # curated | custom
     suggest: bool = False  # offered when the family is picked and no adapter is set
+    kind: str = "training"  # training (on while training only) | base (on always)
 
     @property
     def name(self) -> str:
@@ -66,7 +73,11 @@ CURATED = [
             "Train on Krea 2 Turbo without breaking its few-step sampling.", size=228587504),
     Adapter("nynxz-nk2e-v03", "NK2E v0.3 edit base (Krea 2)", "nynxz/NK2E", "comfy/v0.3/NK2E-v0.3.safetensors",
             ["krea-2"], "Nynxz's in-context edit LoRA: train a specialist edit (Edit training on) on top of it, "
-            "then use both together.", size=385418784),
+            "then use both together.", size=385418784, kind="base"),
+    Adapter("nynxz-moss-sft-destripe", "MOSS SFT destripe", "nynxz/MOSS-Image",
+            "loras/moss_sft_destripe_top64_bf16.safetensors", ["moss-image"],
+            "Removes the SFT build's banding. Under a LoRA, the LoRA doesn't spend itself learning that fix.",
+            size=1900586, kind="base"),
     Adapter("ostris-zimage-turbo-v2", "Ostris Z-Image Turbo adapter v2", "ostris/zimage_turbo_training_adapter",
             "zimage_turbo_training_adapter_v2.safetensors", ["z-image-turbo"],
             "Train on Z-Image Turbo without breaking its few-step sampling.", size=340194488),
@@ -117,19 +128,23 @@ def _installed() -> dict[str, str]:
     return {Path(n).name: n for n in folder_paths.get_filename_list("loras")}
 
 
-def listing(family: str | None) -> list[dict]:
-    """Catalog entries (the family's first), then local adapters the catalog doesn't name."""
+def listing(family: str | None, kind: str = "training") -> list[dict]:
+    """Catalog entries of this kind (the family's first), then local files the catalog doesn't
+    name: training adapters from a training_adapters/ folder, base LoRAs from any loras folder."""
     import folder_paths
 
     have = _installed()
     out, named = [], set()
     for a in catalog():
+        if a.kind != kind:
+            continue
         listed = have.get(a.name)
         named.add(a.name)
         fits = not a.families or (family in a.families if family else False)
         out.append({**asdict(a), "name": a.name, "installed": listed, "fits": fits, "url": f"{HF}/{a.repo}"})
     for n in folder_paths.get_filename_list("loras"):
-        if n.replace("\\", "/").startswith(SUBDIR + "/") and Path(n).name not in named:
+        in_sub = n.replace("\\", "/").startswith(SUBDIR + "/")
+        if (in_sub if kind == "training" else not in_sub) and Path(n).name not in named:
             out.append({"id": f"local:{n}", "label": Path(n).stem, "name": Path(n).name, "installed": n, "source": "local",
                         "families": [], "fits": True, "note": "", "repo": "", "file": "", "size": None, "url": "",
                         "suggest": False, "save_as": ""})
@@ -137,8 +152,8 @@ def listing(family: str | None) -> list[dict]:
     return out
 
 
-def target_dir() -> Path:
-    """Where adapters download: a loras folder that already has training_adapters/, else the
+def target_dir(kind: str = "training") -> Path:
+    """Where adapters download: a loras folder that already has the kind's subfolder, else the
     loras folder downloads use (not ZenTrainer's own output folder of trained LoRAs)."""
     import folder_paths
 
@@ -146,10 +161,11 @@ def target_dir() -> Path:
 
     out = Path(folder_paths.get_output_directory()).resolve()
     roots = [Path(p) for p in folder_paths.get_folder_paths("loras") if out not in Path(p).resolve().parents]
+    sub = SUBDIRS.get(kind, SUBDIR)
     for r in roots:
-        if (r / SUBDIR).is_dir():
-            return r / SUBDIR
-    return downloads.target_dir("loras") / SUBDIR
+        if (r / sub).is_dir():
+            return r / sub
+    return downloads.target_dir("loras") / sub
 
 
 def download(adapter_id: str):
@@ -158,13 +174,13 @@ def download(adapter_id: str):
     a = next((a for a in catalog() if a.id == adapter_id), None)
     if a is None:
         raise ValueError(f"no adapter {adapter_id!r}")
-    return downloads.manager().enqueue("adapter", "loras", a.name, a.url, target_dir(), a.size)
+    return downloads.manager().enqueue("adapter", "loras", a.name, a.url, target_dir(a.kind), a.size)
 
 
 _HF_LINK = re.compile(r"^(?:https?://huggingface\.co/)?([\w.-]+/[\w.-]+)(?:/(?:blob|resolve|tree)/[\w.-]+/?(.*))?/?$")
 
 
-def add(link: str, family: str | None, file: str | None = None) -> dict:
+def add(link: str, family: str | None, file: str | None = None, kind: str = "training") -> dict:
     """Add an adapter from a Hugging Face link (repo, or a file in it). A repo with several
     .safetensors files and no file chosen returns {choices} to pick from instead."""
     m = _HF_LINK.match(link.strip())
@@ -187,8 +203,8 @@ def add(link: str, family: str | None, file: str | None = None) -> dict:
     base = Path(row["path"]).name
     owner = repo.split("/")[0]
     save_as = f"{owner}_{repo.split('/')[1]}.safetensors" if base == "pytorch_lora_weights.safetensors" else ""
-    a = Adapter(f"custom:{repo}/{row['path']}", f"{Path(base).stem} ({owner})", repo, row["path"],
-                [family] if family else [], "", save_as, row.get("size"), "custom")
+    a = Adapter(f"custom{'' if kind == 'training' else '-' + kind}:{repo}/{row['path']}", f"{Path(base).stem} ({owner})", repo, row["path"],
+                [family] if family else [], "", save_as, row.get("size"), "custom", kind=kind)
     with _lock:
         rows_ = [c for c in _custom() if c.id != a.id] + [a]
         _save_custom(rows_)

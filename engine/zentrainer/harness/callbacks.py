@@ -129,6 +129,7 @@ class Samples(Callback):
         self.every = every
         self._conds = None
         self._alt = None  # base patcher of the alternate sampling model, loaded once
+        self._base_sd = None  # the base LoRA (network.base_lora), for the alternate model
 
     def _like(self, t, row: dict) -> None:
         """Hand a landed sample to the likeness worker (faces extra), started on first use."""
@@ -215,6 +216,13 @@ class Samples(Callback):
                 path = folder_paths.get_full_path_or_raise("checkpoints", s.model_name)
                 self._alt = comfy.sd.load_checkpoint_guess_config(path, output_vae=False, output_clip=False)[0]
         patched, _ = comfy.sd.load_lora_for_models(self._alt, None, t.network.state_dict(), s.lora_strength, 0)
+        base = t.spec.network.base_lora
+        if base:  # the trained LoRA sits on it, so its samples do too
+            if self._base_sd is None:
+                import comfy.utils
+
+                self._base_sd = comfy.utils.load_torch_file(folder_paths.get_full_path_or_raise("loras", base), safe_load=True)
+            patched, _ = comfy.sd.load_lora_for_models(patched, None, self._base_sd, t.spec.network.base_strength, 0)
         return patched
 
     def _guided_options(self, model, s) -> dict | None:
@@ -717,7 +725,12 @@ def _preview_url(previewer, x0) -> str | None:
 
 
 def write_metadata(spec_dict: dict, step: int) -> dict[str, str]:
-    return {"zentrainer.spec": json.dumps(spec_dict), "zentrainer.step": str(step)}
+    meta = {"zentrainer.spec": json.dumps(spec_dict), "zentrainer.step": str(step)}
+    net = spec_dict.get("network") or {}
+    if net.get("base_lora"):  # trained on top of it: it belongs beside this LoRA wherever it's used
+        meta["zentrainer.base_lora"] = net["base_lora"]
+        meta["zentrainer.base_strength"] = str(net.get("base_strength", 1.0))
+    return meta
 
 
 def _latent_frames(vae, frames: int) -> int:

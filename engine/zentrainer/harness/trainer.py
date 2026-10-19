@@ -449,8 +449,18 @@ class Trainer:
                 left_out)
             self._partial(s.samples.turbo_lora, "the turbo LoRA", len(preview), left_out)
             logging.info("[ZenTrainer] samples ride on %s at %.2f", s.samples.turbo_lora, s.samples.turbo_strength)
+        base = None
+        if s.network.base_lora:
+            left_out = []
+            base = network_mod.load_training_adapter(
+                patcher, folder_paths.get_full_path_or_raise("loras", s.network.base_lora), self.device, torch.bfloat16,
+                left_out)
+            self._partial(s.network.base_lora, "the base LoRA", len(base), left_out)
+            logging.info("[ZenTrainer] base LoRA %s at %.2f on %d layers (training and samples; saved beside, not in)",
+                         s.network.base_lora, s.network.base_strength, len(base))
         self.network = Network(patcher, s.network, self.device, bypass=bypass, init_weights=init, assist=assist,
-                               preview=preview, preview_strength=s.samples.turbo_strength)
+                               preview=preview, preview_strength=s.samples.turbo_strength,
+                               base=base, base_strength=s.network.base_strength)
         self.optimizer, self.scheduler = optim.build(
             self.network.param_groups(s.optim.learning_rate, s.optim.lora_plus), s.optim)
         from .ema import EMA

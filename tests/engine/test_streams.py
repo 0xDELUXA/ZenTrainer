@@ -139,6 +139,40 @@ def test_training_adapter_is_switchable_and_not_saved():
     assert only(w).tolist() == [0.0, 0.0] and only.h(w, w) == 0
 
 
+def test_base_lora_is_on_in_training_and_samples():
+    from zentrainer.harness.network import _Assisted, _Switch
+    from zentrainer.harness.callbacks import write_metadata
+
+    sw = _Switch()
+    a = _Assisted(_Frozen(1.0), _Frozen(10.0), sw, base=_Frozen(100.0), base_strength=0.5)
+    w = torch.zeros(2)
+    assert a(w).tolist() == [61.0, 61.0]  # training: base at 0.5, training adapter, trained
+    assert a.h(w, w).tolist() == [61.0, 61.0]  # bypass: the same sum
+    sw.on = False
+    assert a(w).tolist() == [51.0, 51.0]  # samples: the base stays, the training adapter goes
+    assert a.h(w, w).tolist() == [51.0, 51.0]
+    only = _Assisted(None, None, sw, base=_Frozen(100.0))  # a layer only the base touches
+    assert only(w).tolist() == [100.0, 100.0]
+    meta = write_metadata({"network": {"base_lora": "base_loras/destripe.safetensors", "base_strength": 0.5}}, 10)
+    assert meta["zentrainer.base_lora"] == "base_loras/destripe.safetensors" and meta["zentrainer.base_strength"] == "0.5"
+    assert "zentrainer.base_lora" not in write_metadata({"network": {}}, 10)
+
+
+def test_frozen_adapters_on_slices_of_a_fused_weight():
+    from zentrainer.harness.network import _Sliced
+
+    s = _Sliced()  # q and v of a fused qkv (rows 0-1, 4-5 of 6)
+    s.add(0, 2, _Frozen(1.0))
+    s.add(4, 2, _Frozen(5.0))
+    w = torch.zeros(6, 3)
+    assert s(w)[:, 0].tolist() == [1.0, 1.0, 0.0, 0.0, 5.0, 5.0]  # k untouched
+    assert w.abs().sum() == 0  # the base weight isn't changed in place
+    out = torch.zeros(2, 6)
+    s.multiplier = 0.5
+    assert s.h(None, out)[0].tolist() == [1.0, 1.0, 0.0, 0.0, 5.0, 5.0]
+    assert s.parts[1][2].multiplier == 0.5  # bypass's layer info reaches the parts
+
+
 def test_pack_trains_a_real_soundtrack(monkeypatch):
     _comfy_utils(monkeypatch)
     s = Streams(types.SimpleNamespace(latent_format=_AV()))

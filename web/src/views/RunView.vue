@@ -410,9 +410,20 @@ const setup = computed((): { k: string; v: string; title?: string }[] => {
       v: [OPT_NAMES[opt.optimizer] ?? opt.optimizer, `from ${fmtLr(opt.learning_rate)}`, ADAPTIVE.has(opt.optimizer) ? '' : opt.scheduler].filter(Boolean).join(' · '),
     },
     { k: 'Network', v: `${sp.network.algorithm} r${sp.network.rank} · ${Array.isArray(sp.network.targets) ? `${sp.network.targets.length} layer types` : sp.network.targets.replace('_', ' + ')}${sp.dataset.masked_loss ? ' · masked' : ''}` },
+    ...(sp.network.base_lora
+      ? [{
+          k: 'Base LoRA',
+          v: `${baseName(sp.network.base_lora)} at ${sp.network.base_strength ?? 1} · load it beside this LoRA`,
+          title: `Trained on top of ${sp.network.base_lora}: the LoRA expects it, at the same strength`,
+        }]
+      : []),
+    ...(sp.network.training_adapter
+      ? [{ k: 'Trained over', v: `${baseName(sp.network.training_adapter)} · training only`, title: sp.network.training_adapter }]
+      : []),
     ...(mem.length ? [{ k: 'Memory', v: mem.join(' · ') }] : []),
   ]
 })
+const baseName = (p: string) => p.split(/[\\/]/).pop()!.replace(/\.safetensors$/, '')
 // faces extra: each sampled step's mean likeness (run samples and Sample now; manual tries left out)
 const likeSteps = computed(() => {
   const by = new Map<number, number[]>()

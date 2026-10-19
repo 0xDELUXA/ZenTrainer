@@ -1,14 +1,15 @@
 <script setup lang="ts">
-// The training adapter picker: adapters we know for the picked family (downloaded on pick),
-// ones added from a Hugging Face link, and files already in a loras/training_adapters folder.
+// The training adapter picker (kind "training"): adapters we know for the picked family
+// (downloaded on pick), ones added from a Hugging Face link, and files already in a
+// loras/training_adapters folder. Kind "base" picks a base LoRA the same way, from any loras folder.
 // v-model is the name ComfyUI lists the file by (what the spec stores), '' for none.
 import { ZenButton, ZenCombo, ZenInput } from '@nynxz/zenkit-ui'
 import { computed, ref, watch } from 'vue'
 import { downloadFor, finished, fmtBytes } from '@/downloads'
-import { EngineError, engine, type TrainingAdapter } from '@/api/engine'
+import { EngineError, engine, type AdapterKind, type TrainingAdapter } from '@/api/engine'
 
 const model = defineModel<string>({ required: true })
-const props = defineProps<{ family: string | null }>()
+const props = withDefaults(defineProps<{ family: string | null; kind?: AdapterKind }>(), { kind: 'training' })
 
 const NONE = '__none'
 const list = ref<TrainingAdapter[]>([])
@@ -17,7 +18,7 @@ const error = ref<string | null>(null)
 
 async function load() {
   try {
-    list.value = await engine.adapters(props.family)
+    list.value = await engine.adapters(props.family, props.kind)
   } catch {
     list.value = []
   }
@@ -101,7 +102,7 @@ async function add(file?: string) {
   busy.value = true
   error.value = null
   try {
-    const r = await engine.addAdapter(link.value.trim(), props.family, file)
+    const r = await engine.addAdapter(link.value.trim(), props.family, file, props.kind)
     if (r.choices) {
       choices.value = r.choices
       return

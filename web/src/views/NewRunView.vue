@@ -286,6 +286,10 @@ const trainingAdapter = computed({
   get: () => spec.network.training_adapter ?? '',
   set: (v: string) => (spec.network.training_adapter = v || null),
 })
+const baseLora = computed({
+  get: () => spec.network.base_lora ?? '',
+  set: (v: string) => (spec.network.base_lora = v || null),
+})
 const sampleModel = computed({
   get: () => spec.samples.model_name ?? '',
   set: (v: string) => (spec.samples.model_name = v || null),
@@ -738,6 +742,12 @@ async function start(position: 'next' | 'end' = 'next') {
                 </ZenField>
                 <ZenField label="Training adapter" stack class="span-2" tip="A LoRA applied while training only, never in samples or the saved file. Guidance-distilled models (MiniMax H3) train much better on a de-distillation adapter">
                   <AdapterPicker v-model="trainingAdapter" :family="familyId" />
+                </ZenField>
+                <ZenField label="Base LoRA" stack class="span-2" tip="A LoRA the new one sits on everywhere: training, samples and use. For a fix the model always needs (MOSS SFT's destripe) or an edit LoRA to build on. The new LoRA learns only what's left, so load the base beside it when you use it">
+                  <AdapterPicker v-model="baseLora" :family="familyId" kind="base" />
+                </ZenField>
+                <ZenField v-if="spec.network.base_lora" label="Base strength" stack tip="The strength the base LoRA runs at, in training and samples. Use it at the same strength">
+                  <ZenNumber :model-value="spec.network.base_strength ?? 1" :min="-4" :max="4" :step="0.05" :precision="2" @update:model-value="spec.network.base_strength = $event" />
                 </ZenField>
                 <ZenField label="Blocks" stack tip="Only these transformer blocks get adapters, e.g. 20-49: the backward stops at the first one, so steps are quicker, and the early blocks (layout, motion) stay untouched. Empty = every block">
                   <ZenInput :model-value="spec.network.blocks ?? ''" placeholder="all" @update:model-value="spec.network.blocks = String($event).trim()" />
