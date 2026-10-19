@@ -394,6 +394,10 @@ const statGroups = computed((): { title: string; items: Stat[] }[] => {
 // what the run is, as label/value lines that wrap rather than cut off
 const OPT_NAMES: Record<string, string> = { Automagic3: 'Automagic v3', AdamWScheduleFree: 'AdamW schedule-free', AdamW8bit: 'AdamW 8-bit' }
 const ADAPTIVE = new Set(['Automagic', 'Automagic3', 'Prodigy']) // they set their own LR: the schedule hardly matters
+const modelFile = computed(() => {
+  const m = detail.value?.spec.model
+  return (m?.kind === 'split' ? m.unet_name : m?.ckpt_name) ?? ''
+})
 const setup = computed((): { k: string; v: string; title?: string }[] => {
   const sp = detail.value?.spec
   if (!sp) return []
@@ -700,7 +704,8 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
             <StatusPill :status="detail.run.status" />
           </div>
           <p class="lede mono">
-            {{ detail.run.run_id }} · {{ detail.spec.model.kind === 'split' ? detail.spec.model.unet_name : detail.spec.model.ckpt_name }}
+            <span class="lede-part" :title="detail.run.run_id">{{ detail.run.run_id }}</span>
+            <span class="lede-part" :title="modelFile">{{ modelFile }}</span>
           </p>
         </div>
         <div class="actions">
@@ -1045,9 +1050,11 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
   gap: 16px;
   flex-wrap: wrap;
 }
+/* the title keeps a readable width: past it the actions wrap below instead of squeezing it into a
+   column of single characters */
 .titles {
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 320px;
+  min-width: min(320px, 100%);
 }
 .title-row {
   display: flex;
@@ -1063,7 +1070,17 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
 .lede {
   margin: 4px 0 0;
   font-size: 12px;
-  overflow-wrap: anywhere; /* the run id and model wrap rather than cut off */
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 12px;
+}
+/* the run id and the model wrap between them, each cut off with an ellipsis if it alone is too long */
+.lede-part {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .actions {
   display: flex;
