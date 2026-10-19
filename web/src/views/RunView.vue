@@ -341,6 +341,15 @@ const statGroups = computed((): { title: string; items: Stat[] }[] => {
           text: ` ${valLast.value.val_loss < valFirst.value.val_loss ? '▼' : '▲'}${Math.abs(((valLast.value.val_loss - valFirst.value.val_loss) / valFirst.value.val_loss) * 100).toFixed(0)}%`,
         }
       : null
+  // likeness rises as it learns, from about 0 (a stranger) before training: the change is in
+  // points, not percent (0.05 -> 0.6 would read +1100%)
+  const likeDelta =
+    likeLast.value && likeFirst.value && likeLast.value.step !== likeFirst.value.step
+      ? {
+          good: likeLast.value.score >= likeFirst.value.score,
+          text: ` ${likeLast.value.score >= likeFirst.value.score ? '▲' : '▼'}${Math.abs(likeLast.value.score - likeFirst.value.score).toFixed(2)}`,
+        }
+      : null
   return [
     {
       title: 'Time',
@@ -373,8 +382,9 @@ const statGroups = computed((): { title: string; items: Stat[] }[] => {
         ...(likeLast.value
           ? [{
               k: 'Likeness',
-              v: `${likeLast.value.score.toFixed(2)} @ ${likeLast.value.step}`,
-              tip: `How much the samples' faces look like the dataset's (mean of the step's samples): 1 is identical, about 0.5 and up reads as the same person, near 0 a stranger. ${likeFirst.value && likeFirst.value.step !== likeLast.value.step ? `It was ${likeFirst.value.score.toFixed(2)} at step ${likeFirst.value.step}.` : ''}`,
+              v: likeDelta ? likeLast.value.score.toFixed(2) : `${likeLast.value.score.toFixed(2)} @ ${likeLast.value.step}`,
+              delta: likeDelta,
+              tip: `At step ${likeLast.value.step}: how much the samples' faces look like the dataset's (mean of the step's samples): 1 is identical, about 0.5 and up reads as the same person, near 0 a stranger. The arrow: change since the first scored samples. ${likeFirst.value && likeFirst.value.step !== likeLast.value.step ? `It was ${likeFirst.value.score.toFixed(2)} at step ${likeFirst.value.step}.` : ''}`,
             }]
           : []),
       ],
