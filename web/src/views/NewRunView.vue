@@ -1309,9 +1309,6 @@ h2 {
   background: var(--zen-warn);
   pointer-events: none;
 }
-.spacer {
-  flex: 1;
-}
 .ds-opt {
   display: flex;
   flex-direction: column;
@@ -1360,11 +1357,6 @@ dt {
 dd {
   margin: 0;
 }
-.ellipsis {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .custom-model {
   display: flex;
   flex-direction: column;
@@ -1387,9 +1379,6 @@ dd {
 }
 .link:hover {
   color: var(--zen-accent);
-}
-.small {
-  font-size: 11px;
 }
 .profile {
   margin-top: 10px;

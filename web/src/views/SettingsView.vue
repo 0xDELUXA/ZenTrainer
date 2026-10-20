@@ -286,12 +286,6 @@ p {
   gap: 10px;
   margin-bottom: 8px;
 }
-.spacer {
-  flex: 1;
-}
-.small {
-  font-size: 11px;
-}
 .small-seg button {
   padding: 3px 10px;
   font-size: 12px;

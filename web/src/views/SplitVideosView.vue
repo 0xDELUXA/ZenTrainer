@@ -107,9 +107,6 @@ async function run() {
 .small {
   font-size: 12px;
 }
-.muted {
-  color: var(--zen-muted);
-}
 .titles h1 {
   display: flex;
   gap: 6px;

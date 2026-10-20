@@ -248,9 +248,6 @@ dd {
 .log .error {
   color: var(--zen-danger);
 }
-.small {
-  font-size: 11px;
-}
 .err {
   color: var(--zen-danger);
 }

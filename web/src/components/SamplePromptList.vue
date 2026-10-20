@@ -224,7 +224,4 @@ function setSize(i: number, v: string | number) {
 .hint {
   font-size: 11px;
 }
-.muted {
-  color: var(--zen-muted);
-}
 </style>

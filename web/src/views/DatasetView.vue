@@ -905,12 +905,6 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
   white-space: pre-wrap;
   font-size: 12px;
 }
-.small {
-  font-size: 11px;
-}
-.spacer {
-  flex: 1;
-}
 .toolbar.selecting {
   border-color: color-mix(in srgb, var(--zen-accent) 45%, transparent);
 }
@@ -1494,11 +1488,6 @@ const thumbSize = computed(() => (zoom.value > 260 ? 768 : 384))
 .c-mask {
   text-align: center;
   color: var(--zen-accent);
-}
-.ellipsis {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .cap-edit {
   display: block;

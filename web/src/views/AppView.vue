@@ -347,12 +347,6 @@ const when = (t: number) => new Date(t * 1000).toLocaleTimeString([], { hour: '2
 .wide {
   max-width: 1440px;
 }
-.small {
-  font-size: 11px;
-}
-.spacer {
-  flex: 1;
-}
 .layout {
   display: grid;
   grid-template-columns: 340px minmax(0, 1fr);

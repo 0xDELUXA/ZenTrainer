@@ -510,9 +510,6 @@ onUnmounted(() => removeEventListener('keydown', onKey))
 .sec-title {
   font-weight: 600;
 }
-.spacer {
-  flex: 1;
-}
 .toggle {
   display: inline-flex;
   align-items: center;
@@ -673,9 +670,6 @@ onUnmounted(() => removeEventListener('keydown', onKey))
 }
 .small {
   font-size: 12px;
-}
-.muted {
-  color: var(--zen-muted);
 }
 .mono {
   font-family: var(--zen-mono, monospace);

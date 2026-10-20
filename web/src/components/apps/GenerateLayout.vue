@@ -575,9 +575,6 @@ watch([values, randomSeed, count], remember, { deep: true })
 .ok {
   color: var(--zen-ok);
 }
-.spacer {
-  flex: 1;
-}
 .warn {
   margin: 0;
   color: var(--zen-warn);

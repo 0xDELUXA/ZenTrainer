@@ -307,19 +307,8 @@ const ago = (t?: number) => {
 .meter span.part {
   background: var(--zen-warn);
 }
-.spacer {
-  flex: 1;
-}
-.small {
-  font-size: 11px;
-}
 .warn {
   color: var(--zen-warn);
-}
-.ellipsis {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .table {
   padding: 0;

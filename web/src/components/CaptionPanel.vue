@@ -595,9 +595,6 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
   gap: 8px;
   min-width: 0;
 }
-.spacer {
-  flex: 1;
-}
 .foot {
   flex-wrap: wrap;
 }

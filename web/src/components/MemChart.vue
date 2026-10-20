@@ -225,7 +225,4 @@ svg {
   margin-left: auto;
   padding-left: 12px;
 }
-.small {
-  font-size: 11px;
-}
 </style>

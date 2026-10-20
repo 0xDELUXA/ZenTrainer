@@ -868,9 +868,6 @@ watch(path, load)
 .small {
   font-size: 12px;
 }
-.muted {
-  color: var(--zen-muted);
-}
 .err {
   color: var(--zen-danger);
 }
@@ -951,9 +948,6 @@ watch(path, load)
   display: flex;
   align-items: center;
   gap: 10px;
-}
-.spacer {
-  flex: 1;
 }
 .tiles {
   flex: 1;

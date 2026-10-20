@@ -414,9 +414,6 @@ async function tryIt() {
   gap: 16px;
   align-items: center;
 }
-.spacer {
-  flex: 1;
-}
 .acts {
   display: flex;
   gap: 8px;
@@ -567,15 +564,7 @@ async function tryIt() {
   object-fit: contain;
   display: block;
 }
-.ellipsis {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .small {
   font-size: 12px;
-}
-.muted {
-  color: var(--zen-muted);
 }
 </style>

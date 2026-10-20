@@ -165,7 +165,4 @@ const NAMES = ['Composition', 'Form', 'Detail']
 .small {
   font-size: 12px;
 }
-.muted {
-  color: var(--zen-muted);
-}
 </style>

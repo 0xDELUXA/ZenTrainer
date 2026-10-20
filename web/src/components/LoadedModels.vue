@@ -106,12 +106,6 @@ const pct = (v: number, b: number) => (b ? Math.round((v / b) * 100) : 0)
   align-items: center;
   gap: 8px;
 }
-.spacer {
-  flex: 1;
-}
-.small {
-  font-size: 11px;
-}
 .model {
   display: flex;
   flex-direction: column;
@@ -139,14 +133,6 @@ const pct = (v: number, b: number) => (b ? Math.round((v / b) * 100) : 0)
 }
 .lbl {
   min-width: 0;
-}
-.ellipsis {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.muted {
-  color: var(--zen-muted);
 }
 .strip {
   display: grid;

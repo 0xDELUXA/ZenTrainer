@@ -596,14 +596,6 @@ void leaving
 .small {
   font-size: 12px;
 }
-.muted {
-  color: var(--zen-muted);
-}
-.ellipsis {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .step :deep(.zen-button) {
   align-self: flex-start;
 }

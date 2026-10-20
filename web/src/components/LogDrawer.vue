@@ -424,9 +424,6 @@ onBeforeUnmount(() => {
 .mem :deep(.legend) {
   flex-wrap: nowrap;
 }
-.spacer {
-  flex: 1;
-}
 .jump-slot {
   display: inline-flex;
   justify-content: flex-end;

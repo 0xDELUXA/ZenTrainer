@@ -291,15 +291,4 @@ async function forget(a: TrainingAdapter) {
 .nowrap {
   white-space: nowrap;
 }
-.spacer {
-  flex: 1;
-}
-.ellipsis {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.muted {
-  color: var(--zen-muted);
-}
 </style>

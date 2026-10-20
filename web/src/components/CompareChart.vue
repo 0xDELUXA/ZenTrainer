@@ -190,9 +190,6 @@ const hovered = computed(() => {
 .small {
   font-size: 12px;
 }
-.muted {
-  color: var(--zen-muted);
-}
 .mono {
   font-family: var(--zen-mono, monospace);
 }

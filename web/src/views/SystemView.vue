@@ -278,9 +278,6 @@ async function restart() {
   margin: 0;
   font-size: 18px;
 }
-.spacer {
-  flex: 1;
-}
 .note {
   min-width: 14ch;
   text-align: right;
@@ -310,11 +307,6 @@ async function restart() {
 }
 .meter span.hot {
   background: var(--zen-danger);
-}
-.ellipsis {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .usage {
   display: grid;

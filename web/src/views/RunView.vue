@@ -1112,12 +1112,6 @@ const fileName = (p: string) => p.split(/[\\/]/).at(-1)
   font-size: 12px;
   white-space: pre-wrap;
 }
-.small {
-  font-size: 11px;
-}
-.spacer {
-  flex: 1;
-}
 .loaded-card {
   display: flex;
   flex-direction: column;

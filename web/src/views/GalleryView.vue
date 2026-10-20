@@ -314,9 +314,6 @@ dd {
 .err {
   color: var(--zen-danger);
 }
-.small {
-  font-size: 11px;
-}
 @media (max-width: 720px) {
   .filters {
     width: 100%;

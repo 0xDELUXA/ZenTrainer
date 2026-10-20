@@ -134,6 +134,17 @@ a {
 .muted {
   color: var(--zen-muted);
 }
+.small {
+  font-size: 11px;
+}
+.spacer {
+  flex: 1;
+}
+.ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .mono {
   font-family: var(--zen-mono);
 }

@@ -439,9 +439,6 @@ defineExpose({ refresh: () => fam.value && open(fam.value.id, true) })
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.spacer {
-  flex: 1;
-}
 .link {
   border: none;
   background: none;

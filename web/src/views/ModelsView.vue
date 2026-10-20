@@ -348,9 +348,6 @@ onMounted(() => {
   background: color-mix(in srgb, var(--zen-accent) 20%, transparent);
   color: var(--zen-text);
 }
-.spacer {
-  flex: 1;
-}
 .small {
   font-size: 11px;
 }
