@@ -19,12 +19,14 @@ from pathlib import Path
 import aiohttp
 from aiohttp import web
 
-from . import __version__, state
-from . import datasets, jobqueue, presets, safeio, system
-from .harness import control
-from .spec import SpecError, TrainSpec, locked_changes
+from .. import __version__, state
+from ..datasets import folders as datasets
+from . import jobqueue, system
+from .. import presets, safeio
+from ..harness import control
+from ..spec import SpecError, TrainSpec, locked_changes
 
-WEB_DIST = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
+WEB_DIST = Path(__file__).resolve().parents[3] / "web" / "dist"
 
 
 # ended without training a step: editable, and saving puts it back in the queue
@@ -151,7 +153,7 @@ def register(server) -> None:
     async def dataset_stats(request):
         """The dataset's health now and over time: {"current": {metrics, scores}, "history"}; a
         snapshot is kept whenever the dataset changed since the last look."""
-        from . import dataset_stats
+        from ..datasets import stats as dataset_stats
 
         try:
             return web.json_response(await asyncio.to_thread(dataset_stats.snapshot, request.match_info["name"],
@@ -163,7 +165,7 @@ def register(server) -> None:
     async def dataset_faces(request):
         """The dataset's faces (faces extra): per picture, faces found, the main face's size, how
         much it looks like the rest, outliers. Cached per file; the first look takes a while."""
-        from . import faces
+        from ..datasets import faces
 
         if not faces.available():
             return web.json_response({"available": False,
@@ -187,7 +189,7 @@ def register(server) -> None:
     @routes.get("/zentrainer/api/caption")
     async def caption_info(request):
         """Styles, models, and the recent jobs (?dataset= for one dataset's)."""
-        from . import captioner
+        from ..datasets import captioner
 
         if request.query.get("active") == "1":
             return web.json_response({"jobs": captioner.active()})
@@ -208,7 +210,7 @@ def register(server) -> None:
     @routes.post("/zentrainer/api/caption/loras")
     async def add_caption_lora(request):
         """{"link", "file"?}: download a text-encoder LoRA for captioning from Hugging Face."""
-        from . import captioner
+        from ..datasets import captioner
 
         b = await request.json()
         try:
@@ -224,8 +226,8 @@ def register(server) -> None:
         "paths" (selected), "subject", "preview": n, "max_length", "replace_default"}.
         Rewriting captions that already exist in the "default" set (the one training reads
         unless told otherwise) needs replace_default: true, so it never happens by accident."""
-        from . import captioner
-        from .harness.data import caption_path, scan
+        from ..datasets import captioner
+        from ..harness.data import caption_path, scan
 
         name, b = request.match_info["name"], await request.json()
         try:
@@ -280,7 +282,8 @@ def register(server) -> None:
         """SAM3 on one image: {path, text?, positive?: [{x,y}], negative?: [{x,y}], threshold?, refine?}.
         Waits up to ~20 s for the result ({job} with status done -> GET .../segment/{id}.png);
         when the GPU is busy (a training run) it returns the queued job to poll."""
-        from . import jobqueue, segment
+        from . import jobqueue
+        from ..datasets import segment
 
         name = request.match_info["name"]
         b = await request.json()
@@ -311,7 +314,7 @@ def register(server) -> None:
 
     @routes.get("/zentrainer/api/segment/{job_id}")
     async def segment_job(request):
-        from . import segment
+        from ..datasets import segment
 
         jid = request.match_info["job_id"]
         if jid.endswith(".png"):
@@ -343,7 +346,7 @@ def register(server) -> None:
 
     @routes.get("/zentrainer/api/caption/{job_id}")
     async def caption_job(request):
-        from . import captioner
+        from ..datasets import captioner
 
         job = captioner.get(request.match_info["job_id"])
         if job is None:
@@ -353,7 +356,7 @@ def register(server) -> None:
     @routes.post("/zentrainer/api/caption/{job_id}/{action}")
     async def caption_action(request):
         """cancel: stop it (before it starts, or at the next image); undo: put back what it changed."""
-        from . import captioner
+        from ..datasets import captioner
 
         job, action = captioner.get(request.match_info["job_id"]), request.match_info["action"]
         if job is None:
@@ -490,7 +493,7 @@ def register(server) -> None:
         if control.get(run_id) is not None or meta["status"] in ("queued", "loading", "training", "paused"):
             return _bad("run is already active", 409)
         body = await request.json() if request.can_read_body else {}
-        from .harness.trainer import state_for
+        from ..harness.trainer import state_for
 
         resumable = [c for c in store.read(run_id, "checkpoints") if state_for(c, run_id)]
         if body.get("checkpoint"):
@@ -565,7 +568,7 @@ def register(server) -> None:
         except (ValueError, TypeError) as e:
             return _bad(str(e))
         if body.get("command") == "sample":  # acknowledge now; it renders at the next step boundary
-            from . import events
+            from .. import events
             events.emit(events.SAMPLE_PROGRESS, {"run_id": run_id, "phase": "requested"})
         return web.json_response({"ok": True})
 
@@ -602,7 +605,7 @@ def register(server) -> None:
     @routes.get("/zentrainer/api/system/models")
     async def loaded_models(_request):
         """Each model ComfyUI holds: its size, how much is in VRAM, per block (see residency.py)."""
-        from . import residency
+        from ..models import residency
 
         return web.json_response({"models": await asyncio.to_thread(residency.report)})
 
@@ -657,13 +660,13 @@ def register(server) -> None:
     def _batches():
         import folder_paths
 
-        from .apps.runtime import BatchStore
+        from ..apps.runtime import BatchStore
 
         return BatchStore(Path(folder_paths.get_user_directory()) / "zentrainer" / "app_batches")
 
     @routes.get("/zentrainer/api/apps")
     async def list_apps(_request):
-        from .apps import manifest
+        from ..apps import manifest
 
         apps, errors = manifest.list_apps(_apps_user_root())
         return web.json_response({"apps": [a.public() for a in apps], "errors": errors})
@@ -673,8 +676,8 @@ def register(server) -> None:
         """The selected workflow's own values ({input: value}) and which inputs it takes, so a
         form starts where the workflow does and hides what it doesn't have. ?family= picks the
         workflow of a per-model app."""
-        from .apps import compile as appcompile
-        from .apps import manifest
+        from ..apps import compile as appcompile
+        from ..apps import manifest
 
         apps, _ = manifest.list_apps(_apps_user_root())
         app = next((a for a in apps if a.id == request.match_info["id"]), None)
@@ -690,7 +693,7 @@ def register(server) -> None:
 
     @routes.get("/zentrainer/api/apps/{id}/cover")
     async def app_cover(request):
-        from .apps import manifest
+        from ..apps import manifest
 
         apps, _ = manifest.list_apps(_apps_user_root())
         app = next((a for a in apps if a.id == request.match_info["id"]), None)
@@ -703,8 +706,8 @@ def register(server) -> None:
     @routes.post("/zentrainer/api/apps/{id}/run")
     async def run_app(request):
         """{"inputs": {...}, "sweep": {input: [values]}, "client_id"}: one prompt per cell."""
-        from .apps import compile as appcompile
-        from .apps import manifest
+        from ..apps import compile as appcompile
+        from ..apps import manifest
 
         apps, _ = manifest.list_apps(_apps_user_root())
         app = next((a for a in apps if a.id == request.match_info["id"]), None)
@@ -738,7 +741,7 @@ def register(server) -> None:
         return web.json_response({"batch": batch})
 
     async def _resolve_batch(batch: dict) -> dict:
-        from .apps.runtime import resolve
+        from ..apps.runtime import resolve
 
         history = {}
         queued: set[str] | None = None
@@ -828,7 +831,7 @@ def register(server) -> None:
 
         import folder_paths
 
-        from .loras import favorites, meta
+        from ..loras import favorites, meta
 
         names = folder_paths.get_filename_list("loras")
         favs = set(favorites.get_favorites())
@@ -860,7 +863,7 @@ def register(server) -> None:
     @routes.get("/zentrainer/api/lora/preview")
     async def lora_preview(request):
         """The preview as a still; raw=1 a video preview as itself; size=<px> a cached thumbnail."""
-        from .loras import meta
+        from ..loras import meta
 
         found = meta.find_preview(_lora_path(request.query.get("name", "")))
         if not found:
@@ -883,7 +886,7 @@ def register(server) -> None:
     async def lora_info(request):
         from urllib.parse import quote
 
-        from .loras import favorites, meta
+        from ..loras import favorites, meta
 
         name = request.query.get("name", "").replace("\\", "/")
         path = _lora_path(name)
@@ -902,7 +905,7 @@ def register(server) -> None:
 
     @routes.get("/zentrainer/api/lora/example")
     async def lora_example(request):
-        from .loras import lora_manager, meta
+        from ..loras import lora_manager, meta
 
         path = _lora_path(request.query.get("name", ""))
         sha = await asyncio.to_thread(meta.sha256_of, path) if path else None
@@ -911,13 +914,13 @@ def register(server) -> None:
 
     @routes.get("/zentrainer/api/lora/favorites")
     async def lora_favorites(_request):
-        from .loras import favorites
+        from ..loras import favorites
 
         return web.json_response({"loras": favorites.get_favorites()})
 
     @routes.post("/zentrainer/api/lora/favorites")
     async def lora_set_favorite(request):
-        from .loras import favorites
+        from ..loras import favorites
 
         body = await request.json()
         name = str(body.get("name", "")).replace("\\", "/")
@@ -929,7 +932,7 @@ def register(server) -> None:
     @routes.get("/zentrainer/api/storage")
     async def get_storage(request):
         """The full report; ?disks=1 for just free space (cheap: the sidebar polls it)."""
-        from . import storage
+        from ..runs import disk as storage
 
         if request.query.get("disks") == "1":
             return web.json_response({"disks": await asyncio.to_thread(storage.disks)})
@@ -957,7 +960,8 @@ def register(server) -> None:
     async def clean_storage(request):
         """{"kind": "states", "run_id"} | {"kind": "states_all"} | {"kind": "cache", "folder"}:
         returns {"freed": bytes} ("runs" too for states_all: how many it cleaned)."""
-        from . import datasets, storage
+        from ..datasets import folders as datasets
+        from ..runs import disk as storage
 
         b = await request.json()
         try:
@@ -979,14 +983,14 @@ def register(server) -> None:
     # ---- ComfyUI workflows in App mode (templates, the user's): what the importer reads -----------
     @routes.get("/zentrainer/api/wapps")
     async def list_wapps(_request):
-        from .apps import catalog
+        from ..apps import catalog
 
         return web.json_response({"apps": await asyncio.to_thread(catalog.list_apps)})
 
     @routes.get("/zentrainer/api/wapps/describe")
     async def describe_wapp(request):
-        from .apps import catalog
-        from .apps.workflow import WorkflowError
+        from ..apps import catalog
+        from ..apps.workflow import WorkflowError
 
         try:
             d = await asyncio.to_thread(catalog.describe, request.query.get("id", ""))
@@ -1001,7 +1005,7 @@ def register(server) -> None:
     @routes.get("/zentrainer/api/families")
     async def list_families(request):
         """Model families from ComfyUI's templates, with what's installed of each."""
-        from . import families
+        from ..models import families
 
         return web.json_response({"families": await asyncio.to_thread(families.list_families)})
 
@@ -1009,7 +1013,7 @@ def register(server) -> None:
     async def get_family(request):
         """One family; ?repo=1 adds every build in its Hugging Face repo (cached a day,
         ?refresh=1 refetches)."""
-        from . import families
+        from ..models import families
 
         fam = await asyncio.to_thread(families.get, request.match_info["fid"],
                                       request.query.get("repo") == "1", request.query.get("refresh") == "1")
@@ -1017,7 +1021,7 @@ def register(server) -> None:
 
     @routes.get("/zentrainer/api/downloads")
     async def list_downloads(request):
-        from . import downloads, families
+        from ..models import downloads, families
 
         targets = {}
         for folder in ("diffusion_models", "text_encoders", "vae", "checkpoints"):
@@ -1031,7 +1035,7 @@ def register(server) -> None:
     @routes.post("/zentrainer/api/downloads")
     async def start_download(request):
         """Download a file the family catalog knows: {family, folder, name}."""
-        from . import downloads
+        from ..models import downloads
 
         body = await request.json()
         try:
@@ -1049,7 +1053,7 @@ def register(server) -> None:
 
         import folder_paths
 
-        from . import merge
+        from ..loras import merge
 
         b = await request.json()
         try:
@@ -1073,7 +1077,7 @@ def register(server) -> None:
     @routes.get("/zentrainer/api/noise")
     async def noise_profile(request):
         """A model's own noise schedule from its file's header (noise.py): ?folder=&name=."""
-        from . import noise
+        from ..models import noise
 
         folder = request.query.get("folder", "diffusion_models")
         if folder not in ("diffusion_models", "checkpoints"):
@@ -1084,7 +1088,7 @@ def register(server) -> None:
     async def list_adapters(request):
         """Training adapters (or ?kind=base: base LoRAs) for the picker: the family's known ones
         first, custom, then local files."""
-        from . import adapters
+        from ..models import adapters
 
         kind = "base" if request.query.get("kind") == "base" else "training"
         rows = await asyncio.to_thread(adapters.listing, request.query.get("family") or None, kind)
@@ -1093,7 +1097,7 @@ def register(server) -> None:
     @routes.post("/zentrainer/api/adapters")
     async def add_adapter(request):
         """Add one from a Hugging Face link: {link, family?, file?, kind?}. Returns {adapter} or {choices}."""
-        from . import adapters
+        from ..models import adapters
 
         body = await request.json()
         try:
@@ -1105,7 +1109,7 @@ def register(server) -> None:
 
     @routes.post("/zentrainer/api/adapters/download")
     async def download_adapter(request):
-        from . import adapters
+        from ..models import adapters
 
         body = await request.json()
         try:
@@ -1116,20 +1120,20 @@ def register(server) -> None:
 
     @routes.delete("/zentrainer/api/adapters")
     async def remove_adapter(request):
-        from . import adapters
+        from ..models import adapters
 
         return web.json_response({"removed": adapters.remove(request.query.get("id", ""))})
 
     @routes.delete("/zentrainer/api/downloads/{job_id}")
     async def cancel_download(request):
-        from . import downloads
+        from ..models import downloads
 
         ok = downloads.manager().cancel(request.match_info["job_id"])
         return web.json_response({"cancelled": ok})
 
     @routes.post("/zentrainer/api/downloads/clear")
     async def clear_downloads(request):
-        from . import downloads
+        from ..models import downloads
 
         downloads.manager().clear()
         return web.json_response({"ok": True})
@@ -1257,7 +1261,7 @@ def _migrate_states() -> None:
 
     import folder_paths
 
-    from .harness.trainer import state_dir
+    from ..harness.trainer import state_dir
 
     store = state.store()
     for meta in store.list():
@@ -1303,7 +1307,7 @@ def _comfy_version(check: bool) -> dict:
         out["commit"] = head.stdout.strip()
         out["describe"] = git("describe", "--tags", "--always").stdout.strip()
         out["dirty"] = bool(git("status", "--porcelain", "--untracked-files=no").stdout.strip())
-    lock = Path(__file__).resolve().parent.parent.parent / "comfy.lock"
+    lock = Path(__file__).resolve().parents[3] / "comfy.lock"
     if lock.is_file():
         pin = json.loads(lock.read_text())["comfyui"]
         out["pin"] = {"ref": pin["ref"], "describe": pin.get("describe")}
@@ -1333,12 +1337,12 @@ _LOADED_AT = time.time()
 def _code_stale() -> bool:
     """The engine's code on disk is newer than what this process loaded (an update or an edit):
     a restart picks it up. The sidebar offers one."""
-    root = Path(__file__).resolve().parent
+    root = Path(__file__).resolve().parents[1]
     return any(p.stat().st_mtime > _LOADED_AT for p in root.rglob("*.py") if "__pycache__" not in p.parts)
 
 
 def _capabilities() -> dict:
-    from .harness import optim
+    from ..harness import optim
 
     caps: dict = {"optimizers": optim.catalog()}
     try:

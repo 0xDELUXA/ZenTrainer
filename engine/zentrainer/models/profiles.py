@@ -20,10 +20,10 @@ import json
 import logging
 from pathlib import Path
 
-from .spec import SampleSpec, TrainSpec
+from ..spec import SampleSpec, TrainSpec
 
 log = logging.getLogger("zentrainer")
-ROOT = Path(__file__).resolve().parent.parent / "profiles"
+ROOT = Path(__file__).resolve().parents[2] / "profiles"
 STATUSES = ("recipe", "verified")
 
 _cache: dict[str, dict] | None = None

@@ -515,7 +515,7 @@ def test_sharpest_frame_picks_the_detailed_one(tmp_path):
 
 
 def test_image_flags_rules():
-    from zentrainer.dataset_stats import image_flags
+    from zentrainer.datasets.stats import image_flags
 
     ok = {"hash": 0, "bright": 0.5, "contrast": 0.2, "sharp": 10.0, "sat": 0.3, "border": 0.0}
     looks = {
@@ -536,7 +536,7 @@ def test_image_flags_rules():
 def test_face_likeness_leaves_each_face_out():
     import numpy as np
 
-    from zentrainer.faces import _leave_one_out
+    from zentrainer.datasets.faces import _leave_one_out
 
     rng = np.random.default_rng(0)
     unit = lambda v: v / np.linalg.norm(v)  # noqa: E731
@@ -550,7 +550,7 @@ def test_face_likeness_leaves_each_face_out():
 def test_masked_out_faces_dont_count():
     import numpy as np
 
-    from zentrainer.faces import _summarize
+    from zentrainer.datasets.faces import _summarize
 
     me = {"box": [0.1, 0.1, 0.4, 0.5], "share": 0.4, "emb": [1.0, 0.0]}
     bystander = {"box": [0.6, 0.2, 0.8, 0.4], "share": 0.2, "emb": [0.0, 1.0]}

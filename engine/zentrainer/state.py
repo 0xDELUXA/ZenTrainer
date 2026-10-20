@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from .runs import RunStore
+from .runs.store import RunStore
 
 _store: RunStore | None = None
 

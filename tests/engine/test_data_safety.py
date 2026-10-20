@@ -5,8 +5,9 @@ import io
 import pytest
 from PIL import Image
 
-from zentrainer import datasets, safeio
-from zentrainer.runs import RunStore
+from zentrainer.datasets import folders as datasets
+from zentrainer import safeio
+from zentrainer.runs.store import RunStore
 
 
 def _png(color) -> bytes:
@@ -88,7 +89,7 @@ def test_run_streams_survive_a_cut_short_line(tmp_path):
 def test_clearing_caches_only_touches_zentrainers_own(tmp_path, monkeypatch):
     import json as _json
 
-    from zentrainer import storage
+    from zentrainer.runs import disk as storage
     from zentrainer.harness import data
 
     monkeypatch.setattr(datasets, "root", lambda: (tmp_path / "input").resolve())

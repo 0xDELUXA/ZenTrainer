@@ -61,7 +61,7 @@ def _roots() -> dict[str, Path]:
 def _caches(folder: str, include_unknown: bool = False) -> list[Path]:
     """ZenTrainer's training caches (latents and conditioning) built from one dataset. Only ever
     these: other trainers' folders inside a dataset (_latent_cache/, .thumbs/...) aren't ours."""
-    from .harness.data import cache_folder
+    from ..harness.data import cache_folder
 
     root = _roots()["cache"]
     if not root.is_dir():
@@ -77,7 +77,7 @@ def disks() -> list[dict]:
     places = [("Outputs", folder_paths.get_output_directory()), ("Datasets", folder_paths.get_input_directory()),
               ("Run state", folder_paths.get_user_directory())]
     try:
-        from .downloads import target_dir
+        from ..models.downloads import target_dir
 
         places.append(("Model downloads", str(target_dir("diffusion_models"))))
     except Exception:
@@ -97,7 +97,7 @@ def disks() -> list[dict]:
 
 
 def report(store) -> dict:
-    from . import datasets
+    from ..datasets import folders as datasets
 
     roots = _roots()
     runs = []
@@ -160,7 +160,7 @@ def clean_all_states(store) -> tuple[int, int]:
 def clean_cache(store, folder: str) -> int:
     """Delete the training caches built from a dataset (and any from before caches recorded their
     dataset); the next run rebuilds what it needs. Nothing inside the dataset folder is touched."""
-    from . import datasets
+    from ..datasets import folders as datasets
 
     _no_active(store)
     datasets.folder(folder)  # must be a real dataset

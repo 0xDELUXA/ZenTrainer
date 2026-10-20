@@ -3,5 +3,5 @@ previews, details from Lora Manager's sidecar metadata and Civitai info, and boo
 
 meta.py, lora_manager.py and favorites.py are ComfyUI-NynxzNodes' nodes/lora modules (same
 code, so both packs read a LoRA the same way); only where they keep their files differs:
-ZenTrainer's under <user>/zentrainer/. The routes are in routes.py (/zentrainer/api/loras...).
+ZenTrainer's under <user>/zentrainer/. The routes are in server/routes.py (/zentrainer/api/loras...).
 """

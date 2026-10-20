@@ -67,7 +67,7 @@ class ZenCaptionSession(io.ComfyNode):
 
     @classmethod
     def execute(cls, job_id) -> io.NodeOutput:
-        from . import captioner
+        from .datasets import captioner
 
         job = captioner.get(job_id)
         if job is None:
@@ -77,7 +77,7 @@ class ZenCaptionSession(io.ComfyNode):
 
 
 class ZenSegmentSession(io.ComfyNode):
-    """Hosts one SAM3 mask request from the dataset mask editor (engine: segment.py)."""
+    """Hosts one SAM3 mask request from the dataset mask editor (engine: datasets/segment.py)."""
 
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -96,7 +96,7 @@ class ZenSegmentSession(io.ComfyNode):
 
     @classmethod
     def execute(cls, job_id) -> io.NodeOutput:
-        from . import segment
+        from .datasets import segment
 
         job = segment.get(job_id)
         if job is None:

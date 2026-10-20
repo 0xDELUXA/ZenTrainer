@@ -18,8 +18,8 @@ import time
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
-from . import safeio
-from . import events
+from .. import safeio
+from .. import events
 
 STYLES = {
     "nl": ("Natural language",
@@ -298,7 +298,7 @@ def instruction(job: CaptionJob, is_video: bool = False, hears: bool = False) ->
 
 def todo(job: CaptionJob, items: list) -> list:
     """The images this job captions, from the dataset's scan."""
-    from .harness.data import caption_path
+    from ..harness.data import caption_path
 
     root = None
     if job.mode == "selected":
@@ -316,7 +316,7 @@ def todo(job: CaptionJob, items: list) -> list:
 
 
 def _dataset_root(job: CaptionJob) -> Path:
-    from . import datasets
+    from . import folders as datasets
 
     return datasets.folder(job.dataset)
 
@@ -329,8 +329,8 @@ def run(job: CaptionJob) -> None:
     import nodes
     import torch
 
-    from .harness.data import caption_path, scan
-    from .harness.trainer import _comfy_compiler
+    from ..harness.data import caption_path, scan
+    from ..harness.trainer import _comfy_compiler
 
     if job.status != "queued":  # cancelled while it waited
         return
@@ -357,7 +357,7 @@ def run(job: CaptionJob) -> None:
             clip = _with_loras(clip, job)
             if not hasattr(clip, "generate"):
                 raise RuntimeError(f"{job.clip_name} can't generate text; pick a vision-language model (Qwen-VL, Gemma)")
-            from .harness import video
+            from ..harness import video
             # Gemma 4 takes a clip as a timestamped video and can hear it (its own chat template
             # carries the media tokens); the others see VIDEO_FRAMES stills
             gemma4 = "gemma4" in getattr(clip.tokenizer, "clip_name", "")
@@ -443,7 +443,7 @@ def te_lora_catalog() -> list[dict]:
 
 def download_te_lora(entry_id: str) -> dict:
     """Download a catalog LoRA into loras/text_encoder_loras/."""
-    from . import downloads
+    from ..models import downloads
 
     e = next((e for e in TE_LORA_CATALOG if e["id"] == entry_id), None)
     if e is None:
@@ -488,8 +488,8 @@ def add_te_lora(link: str, file: str | None = None) -> dict:
     """Download a text-encoder LoRA from a Hugging Face link (a repo, or a file in it) into
     loras/text_encoder_loras/. A repo with several .safetensors and no file picked returns
     {choices}."""
-    from . import downloads, families
-    from .adapters import _HF_LINK
+    from ..models import downloads, families
+    from ..models.adapters import _HF_LINK
 
     m = _HF_LINK.match(link.strip())
     if not m:
@@ -517,7 +517,7 @@ GEMMA_FPS = 2  # frames a second Gemma 4 sees of a clip (it subsamples whatever 
 
 def _gemma4_tokens(clip, job: CaptionJob, path: Path, is_video: bool, hears: bool):
     """Gemma 4's prompt: the picture, or the clip as frames at GEMMA_FPS with its soundtrack."""
-    from .harness import video
+    from ..harness import video
 
     if not is_video:
         return clip.tokenize(instruction(job), image=_picture(path), skip_template=False, min_length=1)
@@ -544,7 +544,7 @@ def _picture(path: Path):
     import torch
     from PIL import Image
 
-    from .harness import video
+    from ..harness import video
 
     if video.is_video(path):
         p = video.probe(path)
@@ -572,7 +572,7 @@ def cancel(job: CaptionJob) -> None:
 def undo(job: CaptionJob) -> int:
     """Put every caption the job wrote back as it was: replaced ones get their old text,
     new ones are removed. Only while nothing else has changed them since."""
-    from .harness.data import caption_path
+    from ..harness.data import caption_path
 
     if job.status in ACTIVE:
         raise ValueError("stop the job before undoing it")

@@ -2,7 +2,7 @@
 
 import torch
 
-from zentrainer import merge
+from zentrainer.loras import merge
 
 
 def _lora(out_dim, in_dim, rank, alpha, seed):

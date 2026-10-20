@@ -18,7 +18,8 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from . import events, families
+from .. import events
+from . import families
 
 log = logging.getLogger("zentrainer")
 EVENT = "zentrainer.download"  # Download.public()

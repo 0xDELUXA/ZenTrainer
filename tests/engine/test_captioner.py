@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from zentrainer import captioner, datasets
+from zentrainer.datasets import captioner, folders as datasets
 from zentrainer.harness.data import scan
 
 
@@ -97,8 +97,8 @@ def test_mask_stats(tmp_path):
 
 
 def test_clean_all_states_keeps_resumable_runs(tmp_path, monkeypatch):
-    from zentrainer import storage
-    from zentrainer.runs import RunStore
+    from zentrainer.runs import disk as storage
+    from zentrainer.runs.store import RunStore
 
     states = tmp_path / "states"
     monkeypatch.setattr(storage, "_roots", lambda: {"states": states})

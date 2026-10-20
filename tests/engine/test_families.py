@@ -5,8 +5,8 @@ import json
 
 import pytest
 
-from zentrainer import families
-from zentrainer.families import Family, ModelFile
+from zentrainer.models import families
+from zentrainer.models.families import Family, ModelFile
 
 
 def _split_template(unet, clip, clip_type, vae, repo, ksampler=None):
@@ -100,7 +100,7 @@ def test_recommend_trains_on_base_and_samples_on_turbo():
 
 
 def test_downloads_only_catalog_files(templates, monkeypatch):
-    from zentrainer import downloads
+    from zentrainer.models import downloads
 
     monkeypatch.setattr(families, "_families", None)
     with pytest.raises(ValueError, match="isn't a"):
@@ -187,7 +187,7 @@ def test_flux3_template_with_prompt_upsampler(tmp_path, monkeypatch):
 
 
 def test_profiles_load_and_validate(tmp_path):
-    from zentrainer import profiles
+    from zentrainer.models import profiles
 
     shipped = profiles.load()
     moss = shipped["moss-image"]

@@ -52,7 +52,7 @@ def _profile(path: str, mtime: float) -> dict:
     import comfy.model_detection as md
     import comfy.utils
 
-    from .harness.objective import is_flow
+    from ..harness.objective import is_flow
 
     sd, meta = _header(Path(path))
     inner = comfy.utils.state_dict_prefix_replace(sd, {md.unet_prefix_from_state_dict(sd): ""}, filter_keys=True)

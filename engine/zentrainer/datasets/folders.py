@@ -9,9 +9,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from . import safeio
-from .harness import video
-from .harness.data import IMAGE_EXTS, MASK_SUFFIXES, MEDIA_EXTS, SET_NAME, caption_path, caption_sets, find_mask, scan
+from .. import safeio
+from ..harness import video
+from ..harness.data import IMAGE_EXTS, MASK_SUFFIXES, MEDIA_EXTS, SET_NAME, caption_path, caption_sets, find_mask, scan
 
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.\-]{0,99}$")
 
@@ -104,7 +104,7 @@ def mask_stats(mask: Path) -> tuple[float, int, int] | None:
 def _health(name: str) -> dict | None:
     """The last stats snapshot's 0-1 scores (dataset_stats), or None before a first look."""
     try:
-        from .dataset_stats import latest_scores
+        from .stats import latest_scores
 
         return latest_scores(name)
     except Exception:
@@ -115,7 +115,7 @@ def items(name: str, caption_ext: str = ".txt") -> dict:
     from PIL import Image
 
     d, r = folder(name), root()
-    from .harness.data import muted as _muted
+    from ..harness.data import muted as _muted
 
     mutes = _muted(d)
     rows = []
@@ -158,7 +158,7 @@ def items(name: str, caption_ext: str = ".txt") -> dict:
 def set_muted(name: str, set_name: str, paths: list[str], on: bool) -> dict[str, list[str]]:
     """Mute (or unmute) pictures in a caption set: kept, captions and all, but not trained on in it.
     Stored in the dataset folder (.zentrainer.json) so the curation travels with the dataset."""
-    from .harness.data import MUTES_FILE, muted as _muted
+    from ..harness.data import MUTES_FILE, muted as _muted
 
     d = folder(name)
     set_name = _set(set_name)

@@ -68,7 +68,7 @@ def detect(rgb: np.ndarray) -> list[dict]:
 
 def _frames(path: Path, n: int) -> list[np.ndarray]:
     """A picture, or n frames spread over a clip, as uint8 RGB."""
-    from .harness import video
+    from ..harness import video
 
     if video.is_video(path):
         p = video.probe(path)
@@ -155,8 +155,8 @@ def dataset_faces(name: str, progress=None) -> dict:
 
 def _report(name: str, progress=None) -> tuple[dict, dict[str, np.ndarray]]:
     """The face report, and each picture's main trained face embedding (for the centroid)."""
-    from . import datasets
-    from .harness.data import scan
+    from . import folders as datasets
+    from ..harness.data import scan
 
     root = datasets.folder(name)
     cache_file = _cache_dir() / f"{hashlib.sha1(name.encode()).hexdigest()[:16]}.json"
@@ -283,7 +283,7 @@ class LikenessWorker:
                 if row.get("manual"):
                     out.update(manual=True, base=bool(row.get("base")))
                 self.store.append(self.run_id, "likeness", out)
-                from . import events
+                from .. import events
 
                 events.emit(events.LIKENESS, out)
             except Exception:

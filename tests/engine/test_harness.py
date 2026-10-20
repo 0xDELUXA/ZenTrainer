@@ -8,7 +8,7 @@ import torch
 
 from zentrainer.harness import control, data, optim
 from zentrainer.harness.objective import Objective, sample_percents
-from zentrainer.runs import RunStore
+from zentrainer.runs.store import RunStore
 from zentrainer.spec import ObjectiveSpec, OptimSpec, SpecError, TrainSpec
 
 
@@ -142,7 +142,7 @@ def test_control_commands_and_pause():
 def test_themes_later_source_wins_and_css_refs_inline(tmp_path):
     import json
 
-    from zentrainer.themes import BUNDLED, list_themes
+    from zentrainer.server.themes import BUNDLED, list_themes
 
     bundled = {p["id"] for p in list_themes([BUNDLED])}
     assert {"maroon-volt", "strawberry-milk", "nynxz"} <= bundled
@@ -187,7 +187,7 @@ def test_targets_match_by_structure_across_families():
 def test_dataset_editing_stays_inside_the_folder(tmp_path, monkeypatch):
     from PIL import Image
 
-    from zentrainer import datasets
+    from zentrainer.datasets import folders as datasets
 
     monkeypatch.setattr(datasets, "root", lambda: tmp_path.resolve())
     datasets.create("cats")
@@ -218,7 +218,7 @@ def test_dataset_editing_stays_inside_the_folder(tmp_path, monkeypatch):
 
 
 def test_queue_order_pause_and_persistence(tmp_path):
-    from zentrainer.jobqueue import Queue
+    from zentrainer.server.jobqueue import Queue
 
     q = Queue(tmp_path / "queue.json")
     for r in ("a", "b", "c"):
@@ -332,8 +332,8 @@ def test_optimizer_catalog_builds_what_is_available():
 def test_caption_sets_read_write_and_mix(tmp_path, monkeypatch):
     from PIL import Image
 
-    from zentrainer import datasets
-    from zentrainer.captioner import clean
+    from zentrainer.datasets import folders as datasets
+    from zentrainer.datasets.captioner import clean
 
     monkeypatch.setattr(datasets, "root", lambda: tmp_path.resolve())
     datasets.create("d")
@@ -470,7 +470,7 @@ def test_training_shift_reskews_flow_sigmas():
 
 
 def test_storage_sizes_and_safe_cleanup(tmp_path, monkeypatch):
-    from zentrainer import storage
+    from zentrainer.runs import disk as storage
 
     class Store:
         def __init__(self):
@@ -556,7 +556,7 @@ def test_stochastic_rounding_is_unbiased():
 def test_muting_per_caption_set(tmp_path, monkeypatch):
     from PIL import Image
 
-    from zentrainer import datasets
+    from zentrainer.datasets import folders as datasets
     from zentrainer.harness.data import muted
 
     monkeypatch.setattr(datasets, "root", lambda: tmp_path.resolve())

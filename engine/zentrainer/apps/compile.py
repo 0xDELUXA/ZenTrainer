@@ -111,7 +111,7 @@ def _one(app: App, values: dict[str, Any]) -> tuple[dict, str]:
 
 def _family_models(graph: dict, family: str) -> None:
     """The workflow's own files where installed, else an installed build of the family."""
-    from .. import families
+    from ..models import families
     from .catalog import _pick_models
 
     fam = families._all().get(family)

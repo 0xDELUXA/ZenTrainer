@@ -25,7 +25,7 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from . import safeio
+from .. import safeio
 
 TARGET_SIDE = 768  # a picture's short side at or above this is training-ready at the usual sizes
 NEAR_DUP = 6  # bits of 64 a difference hash may differ by and still count as the same picture
@@ -51,7 +51,7 @@ def _look(path: Path) -> dict | None:
     import numpy as np
     from PIL import Image
 
-    from .harness import video
+    from ..harness import video
 
     try:
         if video.is_video(path):
@@ -174,9 +174,9 @@ def compute(name: str, set_name: str = "default") -> dict:
     the pictures muted in it."""
     from PIL import Image
 
-    from . import datasets, faces
-    from .harness import video
-    from .harness.data import muted, scan
+    from . import folders as datasets, faces
+    from ..harness import video
+    from ..harness.data import muted, scan
 
     root = datasets.folder(name)
     off = muted(root).get(set_name, set())
@@ -284,15 +284,15 @@ def compute(name: str, set_name: str = "default") -> dict:
 
 def _cached_faces(name: str) -> dict | None:
     """The faces report when the dataset has faces on (its setting; cached per picture)."""
-    from . import datasets, faces
+    from . import folders as datasets, faces
 
     return faces.dataset_faces(name) if datasets.get_settings(name).get("faces") else None
 
 
 def _fingerprint(name: str, set_name: str) -> str:
     """What the dataset is, for this set: its files, the set's captions, masks, pairs, mutes."""
-    from . import datasets
-    from .harness.data import muted, scan
+    from . import folders as datasets
+    from ..harness.data import muted, scan
 
     root = datasets.folder(name)
     h = hashlib.sha256(json.dumps(sorted(muted(root).get(set_name, ()))).encode())

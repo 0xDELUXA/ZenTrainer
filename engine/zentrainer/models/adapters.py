@@ -24,7 +24,7 @@ import threading
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from . import safeio
+from .. import safeio
 from . import families
 
 SUBDIR = "training_adapters"

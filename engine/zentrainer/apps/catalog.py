@@ -61,7 +61,7 @@ def object_info() -> dict:
 # ---- sources ---------------------------------------------------------------------------------
 
 def _templates_dir() -> Path | None:
-    from ..families import _templates_dir as d
+    from ..models.families import _templates_dir as d
 
     return d()
 
@@ -313,7 +313,7 @@ def _set(prompt: dict, nid: str, name: str, value: Any) -> None:
 def _pick_models(prompt: dict, fam: Any) -> None:
     """Loaders keep the template's files when installed; otherwise an installed build of the
     same family (a distilled one for the diffusion model: these are for generating)."""
-    from .. import families
+    from ..models import families
 
     index = families._installed_index()
     for n in prompt.values():

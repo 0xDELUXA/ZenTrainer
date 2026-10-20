@@ -1,6 +1,6 @@
 """Training adapter catalog: Hugging Face links, and local names."""
 
-from zentrainer import adapters
+from zentrainer.models import adapters
 
 
 def test_hf_links():

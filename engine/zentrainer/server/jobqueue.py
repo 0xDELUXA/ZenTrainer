@@ -14,7 +14,7 @@ import logging
 import threading
 from pathlib import Path
 
-from . import state
+from .. import state
 
 TERMINAL = {"done", "stopped", "error", "interrupted", "rejected"}
 _lock = threading.Lock()
@@ -97,7 +97,7 @@ def get() -> Queue:
 async def worker(dispatch, interval: float = 1.5) -> None:
     """Dispatch the next queued run whenever nothing is active. `dispatch(run_id)` is
     the coroutine that submits the session job to ComfyUI."""
-    from .harness import control
+    from ..harness import control
 
     q = get()
     store = state.store()

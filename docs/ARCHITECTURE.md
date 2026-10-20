@@ -18,9 +18,9 @@ and calls ComfyUI **as a library** for everything else.
  ┌──────────────▼────────────────────────────▼────────────┐
  │ ComfyUI process                                        │
  │  engine/zentrainer                                     │
- │   routes.py    runs, datasets, control                 │
+ │   server/      routes (HTTP API), jobqueue, telemetry  │
  │   nodes.py     ZenTrainSession: hosts one run          │
- │   runs.py      run store (user/zentrainer/runs/<id>/)  │
+ │   runs/        run store (user/zentrainer/runs/<id>/)  │
  │   harness/                                             │
  │     trainer.py    the loop: setup → steps → save       │
  │     models.py     comfy.sd loaders (non-dynamic copy)  │
@@ -40,7 +40,7 @@ and calls ComfyUI **as a library** for everything else.
 ### How a run executes
 
 1. `POST /zentrainer/api/runs` validates the `TrainSpec`, writes it to the run store and
-   adds it to **ZenTrainer's queue** (`jobqueue.py`): an ordered, persistent list that
+   adds it to **ZenTrainer's queue** (`server/jobqueue.py`): an ordered, persistent list that
    can be reordered, pruned or paused. A worker hands the head of the queue to ComfyUI
    as a **one-node** job, `ZenTrainSession(run_id)`, only when nothing is training.
 2. That job exists only to claim ComfyUI's execution lane, and with it the GPU, for the
@@ -136,7 +136,7 @@ and calls ComfyUI **as a library** for everything else.
 
 - **Caption sets**: `<img>.txt` is "default", `<img>.<set>.txt` the others (tags, nl,
   bbox, ...). A run trains on one set or mixes several (random per step).
-- **Auto-captioning** (`captioner.py`): ComfyUI's native text generation (the
+- **Auto-captioning** (`datasets/captioner.py`): ComfyUI's native text generation (the
   TextGenerate path: `clip.tokenize(image=…)` → `generate` → `decode`) with a
   vision-language text encoder, writing into a caption set. Runs as a one-node
   `ZenCaptionSession` job so it takes its turn on the GPU. Jobs persist
@@ -167,7 +167,7 @@ and calls ComfyUI **as a library** for everything else.
   sample so masked and unmasked images stay on one scale.
 - **Live sampling**: `zentrainer.sample_progress` events carry the prompt/step and a
   latent preview (ComfyUI's previewer, latent-to-RGB fallback when previews are off).
-- **Datasets** (`datasets.py`): list, per-image view with sizes, caption edit, bulk
+- **Datasets** (`datasets/folders.py`): list, per-image view with sizes, caption edit, bulk
   prefix/suffix/replace, upload, delete, create; every path is checked to stay inside
   its folder. The scanner skips `.`/`_` folders (other trainers' caches and thumbnails).
 - **Memory** (`system.py`): VRAM (device, PyTorch allocated/reserved, comfy_aimdo) and
@@ -178,7 +178,7 @@ and calls ComfyUI **as a library** for everything else.
 ## Model families and downloads
 
 Picking a model is one choice (Krea 2, Z-Image, SDXL…), not three files.
-`families.py` builds the catalog from ComfyUI's own workflow templates (the
+`models/families.py` builds the catalog from ComfyUI's own workflow templates (the
 `comfyui_workflow_templates` package that ships with ComfyUI), so a new ComfyUI brings new
 families and nothing here is hand-maintained.
 
@@ -211,7 +211,7 @@ families and nothing here is hand-maintained.
   precision, then the template's file.
 - **Samples.** The family's template sampler settings (steps, CFG, sampler, scheduler) and
   an installed distilled build become a one-click "preview faster on turbo" suggestion.
-- **Profiles** (`profiles.py`, `engine/profiles/*.json`). Settings hand-picked for one
+- **Profiles** (`models/profiles.py`, `engine/profiles/*.json`). Settings hand-picked for one
   family, beyond the generic defaults and the templates: partial training and sample settings,
   notes, and the sources they come from. `status` is `recipe` (the makers' published settings,
   applied as written) or `verified` (trained with and checked). A profile holds only what its
@@ -226,7 +226,7 @@ families and nothing here is hand-maintained.
   training patcher would reload its weights.
 - **Install state.** Each file is matched by basename against ComfyUI's own loader lists,
   so files in subfolders and `extra_model_paths` libraries count.
-- **Downloads** (`downloads.py`). Callers name a family/folder/file, never a URL, so only
+- **Downloads** (`models/downloads.py`). Callers name a family/folder/file, never a URL, so only
   catalog files can be fetched, and only to a vetted file name. A worker runs one download
   at a time, resumes from `.part` with HTTP ranges, checks free space first and reports on
   `zentrainer.download`. `HF_TOKEN` is passed for gated repos. Files land in the first

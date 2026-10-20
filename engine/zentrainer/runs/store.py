@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import safeio
+from .. import safeio
 
 _lock = threading.Lock()
 

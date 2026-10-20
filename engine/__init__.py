@@ -14,7 +14,7 @@ def _setup() -> None:
     import folder_paths
     from server import PromptServer
 
-    from .zentrainer import routes
+    from .zentrainer.server import routes
 
     # Trained LoRAs (final and mid-run checkpoints) land under output/zentrainer/loras.
     # Registering it as a loras folder makes them loadable by LoraLoader at once,

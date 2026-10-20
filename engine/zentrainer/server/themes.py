@@ -12,7 +12,7 @@ import json
 import os
 from pathlib import Path
 
-BUNDLED = Path(__file__).resolve().parent.parent / "themes"
+BUNDLED = Path(__file__).resolve().parents[2] / "themes"
 
 
 def _zenkit_dirs() -> list[Path]:
