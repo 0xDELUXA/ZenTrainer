@@ -55,14 +55,13 @@ const live = computed(() =>
   }),
 )
 
-// the run that's going gets the card; the ones waiting fold into one line each under it, in
-// queue order (a card per queued run was a stack of empty rings)
+// the run that's going gets the card; the ones waiting, in queue order, become its "next" line
+// (a card per queued run was a stack of empty rings). Nothing running (a paused queue): the line alone
 const running = computed(() => live.value.filter((r) => r.status !== 'queued'))
 const waiting = computed(() => {
   const order = queue.value.items.map((i) => i.run_id)
   return live.value.filter((r) => r.status === 'queued').sort((a, b) => order.indexOf(a.run_id) - order.indexOf(b.run_id))
 })
-const WAIT_SHOWN = 3
 
 function spark(values: number[] | undefined): string {
   if (!values || values.length < 2) return ''
@@ -108,6 +107,7 @@ const cap = computed(() => {
 })
 
 // ---- housekeeping: restart to load an update, or ComfyUI has one -----------------------
+const housekeeping = computed(() => !!(comfyOld.value || engineStale.value || comfyBehind.value))
 const trainingNow = computed(() => activeRuns.value.some((r) => r.status === 'training' || r.status === 'loading'))
 async function onRestart() {
   if (trainingNow.value) return
@@ -173,45 +173,43 @@ onUnmounted(() => {
       </RouterLink>
     </nav></ScrollArea>
 
-    <!-- the queue sits above the running run: it grows and empties, and the run's card stays put -->
-    <RouterLink
-      v-if="waiting.length"
-      to="/jobs"
-      class="row queue"
-      :title="`Queued, in order:\n${waiting.map((r, i) => `${i + 1}. ${r.name}`).join('\n')}`"
-      @click="emit('navigate')"
-    >
-      <span class="ic"><i class="mdi mdi-tray-full" /><span class="q-count">{{ waiting.length }}</span></span>
-      <span class="lbl queue-body">
-        <span class="q-head">{{ waiting.length }} queued</span>
-        <span v-for="(r, i) in waiting.slice(0, WAIT_SHOWN)" :key="r.run_id" class="q-item ellipsis"><span class="q-n">{{ i + 1 }}</span>{{ r.name }}</span>
-        <span v-if="waiting.length > WAIT_SHOWN" class="q-more">+{{ waiting.length - WAIT_SHOWN }} more</span>
-      </span>
-    </RouterLink>
-    <!-- what's training, above the memory meters: one click to it -->
-    <RouterLink
-      v-for="r in running"
-      :key="r.run_id"
-      :to="simple ? `/simple/run/${r.run_id}` : `/runs/${r.run_id}`"
-      class="live"
-      :title="`${r.name}: ${r.status} ${Math.round(r.frac * 100)}%`"
-      @click="emit('navigate')"
-    >
-      <span class="ic">
-        <svg viewBox="0 0 36 36" class="ring" :class="r.status">
-          <circle cx="18" cy="18" r="15" class="track" />
-          <circle cx="18" cy="18" r="15" class="arc" :stroke-dasharray="`${r.frac * 94.25} 94.25`" />
-        </svg>
-        <span class="pct">{{ Math.round(r.frac * 100) }}</span>
-      </span>
-      <span class="lbl live-body">
-        <span class="live-name ellipsis">{{ r.name }}</span>
-        <svg v-if="r.spark" viewBox="0 0 100 24" preserveAspectRatio="none" class="spark"><path :d="r.spark" /></svg>
-        <span class="live-meta">
-          {{ r.status === 'training' ? `${r.step}/${r.total} · ${r.it_s?.toFixed(2) ?? '–'} it/s` : r.status }}
+    <!-- what's training, above the memory meters: one click to it. The queue rides on the card's
+         foot as one "next" line (all of it in the tooltip), so the card stays put as runs come and go -->
+    <div v-if="running.length || waiting.length" class="live">
+      <RouterLink
+        v-for="r in running"
+        :key="r.run_id"
+        :to="simple ? `/simple/run/${r.run_id}` : `/runs/${r.run_id}`"
+        class="live-run"
+        :title="`${r.name}: ${r.status} ${Math.round(r.frac * 100)}%`"
+        @click="emit('navigate')"
+      >
+        <span class="ic">
+          <svg viewBox="0 0 36 36" class="ring" :class="r.status">
+            <circle cx="18" cy="18" r="15" class="track" />
+            <circle cx="18" cy="18" r="15" class="arc" :stroke-dasharray="`${r.frac * 94.25} 94.25`" />
+          </svg>
+          <span class="pct">{{ Math.round(r.frac * 100) }}</span>
         </span>
-      </span>
-    </RouterLink>
+        <span class="lbl live-body">
+          <span class="live-name ellipsis">{{ r.name }}</span>
+          <svg v-if="r.spark" viewBox="0 0 100 24" preserveAspectRatio="none" class="spark"><path :d="r.spark" /></svg>
+          <span class="live-meta">
+            {{ r.status === 'training' ? `${r.step}/${r.total} · ${r.it_s?.toFixed(2) ?? '–'} it/s` : r.status }}
+          </span>
+        </span>
+      </RouterLink>
+      <RouterLink
+        v-if="waiting.length"
+        to="/jobs"
+        class="live-next"
+        :title="`Queued, in order:\n${waiting.map((w, i) => `${i + 1}. ${w.name}`).join('\n')}`"
+        @click="emit('navigate')"
+      >
+        <span class="ic"><i class="mdi mdi-tray-full" /><span class="q-count">{{ waiting.length }}</span></span>
+        <span class="lbl next-body"><span class="muted">Next</span><span class="ellipsis">{{ waiting[0]!.name }}</span><span v-if="waiting.length > 1" class="mono muted">+{{ waiting.length - 1 }}</span></span>
+      </RouterLink>
+    </div>
 
 
 
@@ -241,25 +239,6 @@ onUnmounted(() => {
       </span>
     </div>
 
-    <div v-if="comfyOld" class="row mem status-row warn-row" :title="comfyOld">
-      <span class="ic"><i class="mdi mdi-alert-outline" /></span>
-      <span class="lbl status-lbl">Update ComfyUI for ZenTrainer</span>
-    </div>
-    <button
-      v-else-if="engineStale"
-      class="row mem status-row"
-      :disabled="trainingNow || restarting"
-      :title="trainingNow ? 'Updated engine code is waiting: restart once nothing is training' : 'The engine’s code changed since it started: restart ComfyUI to load it'"
-      @click="onRestart"
-    >
-      <span class="ic"><i :class="restarting ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-restart'" /></span>
-      <span class="lbl status-lbl">{{ restarting ? 'Restarting…' : trainingNow ? 'Update waiting (after the run)' : 'Restart to load updates' }}</span>
-    </button>
-    <RouterLink v-else-if="comfyBehind" to="/settings" class="row mem status-row" :title="`ComfyUI is ${comfyBehind} commits behind upstream`" @click="emit('navigate')">
-      <span class="ic"><i class="mdi mdi-arrow-up-circle-outline" /></span>
-      <span class="lbl status-lbl">ComfyUI update available</span>
-    </RouterLink>
-
     <RouterLink v-if="meters.length" to="/system" class="row mem" :class="{ active: isActive('/system') }" title="System memory" @click="emit('navigate')">
       <span class="ic"><i class="mdi mdi-memory" /></span>
       <span class="lbl mem-body">
@@ -285,16 +264,34 @@ onUnmounted(() => {
         <span v-if="unseenErrors" class="lbl count err" :title="`${unseenErrors} new error${unseenErrors === 1 ? '' : 's'}`">{{ unseenErrors > 99 ? '99+' : unseenErrors }}</span>
         <kbd v-else class="lbl key">Ctrl `</kbd>
       </button>
-      <RouterLink
-        to="/settings"
-        class="row item"
-        :class="{ active: isActive('/settings') }"
-        :title="collapsed ? 'Settings' : undefined"
-        @click="emit('navigate')"
-      >
-        <span class="ic"><i class="mdi mdi-cog-outline" /></span>
-        <span class="lbl">Settings</span>
-      </RouterLink>
+      <div class="foot-row">
+        <RouterLink
+          to="/settings"
+          class="row item"
+          :class="{ active: isActive('/settings') }"
+          :title="collapsed ? 'Settings' : undefined"
+          @click="emit('navigate')"
+        >
+          <span class="ic"><i class="mdi mdi-cog-outline" /><span v-if="housekeeping" class="dot-count" /></span>
+          <span class="lbl">Settings</span>
+        </RouterLink>
+        <!-- housekeeping, open sidebar only: restart to load an update, or ComfyUI has one -->
+        <template v-if="!collapsed || mobileOpen">
+          <span v-if="comfyOld" class="sq warn" :title="comfyOld"><i class="mdi mdi-alert-outline" /></span>
+          <button
+            v-else-if="engineStale"
+            class="sq"
+            :disabled="trainingNow || restarting"
+            :title="restarting ? 'Restarting…' : trainingNow ? 'Updated engine code is waiting: restart once nothing is training' : 'The engine’s code changed since it started: restart ComfyUI to load it'"
+            @click="onRestart"
+          >
+            <i :class="restarting ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-restart'" />
+          </button>
+          <RouterLink v-else-if="comfyBehind" to="/settings" class="sq" :title="`ComfyUI update available: ${comfyBehind} commits behind upstream`" @click="emit('navigate')">
+            <i class="mdi mdi-arrow-up-circle-outline" />
+          </RouterLink>
+        </template>
+      </div>
     </div>
   </aside>
 </template>
@@ -368,7 +365,8 @@ onUnmounted(() => {
 
 /* every row: [44px icon column][label]; the icon never moves */
 .row,
-.live {
+.live-run,
+.live-next {
   display: flex;
   align-items: center;
   min-height: 36px;
@@ -522,7 +520,9 @@ nav {
 
 /* live run: progress ring in the icon column, details beside it */
 .live {
-  min-height: 56px;
+  display: flex;
+  flex-direction: column;
+  flex: none;
   margin-bottom: 4px;
   border: 1px solid var(--sb-border);
   background: color-mix(in srgb, var(--zen-surface) 70%, transparent);
@@ -536,7 +536,10 @@ nav {
 .live:hover {
   border-color: var(--sb-primary);
 }
-.live .ic {
+.live-run {
+  min-height: 54px;
+}
+.live-run .ic {
   height: 54px;
 }
 .ring {
@@ -591,53 +594,41 @@ nav {
   color: var(--sb-muted);
 }
 
-/* the queue: one quiet block, a line per waiting run */
-.queue {
-  align-items: flex-start;
-  margin-bottom: 6px;
-  padding: 6px 0;
+/* the queue: the card's foot, the next run and how many more */
+.live-next {
+  min-height: 28px;
   color: var(--sb-muted);
+  font-size: 11px;
 }
-.queue:hover {
-  color: var(--zen-text);
+.live-run + .live-next {
+  border-top: 1px solid var(--sb-border);
 }
-.queue .ic {
-  height: 22px;
-  font-size: 16px;
+.collapsed .live-next {
+  border-top-color: transparent;
+}
+.live-next:hover {
+  color: var(--sb-fg);
+}
+.live-next .ic {
+  height: 26px;
+  font-size: 15px;
 }
 .q-count {
   position: absolute;
   right: 8px;
-  top: -4px;
+  top: -2px;
   font: 600 9px var(--zen-mono);
   color: var(--sb-primary);
 }
-.queue-body {
+.next-body {
   flex: 1;
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  gap: 6px;
   padding-right: 10px;
-  font-size: 11px;
 }
-.q-head {
-  font-weight: 600;
-  font-size: 11px;
-  line-height: 22px;
-}
-.q-item {
-  display: block;
-}
-.q-n {
-  display: inline-block;
-  width: 14px;
-  font: 10px var(--zen-mono);
-  opacity: 0.7;
-}
-.q-more {
-  font-size: 10px;
-  opacity: 0.8;
+.next-body .ellipsis {
+  flex: 1;
 }
 
 /* memory */
@@ -658,22 +649,6 @@ nav {
   gap: 5px;
   padding: 6px 10px 6px 0;
   font-size: 11px;
-}
-.status-row {
-  border: none;
-  background: none;
-  font: inherit;
-  text-align: left;
-  width: 100%;
-  cursor: pointer;
-  color: var(--zen-accent);
-}
-.status-row:disabled {
-  cursor: default;
-  color: var(--zen-muted);
-}
-.status-lbl {
-  font-size: 12px;
 }
 .mem-row {
   display: flex;
@@ -728,7 +703,36 @@ nav {
     transform: none;
   }
 }
-.warn-row {
+/* Settings, and beside it (open sidebar only) a square for housekeeping: an update to load */
+.foot-row {
+  display: flex;
+  gap: 4px;
+}
+.foot-row > .item {
+  flex: 1;
+  min-width: 0;
+}
+.sq {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+  border: 1px solid var(--sb-border);
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--sb-primary);
+  cursor: pointer;
+}
+.sq:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--sb-accent) 60%, transparent);
+}
+.sq:disabled {
+  cursor: default;
+  color: var(--sb-muted);
+}
+.sq.warn {
   color: var(--zen-warn);
   cursor: help;
 }
