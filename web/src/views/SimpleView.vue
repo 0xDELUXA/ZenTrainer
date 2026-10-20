@@ -593,9 +593,6 @@ void leaving
 .err {
   color: var(--zen-danger);
 }
-.small {
-  font-size: 12px;
-}
 .step :deep(.zen-button) {
   align-self: flex-start;
 }

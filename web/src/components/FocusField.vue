@@ -162,7 +162,4 @@ const NAMES = ['Composition', 'Form', 'Detail']
   color: var(--zen-accent);
   cursor: pointer;
 }
-.small {
-  font-size: 12px;
-}
 </style>

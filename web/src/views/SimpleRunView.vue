@@ -564,7 +564,4 @@ async function tryIt() {
   object-fit: contain;
   display: block;
 }
-.small {
-  font-size: 12px;
-}
 </style>

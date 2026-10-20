@@ -205,9 +205,6 @@ async function run() {
 .err {
   color: var(--zen-danger);
 }
-.small {
-  font-size: 12px;
-}
 .titles h1 {
   display: flex;
   gap: 6px;

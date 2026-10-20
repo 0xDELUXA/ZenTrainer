@@ -187,9 +187,6 @@ const hovered = computed(() => {
   border-radius: 2px;
   display: inline-block;
 }
-.small {
-  font-size: 12px;
-}
 .mono {
   font-family: var(--zen-mono, monospace);
 }

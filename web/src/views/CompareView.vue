@@ -668,9 +668,6 @@ onUnmounted(() => removeEventListener('keydown', onKey))
   object-fit: cover;
   display: block;
 }
-.small {
-  font-size: 12px;
-}
 .mono {
   font-family: var(--zen-mono, monospace);
 }
