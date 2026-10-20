@@ -11,7 +11,7 @@ and calls ComfyUI **as a library** for everything else.
 ```
  ┌──────────── web (Vue + zenkit-ui) ─────────────────────┐
  │ sidebar: New run · Runs · Datasets · Apps · Settings   │
- │ api/engine.ts (REST + control)   api/comfy.ts (/ws,    │
+ │ api/engine/ (REST + control)     api/comfy.ts (/ws,    │
  │                                       /object_info)    │
  └──────────────┬────────────────────────────┬────────────┘
                 │ /zentrainer/api/*          │ stock ComfyUI API
@@ -79,7 +79,7 @@ and calls ComfyUI **as a library** for everything else.
 
 ### Upstream seams
 
-- `harness/memory.py` imports `patch`/`unpatch`/`find_modules_at_depth` from
+- `harness/memory/` imports `patch`/`unpatch`/`find_modules_at_depth` from
   `comfy_extras/nodes_train.py`. That's the only private import. The proposal is to move
   these helpers into a public `comfy/train/` module.
 - `harness/compat.py` patches ComfyUI model code that samples fine but can't train,
@@ -123,7 +123,7 @@ and calls ComfyUI **as a library** for everything else.
   LoRA through ComfyUI's own `load_lora_for_models`.
 - **Trigger word**, ai-toolkit style: `[trigger]` in captions and prompts becomes the
   word; captions that lack it get it prepended.
-- **Optimizers** (`harness/optim.py`): AdamW, Adam, Adafactor, Lion, SGD, RMSprop built
+- **Optimizers** (`harness/optim/`): AdamW, Adam, Adafactor, Lion, SGD, RMSprop built
   in; AdamW/Lion 8-bit, Prodigy, schedule-free AdamW and CAME when their packages are
   installed (`scripts/zt extras optimizers`). Schedule-free switches to its eval
   weights for sampling, validation and saving.
@@ -147,13 +147,13 @@ and calls ComfyUI **as a library** for everything else.
   captions in "default" needs an explicit `replace_default`. Videos caption from their
   middle frame.
 
-- **Multi-stream models** (`harness/streams.py`): MiniMax H3 denoises video and stereo
+- **Multi-stream models** (`harness/data/streams.py`): MiniMax H3 denoises video and stereo
   audio together. As ComfyUI's sampler does, the streams are packed into one flat latent
   with their shapes (`latent_shapes`, which conds need too). The dataset caches only
   the picture; the other streams are the model's own empty ones (`fix_empty_latent`),
   and a per-element loss weight leaves them out, so a LoRA learns the picture without
   unlearning the sound. Batch size 1 (the model's limit); use gradient accumulation.
-- **Videos** (`harness/video.py`): videos sit in datasets beside images and train as
+- **Videos** (`harness/data/video.py`): videos sit in datasets beside images and train as
   clips. Each clip is resampled to `video_fps` and cut to the longest length up to
   `video_frames` that the VAE encodes exactly. Valid lengths come from the VAE's own
   temporal formulas: the counts it encodes and decodes back unchanged, 4k+1 for Wan,

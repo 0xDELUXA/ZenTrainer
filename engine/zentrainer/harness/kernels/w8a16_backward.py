@@ -8,7 +8,7 @@ optional fp32 output (out_dtype) so the ConvRot rotation after it rounds to bf16
 What it computes: for a frozen linear layer whose weight is int8 with a scale per output row,
 the input gradient (grad_out * row_scale) @ int8_weight, scaling in fp32 and casting the int8
 tiles inside the kernel, so the full bf16 weight ComfyUI's backward dequantizes per layer per
-step is never built. ConvRot's Hadamard rotation is applied after (harness/int8_backward.py).
+step is never built. ConvRot's Hadamard rotation is applied after (harness/kernels/int8_backward.py).
 Fizgig measured it within one bf16 ulp of the eager path, 1.2-1.4x per GEMM at clip-sized token
 counts (4k+), about even below ~1.7k tokens; it always saves the transient bf16 weight.
 """

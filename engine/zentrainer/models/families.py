@@ -49,7 +49,7 @@ BASE = re.compile(r"(^|[_-])(base|raw)([_.-]|$)", re.I)  # among non-distilled b
 NOT_IMAGE = re.compile(
     r"video|audio|music|wan_?2|ltx|hunyuan_?video|hunyuan_?3d|3d|cosmos|mochi|svd|ace_step|stable_audio|yue|"
     r"sam|seedvr|pose|lotus|controlnet|redux|kontext|edit|upscal|esrgan|vision|sigclip|layered|depth", re.I)
-# video models the harness trains (on images as one-frame clips; see harness/streams.py): their
+# video models the harness trains (on images as one-frame clips; see harness/data/streams.py): their
 # text-to-video template defines the family
 TRAINABLE_VIDEO = re.compile(r"minimax_h3", re.I)
 ORG = "Comfy-Org"

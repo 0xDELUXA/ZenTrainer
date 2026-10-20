@@ -10,7 +10,7 @@ type Folder = 'diffusion_models' | 'text_encoders' | 'vae'
 
 export interface Recipe {
   id: string
-  /** model family id (engine/zentrainer/families.py) */
+  /** model family id (engine/zentrainer/models/families.py) */
   family: string
   model: string
   kind: 'character' | 'style' | 'video'

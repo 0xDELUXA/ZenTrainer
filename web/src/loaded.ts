@@ -1,4 +1,4 @@
-// The models ComfyUI holds right now (engine/zentrainer/residency.py), polled while anything
+// The models ComfyUI holds right now (engine/zentrainer/models/residency.py), polled while anything
 // shows them: the sidebar, a run's page, the log drawer.
 
 import { computed, ref } from 'vue'
