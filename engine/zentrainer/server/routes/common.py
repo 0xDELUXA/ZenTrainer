@@ -1,0 +1,237 @@
+"""Helpers the API's areas share: errors, queueing a run as a ComfyUI job, ComfyUI's version,
+restarting, and what the engine can do (capabilities)."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import re
+import shutil
+import time
+import uuid
+from pathlib import Path
+
+import aiohttp
+from aiohttp import web
+
+from ... import safeio, state
+from ...datasets import folders as datasets
+
+
+WEB_DIST = Path(__file__).resolve().parents[4] / "web" / "dist"
+
+# ended without training a step: editable, and saving puts it back in the queue
+RETRYABLE = ("error", "stopped", "interrupted", "rejected")
+
+
+def _keep_later(store, run_id: str, step: int) -> None:
+    """Before a resume retrains past `step`, move the LoRAs and sample pictures saved after it into
+    a `replaced-<time>` folder beside them: retraining writes the same file names, and those files
+    are someone's results until they say otherwise."""
+    import shutil
+
+    import folder_paths
+
+    tag = f"replaced-{time.strftime('%Y%m%d-%H%M%S')}"
+    out = Path(folder_paths.get_output_directory())
+    files = [Path(c["path"]) for c in store.read(run_id, "checkpoints") if c.get("step", 0) > step and c.get("path")]
+    files += [out / r.get("subfolder", "") / r["filename"] for r in store.read(run_id, "samples")
+              if r.get("step", 0) > step and r.get("filename") and r.get("type", "output") == "output"]
+    for f in files:
+        if f.is_file():
+            keep = f.parent / tag / f.name
+            keep.parent.mkdir(exist_ok=True)
+            shutil.move(str(f), str(keep))
+
+
+def _bad(message: str, status: int = 400, **extra) -> web.Response:
+    return web.json_response({"error": message, **extra}, status=status)
+
+
+# The oldest ComfyUI ZenTrainer is tested with (comfy.lock pins newer). Installed as a node pack
+# into someone's ComfyUI, an older one would fail in odd places; this says so plainly instead.
+MIN_COMFY = (0, 41, 0)
+
+
+def comfy_too_old() -> str | None:
+    try:
+        from comfyui_version import __version__ as v
+    except Exception:
+        return None
+    nums = tuple(int(x) for x in re.findall(r"\d+", v)[:3])
+    if nums and nums < MIN_COMFY:
+        return (f"ComfyUI {v} is older than ZenTrainer needs ({'.'.join(map(str, MIN_COMFY))} or newer): "
+                "update ComfyUI (Manager > Update ComfyUI, or git pull)")
+    return None
+
+
+_client_id: str | None = None
+
+
+def _remember_client(client_id: str | None) -> None:
+    """Session jobs report progress to the last UI client that queued something."""
+    global _client_id
+    if client_id:
+        _client_id = client_id
+
+
+def _exec_self() -> None:
+    import os
+    import sys
+
+    logging.info("[ZenTrainer] restarting ComfyUI")
+    sys.stdout.flush()
+    os.execv(sys.executable, [sys.executable, *sys.argv])
+
+
+async def _queue_session(server, run_id: str, name: str, client_id: str | None) -> web.Response:
+    """Queue the one-node job that hosts the run. Its only job is to hold ComfyUI's
+    execution lane; the run itself is defined by the spec in the store."""
+    store = state.store()
+    prompt_id = str(uuid.uuid4())
+    prompt = {"session": {"class_type": "ZenTrainSession", "inputs": {"run_id": run_id},
+                          "_meta": {"title": f"train {name}"}}}
+    payload = {"prompt": prompt, "prompt_id": prompt_id, "extra_data": {"zentrainer_run": run_id}}
+    if client_id:
+        payload["client_id"] = client_id
+    store.update(run_id, prompt_id=prompt_id, status="queued")
+    async with aiohttp.ClientSession() as s:
+        async with s.post(_loopback(server) + "/prompt", json=payload) as r:
+            result = await r.json()
+    if r.status != 200:
+        store.update(run_id, status="rejected", message=str(result.get("error")))
+        return _bad("ComfyUI rejected the run", 422, run_id=run_id, comfy=result)
+    return web.json_response({"run": store.meta(run_id)})
+
+
+async def _dequeue(server, run_id: str) -> web.Response:
+    store = state.store()
+    try:
+        prompt_id = store.meta(run_id)["prompt_id"]
+    except (FileNotFoundError, ValueError):
+        return _bad("run not found", 404)
+    async with aiohttp.ClientSession() as s:
+        await s.post(_loopback(server) + "/queue", json={"delete": [prompt_id]})
+    store.update(run_id, status="stopped", message="removed from queue")
+    return web.json_response({"ok": True})
+
+
+async def _ds(fn) -> web.Response:
+    """Run a dataset operation off the event loop, mapping its errors to HTTP."""
+    try:
+        return web.json_response(await asyncio.to_thread(fn))
+    except FileNotFoundError:
+        return _bad("dataset not found", 404)
+    except (datasets.DatasetError, KeyError) as e:
+        return _bad(str(e))
+
+
+def _migrate_states() -> None:
+    """Move training-state files out of the LoRA folders (older versions saved
+    <name>.state.pt beside each checkpoint, where ComfyUI lists it as a LoRA)."""
+
+    import folder_paths
+
+    from ...harness.trainer import state_dir
+
+    store = state.store()
+    for meta in store.list():
+        rid = meta["run_id"]
+        rows = store.read(rid, "checkpoints")
+        changed = False
+        for row in rows:
+            old = Path(row["path"]).with_suffix(".state.pt")
+            if not row.get("state") and old.is_file():
+                new = state_dir(rid) / f"{Path(row['path']).stem}.pt"
+                new.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(old), str(new))
+                row["state"] = str(new)
+                changed = True
+        if changed:
+            store.rewrite(rid, "checkpoints", rows)
+            logging.info("[ZenTrainer] moved training state of %s out of the LoRA folder", rid)
+    # strays not tied to a run row
+    root = Path(folder_paths.get_output_directory()) / "zentrainer" / "loras"
+    for stray in root.rglob("*.state.pt") if root.is_dir() else []:
+        dest = safeio.free_name(state_dir("_orphaned") / stray.name)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(stray), str(dest))
+
+
+def _comfy_version(check: bool) -> dict:
+    import json
+    import subprocess
+
+    import folder_paths
+
+    root = Path(folder_paths.__file__).resolve().parent
+    git = lambda *a: subprocess.run(["git", "-C", str(root), *a], capture_output=True, text=True, timeout=60)  # noqa: E731
+    out: dict = {"path": str(root)}
+    try:
+        import comfyui_version
+
+        out["version"] = comfyui_version.__version__
+    except Exception:
+        pass
+    head = git("rev-parse", "HEAD")
+    if head.returncode == 0:
+        out["commit"] = head.stdout.strip()
+        out["describe"] = git("describe", "--tags", "--always").stdout.strip()
+        out["dirty"] = bool(git("status", "--porcelain", "--untracked-files=no").stdout.strip())
+    lock = Path(__file__).resolve().parents[4] / "comfy.lock"
+    if lock.is_file():
+        pin = json.loads(lock.read_text())["comfyui"]
+        out["pin"] = {"ref": pin["ref"], "describe": pin.get("describe")}
+        out["matches_pin"] = out.get("commit") == pin["ref"]
+    if check and "commit" in out:
+        fetched = git("fetch", "--quiet", "origin")
+        if fetched.returncode == 0:
+            upstream = git("rev-parse", "origin/HEAD").stdout.strip() or git("rev-parse", "origin/master").stdout.strip()
+            behind = git("rev-list", "--count", f"HEAD..{upstream}").stdout.strip()
+            out["upstream"] = {"commit": upstream, "describe": git("describe", "--tags", "--always", upstream).stdout.strip(),
+                               "behind": int(behind or 0)}
+        else:
+            out["upstream_error"] = fetched.stderr.strip()[:300]
+    return out
+
+
+def _loopback(server) -> str:
+    host = server.address if server.address not in ("0.0.0.0", "::", "", None) else "127.0.0.1"
+    if ":" in host:
+        host = f"[{host}]"
+    return f"http://{host}:{server.port}"
+
+
+_LOADED_AT = time.time()
+
+
+def _code_stale() -> bool:
+    """The engine's code on disk is newer than what this process loaded (an update or an edit):
+    a restart picks it up. The sidebar offers one."""
+    root = Path(__file__).resolve().parents[2]
+    return any(p.stat().st_mtime > _LOADED_AT for p in root.rglob("*.py") if "__pycache__" not in p.parts)
+
+
+def _capabilities() -> dict:
+    from ...harness import optim
+
+    caps: dict = {"optimizers": optim.catalog()}
+    try:
+        from comfy.ldm.modules.attention import REGISTERED_ATTENTION_FUNCTIONS
+
+        # Only backends with a backward pass are offered for training.
+        caps["train_attention"] = [n for n in REGISTERED_ATTENTION_FUNCTIONS if n not in ("flash", "sage", "sage3")]
+        caps["infer_attention"] = list(REGISTERED_ATTENTION_FUNCTIONS)
+    except Exception:
+        pass
+    try:
+        import comfy.model_management as mm
+
+        dev = mm.get_torch_device()
+        caps["device"] = str(dev)
+        caps["device_name"] = mm.get_torch_device_name(dev)
+        caps["vram_total"] = mm.get_total_memory(dev)
+        caps["vram_free"] = mm.get_free_memory(dev)
+    except Exception:
+        pass
+    return caps
