@@ -573,3 +573,12 @@ def test_muting_per_caption_set(tmp_path, monkeypatch):
     assert muted(d) == {"tags": {"c.png"}}
     with pytest.raises(datasets.DatasetError):
         datasets.set_muted("cats", "default", ["../x.png"], True)
+
+
+def test_conds_that_cannot_stack_get_their_own_call():
+    from zentrainer.harness.denoiser import batches
+
+    # captions by token length; like MOSS, only equal lengths stack
+    parts = [151, 129, 151, 129, 77]
+    assert batches(parts, lambda a, b: a == b) == [[0, 2], [1, 3], [4]]
+    assert batches(parts, lambda a, b: True) == [[0, 1, 2, 3, 4]]
