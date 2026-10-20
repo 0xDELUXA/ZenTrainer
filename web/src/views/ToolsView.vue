@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Tools: utilities for LoRA files and datasets (tools.ts), laid out like Apps.
 import TemplateCard from '@/components/TemplateCard.vue'
-import { TOOL_CATEGORIES, TOOLS, type Tool } from '@/tools'
+import { TOOL_CATEGORIES, TOOLS, type Tool } from '@/lib/tools'
 
 const byCategory = Object.entries(TOOL_CATEGORIES).map(([k, label]) => [label, TOOLS.filter((t) => t.category === k)] as [string, Tool[]])
 </script>

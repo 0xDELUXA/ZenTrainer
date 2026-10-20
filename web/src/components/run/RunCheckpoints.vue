@@ -4,7 +4,7 @@
 // its name.
 import { ZenTip } from '@nynxz/zenkit-ui'
 import { computed, ref } from 'vue'
-import { fmtBytes } from '@/downloads'
+import { fmtBytes } from '@/stores/downloads'
 import { ckKind, useRunContext } from './context'
 
 const { id, detail, total, running, ckRows, nextSave, likeAt, ckptVal, resumable, resumeFrom } = useRunContext()

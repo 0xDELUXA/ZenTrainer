@@ -6,8 +6,8 @@ import { computed, reactive } from 'vue'
 import type { OptimizerInfo } from '@/api/engine'
 import AdapterPicker from '@/components/AdapterPicker.vue'
 import FocusField from '@/components/FocusField.vue'
-import { fmtBytes } from '@/downloads'
-import { setSetting } from '@/settings'
+import { fmtBytes } from '@/stores/downloads'
+import { setSetting } from '@/stores/settings'
 import { items, useRunFormContext } from './form'
 
 const { spec, loraPlaces, choices, familyId, optimizers, dataset, opt, epochs, noise, resuming } = useRunFormContext()

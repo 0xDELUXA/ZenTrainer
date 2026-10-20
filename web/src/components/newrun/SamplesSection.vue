@@ -5,7 +5,7 @@ import { ZenButton, ZenCombo, ZenField, ZenInput, ZenNumber, ZenSwitch } from '@
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { engine, thumbUrl } from '@/api/engine'
 import SamplePromptList from '@/components/SamplePromptList.vue'
-import { downloadFor, fmtBytes } from '@/downloads'
+import { downloadFor, fmtBytes } from '@/stores/downloads'
 import { items, merge, useRunFormContext } from './form'
 
 const { spec, choices, sampleSuggestion, promptSets, pairItems, isVideoModel } = useRunFormContext()

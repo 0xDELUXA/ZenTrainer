@@ -2,8 +2,8 @@
 // running from any page, and a dataset page opened mid-job picks its job back up.
 
 import { computed, reactive } from 'vue'
-import { onComfyMessage } from './api/comfy'
-import { EVENTS, engine, type CaptionJob } from './api/engine'
+import { onComfyMessage } from '@/api/comfy'
+import { EVENTS, engine, type CaptionJob } from '@/api/engine'
 
 export const captionJobs = reactive<Record<string, CaptionJob>>({})
 

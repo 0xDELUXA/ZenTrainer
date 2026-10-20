@@ -3,7 +3,7 @@
 // in the other sets (to compare, or copy one across), its mask, and the file's details.
 import { reactive } from 'vue'
 import type { DatasetItem } from '@/api/engine'
-import { vAutosize } from '@/autosize'
+import { vAutosize } from '@/lib/autosize'
 import { isVideoPath, kb, pct, secs, useDatasetContext } from './context'
 
 const props = defineProps<{ it: DatasetItem; name: string }>()

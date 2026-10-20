@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The dataset as a table: sortable columns, every caption editable in place.
-import { vAutosize } from '@/autosize'
+import { vAutosize } from '@/lib/autosize'
 import { kb, pct, useDatasetContext } from './context'
 
 const { cap, k, drafts, saving, save, sortKey, sortDir, selected, isMuted, faceOf, faceIssue, faceNote, shown, sortBy, toggleSelect, onItemClick, onItemMenu, allShownSelected, toggleAll, full, thumb } = useDatasetContext()

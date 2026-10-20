@@ -5,7 +5,7 @@
 // you see blocks stream in and out. Polls while shown.
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { engine, type LoadedModel } from '@/api/engine'
-import { gb } from '@/system'
+import { gb } from '@/stores/system'
 
 const models = ref<LoadedModel[]>([])
 const error = ref<string | null>(null)

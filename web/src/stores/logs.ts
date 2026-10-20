@@ -8,7 +8,7 @@
 // Python traceback kept together as one block.
 
 import { computed, ref } from 'vue'
-import { getClientId, onComfyMessage } from './api/comfy'
+import { getClientId, onComfyMessage } from '@/api/comfy'
 
 export type LogLevel = 'info' | 'warn' | 'error'
 export interface LogLine {

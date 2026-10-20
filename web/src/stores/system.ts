@@ -2,7 +2,7 @@
 // sidebar meters and the System page.
 
 import { computed, ref } from 'vue'
-import { engine, type MemSample, type StorageReport } from './api/engine'
+import { engine, type MemSample, type StorageReport } from '@/api/engine'
 
 export const samples = ref<MemSample[]>([])
 export const memLatest = computed(() => samples.value.at(-1))

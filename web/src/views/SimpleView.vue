@@ -7,10 +7,10 @@ import TemplateCard from '@/components/TemplateCard.vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { EngineError, defaultSpec, engine, thumbUrl, type DatasetInfo, type DatasetItem } from '@/api/engine'
-import { captionJobs, startCaptionSync } from '@/captions'
-import { downloadFor, finished, fmtBytes, startDownloadSync } from '@/downloads'
-import { RECIPES, buildSpec, eta, plan, recipe as findRecipe, stepsFor, triggerFrom, type Plan, type Recipe } from '@/recipes'
-import { settings } from '@/settings'
+import { captionJobs, startCaptionSync } from '@/stores/captions'
+import { downloadFor, finished, fmtBytes, startDownloadSync } from '@/stores/downloads'
+import { RECIPES, buildSpec, eta, plan, recipe as findRecipe, stepsFor, triggerFrom, type Plan, type Recipe } from '@/lib/recipes'
+import { settings } from '@/stores/settings'
 
 const props = defineProps<{ id?: string }>()
 const router = useRouter()

@@ -245,14 +245,14 @@ collapsible app sidebar with a live card per training run, and a phone overlay b
 720px.
 
 The log drawer (sidebar "Log", or Ctrl+`) shows ComfyUI's console live. It overlays the
-bottom of the main area, so the page never moves. `web/src/logs.ts` backfills from
+bottom of the main area, so the page never moves. `web/src/stores/logs.ts` backfills from
 `/internal/logs/raw` and subscribes with `PATCH /internal/logs/subscribe`. ComfyUI drops
 that subscription when the socket closes, so it's renewed on each reconnect's `status`
 message. Raw writes are stitched into lines: ANSI stripped, `\r` progress bars collapsed
 to their latest state, a Python traceback kept as one block, and the level taken from
 ComfyUI's `[WARNING]`/`[ERROR]` tags (keywords for untagged output). It keeps 5000 lines.
 Errors that arrive while the drawer is closed badge the sidebar row. The drawer's Memory tab charts VRAM and
-RAM with the System page's series (`web/src/memSeries.ts`), sized to the drawer. Model
+RAM with the System page's series (`web/src/lib/memSeries.ts`), sized to the drawer. Model
 loads/unloads and errors from the log are marked on the time axis. ComfyUI's zoneless local
 log times are read as browser-local, which lines up when both run on one machine.
 
@@ -267,7 +267,7 @@ ZenKit follow-ups:
   checkout today (vite dedupes `vue`). zenkit-ui gained lightbox features ZenTrainer uses:
   `overlay` and `thumb` items, a `#side` panel, `grid` navigation (WASD), `searchable`, and
   keys that leave Ctrl/Cmd/Alt combos to the browser.
-- **Light base tokens in zenkit-theme.** `BASE_TOKENS` are dark-only. `web/src/theme.ts`
+- **Light base tokens in zenkit-theme.** `BASE_TOKENS` are dark-only. `web/src/lib/theme.ts`
   carries a `LIGHT_BASE` workaround that belongs upstream.
 
 ## ComfyUI version

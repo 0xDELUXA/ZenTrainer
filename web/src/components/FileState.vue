@@ -3,7 +3,7 @@
 // download button with its size. Used by the model picker and the Models page.
 import { computed } from 'vue'
 import { engine, type ModelFile } from '@/api/engine'
-import { downloadFor, fmtBytes } from '@/downloads'
+import { downloadFor, fmtBytes } from '@/stores/downloads'
 
 const props = defineProps<{ family: string; file: ModelFile }>()
 const emit = defineEmits<{ error: [string] }>()

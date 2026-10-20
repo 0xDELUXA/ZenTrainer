@@ -6,10 +6,10 @@
 import { ZenButton, ZenCombo } from '@nynxz/zenkit-ui'
 import { computed, onMounted, ref, watch } from 'vue'
 import { engine, type ModelFamily, type ModelFile, type ModelFolder, type ModelProfile, type SampleDefaults } from '@/api/engine'
-import { fmtAdded, fmtBytes, finished, hfToken, isNew, startDownloadSync, targets } from '@/downloads'
+import { fmtAdded, fmtBytes, finished, hfToken, isNew, startDownloadSync, targets } from '@/stores/downloads'
 import FileState from './FileState.vue'
 import StarButton from './StarButton.vue'
-import { starredFirst } from '@/favorites'
+import { starredFirst } from '@/stores/favorites'
 import type { ModelValue } from './ModelPicker.vue'
 
 export interface SampleSuggestion extends SampleDefaults {

@@ -2,10 +2,10 @@
 import { ZenButton } from '@nynxz/zenkit-ui'
 import { computed, onMounted, ref } from 'vue'
 import { engine, type Health, type StorageReport } from '@/api/engine'
-import { fmtBytes } from '@/downloads'
+import { fmtBytes } from '@/stores/downloads'
 import MemChart from '@/components/MemChart.vue'
-import { RAM_SERIES as RAM, VRAM_SERIES as VRAM } from '@/memSeries'
-import { gb, memLatest, samples, startSystemSync } from '@/system'
+import { RAM_SERIES as RAM, VRAM_SERIES as VRAM } from '@/lib/memSeries'
+import { gb, memLatest, samples, startSystemSync } from '@/stores/system'
 
 const health = ref<Health | null>(null)
 onMounted(async () => {

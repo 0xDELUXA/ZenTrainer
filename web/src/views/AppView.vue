@@ -10,7 +10,7 @@ import { onComfyMessage } from '@/api/comfy'
 import { engine, viewUrl, type AppInfo, type AppInput as AppInputDef, type Batch, type BatchCell } from '@/api/engine'
 import AppInput from '@/components/AppInput.vue'
 import GenerateLayout from '@/components/apps/GenerateLayout.vue'
-import { runs } from '@/runs'
+import { runs } from '@/stores/runs'
 
 const props = defineProps<{ id: string }>()
 const route = useRoute()

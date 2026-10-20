@@ -5,7 +5,7 @@
 // v-model is the name ComfyUI lists the file by (what the spec stores), '' for none.
 import { ZenButton, ZenCombo, ZenInput } from '@nynxz/zenkit-ui'
 import { computed, ref, watch } from 'vue'
-import { downloadFor, finished, fmtBytes } from '@/downloads'
+import { downloadFor, finished, fmtBytes } from '@/stores/downloads'
 import { EngineError, engine, type AdapterKind, type TrainingAdapter } from '@/api/engine'
 
 const model = defineModel<string>({ required: true })

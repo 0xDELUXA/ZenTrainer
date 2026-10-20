@@ -4,7 +4,7 @@
 import { ZenButton, ZenInput, ZenSwitch } from '@nynxz/zenkit-ui'
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { engine } from '@/api/engine'
-import { activeCaptions } from '@/captions'
+import { activeCaptions } from '@/stores/captions'
 import CaptionPanel from '@/components/CaptionPanel.vue'
 import DatasetStats from '@/components/DatasetStats.vue'
 import { useDatasetContext } from './context'

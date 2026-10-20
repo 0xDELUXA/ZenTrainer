@@ -5,9 +5,9 @@ import './app.css'
 import { createApp } from 'vue'
 import { createRouter, createWebHistory } from 'vue-router'
 import App from './App.vue'
-import { registerLoraSource } from './loraSource'
-import { initSettings } from './settings'
-import { initTheme } from './theme'
+import { registerLoraSource } from '@/lib/loraSource'
+import { initSettings } from '@/stores/settings'
+import { initTheme } from '@/lib/theme'
 
 const router = createRouter({
   history: createWebHistory('/zentrainer/'),

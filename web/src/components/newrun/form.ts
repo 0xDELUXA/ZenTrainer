@@ -6,7 +6,7 @@ import { computed, inject, onMounted, reactive, ref, toRaw, watch, type Injectio
 import { useRoute } from 'vue-router'
 import { inputChoices } from '@/api/comfy'
 import type { SampleSuggestion } from '@/components/FamilyPicker.vue'
-import { setSetting, settings } from '@/settings'
+import { setSetting, settings } from '@/stores/settings'
 import {
   defaultSpec,
   engine,

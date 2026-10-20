@@ -2,7 +2,7 @@
 // Text to Image, Models). Kept in ComfyUI's per-user settings, so they follow you around.
 
 import { computed } from 'vue'
-import { setSetting, settings } from './settings'
+import { setSetting, settings } from '@/stores/settings'
 
 export const starred = computed(() => new Set(settings.favoriteModels))
 export const isStarred = (id: string) => starred.value.has(id)

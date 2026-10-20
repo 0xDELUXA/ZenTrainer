@@ -7,7 +7,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { inputChoices } from '@/api/comfy'
 import { EngineError, engine } from '@/api/engine'
-import { fmtBytes } from '@/downloads'
+import { fmtBytes } from '@/stores/downloads'
 
 const props = defineProps<{ compact?: boolean }>()
 const route = useRoute()

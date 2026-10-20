@@ -3,7 +3,7 @@
 // engine every minute; ComfyUI once (its check fetches from git).
 
 import { ref } from 'vue'
-import { engine } from './api/engine'
+import { engine } from '@/api/engine'
 
 export const engineStale = ref(false)
 /** set when this ComfyUI is older than ZenTrainer needs (a node-pack install into an old one) */

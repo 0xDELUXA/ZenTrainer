@@ -5,7 +5,7 @@
 // The engine serves the packs (/zentrainer/api/themes): the bundled set, a linked
 // ZenKit's, and the shared user drop-in folder, so there's no dependency on ZenKit.
 
-import { updateFavicon } from './favicon'
+import { updateFavicon } from '@/lib/favicon'
 import {
   BASE_TOKENS as BASE_DARK,
   applyPack,

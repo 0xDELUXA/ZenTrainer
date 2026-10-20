@@ -1,6 +1,6 @@
 // The VRAM and RAM series the System page and the log drawer chart. Colours come from the
 // pack's chart tokens when it has them; dashes carry identity too (never colour alone).
-import type { Series } from './components/MemChart.vue'
+import type { Series } from '@/components/MemChart.vue'
 
 export const VRAM_SERIES: Series[] = [
   { key: 'vram_used', label: 'Device used', color: 'var(--chart-1, var(--zen-accent))' },

@@ -3,7 +3,7 @@
 // (LR, grad norm, losses, likeness), each value's meaning behind an ⓘ.
 import { ZenTip } from '@nynxz/zenkit-ui'
 import { computed } from 'vue'
-import { gb } from '@/system'
+import { gb } from '@/stores/system'
 import { dur, fmtLr, useRunContext } from './context'
 
 const { detail, last, wall, likeLast, likeFirst } = useRunContext()

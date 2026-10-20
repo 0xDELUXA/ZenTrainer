@@ -2,8 +2,8 @@
 // The rail's In VRAM card, while the run is live: the run's own models among what ComfyUI
 // holds (matched by file), and how much of each is on the GPU.
 import { computed, onMounted, onUnmounted } from 'vue'
-import { loadedModels, watchLoaded } from '@/loaded'
-import { gb } from '@/system'
+import { loadedModels, watchLoaded } from '@/stores/loaded'
+import { gb } from '@/stores/system'
 import { useRunContext } from './context'
 
 const { detail, running } = useRunContext()

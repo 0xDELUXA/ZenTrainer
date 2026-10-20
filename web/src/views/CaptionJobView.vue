@@ -5,7 +5,7 @@ import { ZenButton } from '@nynxz/zenkit-ui'
 import { computed, onMounted, ref, watch } from 'vue'
 import { EngineError, engine, thumbUrl, type CaptionJob } from '@/api/engine'
 import StatusPill from '@/components/StatusPill.vue'
-import { captionJobs, startCaptionSync } from '@/captions'
+import { captionJobs, startCaptionSync } from '@/stores/captions'
 
 const props = defineProps<{ id: string }>()
 const job = ref<CaptionJob | null>(null)

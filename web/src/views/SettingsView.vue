@@ -5,8 +5,8 @@
 import { ZenButton } from '@nynxz/zenkit-ui'
 import { computed, onMounted, ref } from 'vue'
 import { engine, type ComfyVersion } from '@/api/engine'
-import { SETTINGS, setSetting, settings, type SettingId } from '@/settings'
-import { currentModes, currentTheme, packCards, setMode, setTheme } from '@/theme'
+import { SETTINGS, setSetting, settings, type SettingId } from '@/stores/settings'
+import { currentModes, currentTheme, packCards, setMode, setTheme } from '@/lib/theme'
 
 const mode = computed(() => currentTheme.value.mode)
 // registry settings, by category (Appearance renders inside its own section)

@@ -4,7 +4,7 @@
 import { computed, inject, onUnmounted, ref, type InjectionKey } from 'vue'
 import type { LightboxItem } from '@nynxz/zenkit-ui'
 import { promptText as specPrompt, viewUrl, type SampleRow } from '@/api/engine'
-import { playTogether } from '@/videoSync'
+import { playTogether } from '@/lib/videoSync'
 import type { RunContext } from './context'
 
 export const isVideo = (x: SampleRow) => /\.(mp4|webm)$/i.test(x.filename)

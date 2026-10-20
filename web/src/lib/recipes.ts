@@ -3,7 +3,7 @@
 // trained and checked (see docs/ARCHITECTURE.md, "Recipes"); the model files are the ones those
 // runs used, with the family's recommended file as the fallback when a file isn't installed.
 
-import type { TrainSpec } from './api/engine'
+import type { TrainSpec } from '@/api/engine'
 
 type DeepPartial<T> = { [K in keyof T]?: NonNullable<T[K]> extends unknown[] ? T[K] : NonNullable<T[K]> extends object ? DeepPartial<NonNullable<T[K]>> : T[K] }
 type Folder = 'diffusion_models' | 'text_encoders' | 'vae'
@@ -214,7 +214,7 @@ export interface Plan {
 
 /** Which files a recipe trains with on this install, and what must be downloaded first. */
 export async function plan(r: Recipe): Promise<Plan> {
-  const { engine } = await import('./api/engine')
+  const { engine } = await import('@/api/engine')
   const fam = await engine.family(r.family, true)
   const out: Plan = { model: { diffusion_models: null, text_encoders: null, vae: null }, clipType: fam.clip_type, downloads: [], adapter: null, sampleModel: null, problems: [] }
   for (const folder of ['diffusion_models', 'text_encoders', 'vae'] as Folder[]) {

@@ -2,8 +2,8 @@
 // picker (per-file progress) and the sidebar (anything downloading).
 
 import { computed, reactive, ref } from 'vue'
-import { onComfyMessage } from './api/comfy'
-import { EVENTS, engine, type ModelDownload, type ModelFolder } from './api/engine'
+import { onComfyMessage } from '@/api/comfy'
+import { EVENTS, engine, type ModelDownload, type ModelFolder } from '@/api/engine'
 
 export const downloads = reactive<Record<string, ModelDownload>>({})
 export const targets = ref<Partial<Record<ModelFolder, string>>>({})

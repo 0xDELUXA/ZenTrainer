@@ -3,7 +3,7 @@
 // video models). A sample left on "Run size" follows the run's width/height/frames.
 import { ZenCombo, ZenNumber } from '@nynxz/zenkit-ui'
 import { computed } from 'vue'
-import { vAutosize } from '@/autosize'
+import { vAutosize } from '@/lib/autosize'
 import type { SamplePrompt } from '@/api/engine'
 
 const model = defineModel<(string | SamplePrompt)[]>({ required: true })

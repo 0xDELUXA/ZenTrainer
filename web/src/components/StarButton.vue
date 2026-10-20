@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Star a model family. Safe inside a dropdown option: the click doesn't pick the option.
-import { isStarred, toggleStar } from '@/favorites'
+import { isStarred, toggleStar } from '@/stores/favorites'
 
 const props = defineProps<{ id: string; name?: string }>()
 </script>

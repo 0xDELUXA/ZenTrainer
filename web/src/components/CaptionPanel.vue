@@ -5,7 +5,7 @@
 import { ZenButton, ZenCombo, ZenInput, ZenNumber } from '@nynxz/zenkit-ui'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { onComfyMessage } from '@/api/comfy'
-import { setSetting, settings } from '@/settings'
+import { setSetting, settings } from '@/stores/settings'
 import { EVENTS, EngineError, engine, thumbUrl, type CaptionJob, type CaptionLora, type CaptionMode, type CaptionStyle, type DatasetItem, type ModelSenses } from '@/api/engine'
 
 const props = defineProps<{ dataset: string; items: DatasetItem[]; sets: string[]; selected: string[]; subject?: string }>()

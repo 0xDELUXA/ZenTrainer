@@ -5,7 +5,7 @@
 import { ZenButton, ZenCombo, ZenNumber, ZenSwitch } from '@nynxz/zenkit-ui'
 import { computed, ref } from 'vue'
 import { viewUrl, type SampleRow } from '@/api/engine'
-import { vAutosize } from '@/autosize'
+import { vAutosize } from '@/lib/autosize'
 import { useRunContext } from './context'
 import { isVideo, rowHasVideo, sampleItem, useSamplesContext } from './samples'
 

@@ -6,7 +6,7 @@ import { ZenButton, ZenLightbox, type LightboxItem } from '@nynxz/zenkit-ui'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { onComfyMessage } from '@/api/comfy'
 import { ACTIVE, EVENTS, engine, promptText, type CheckpointRow, type RunDetail, type SampleRow } from '@/api/engine'
-import { eta } from '@/recipes'
+import { eta } from '@/lib/recipes'
 
 const props = defineProps<{ id: string }>()
 const d = ref<RunDetail | null>(null)

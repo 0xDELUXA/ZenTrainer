@@ -6,8 +6,8 @@ import AppSidebar from './components/AppSidebar.vue'
 import HoverPeek from './components/HoverPeek.vue'
 import LogDrawer from './components/LogDrawer.vue'
 import ScrollArea from './components/ScrollArea.vue'
-import { drawerHeight, drawerOpen, startLogSync } from './logs'
-import { startRunSync } from './runs'
+import { drawerHeight, drawerOpen, startLogSync } from '@/stores/logs'
+import { startRunSync } from '@/stores/runs'
 
 const KEY = 'zentrainer.sidebar.collapsed'
 const read = () => {

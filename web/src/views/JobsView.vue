@@ -7,8 +7,8 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { engine, type CaptionJob, type RunMeta } from '@/api/engine'
 import StatusPill from '@/components/StatusPill.vue'
-import { activeCaptions, captionJobs, startCaptionSync } from '@/captions'
-import { engineError, latest, queue, refreshQueue, refreshRuns, runs } from '@/runs'
+import { activeCaptions, captionJobs, startCaptionSync } from '@/stores/captions'
+import { engineError, latest, queue, refreshQueue, refreshRuns, runs } from '@/stores/runs'
 
 const captions = ref<CaptionJob[]>([])
 async function refreshCaptions() {

@@ -2,7 +2,7 @@
 // Edit pairs: every input, then the result, the instruction beside them (one picture in and one
 // out, the same shape, as a drag-across compare).
 import { ZenCompare } from '@nynxz/zenkit-ui'
-import { vAutosize } from '@/autosize'
+import { vAutosize } from '@/lib/autosize'
 import { aspect, isSimplePair, isVideoPath, useDatasetContext } from './context'
 
 const { zoom, cap, k, drafts, saving, save, selected, shown, toggleSelect, onItemClick, onItemMenu, ctrlView, full, thumb } = useDatasetContext()

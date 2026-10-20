@@ -12,7 +12,7 @@ import { inputChoices, onComfyMessage, onComfyPreview } from '@/api/comfy'
 import { engine, viewUrl, type AppInfo, type AppInput, type Batch, type BatchCell, type ModelFamily } from '@/api/engine'
 import LoraStack, { type LoraRow } from '@/components/LoraStack.vue'
 import StarButton from '@/components/StarButton.vue'
-import { starredFirst } from '@/favorites'
+import { starredFirst } from '@/stores/favorites'
 
 const props = defineProps<{ app: AppInfo }>()
 const route = useRoute()

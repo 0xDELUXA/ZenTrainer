@@ -7,7 +7,7 @@ import { ZenButton, ZenCombo, ZenContextMenu, ZenEmpty, ZenInput, ZenLightbox, Z
 import { computed, nextTick, onMounted, onUnmounted, provide, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { engine } from '@/api/engine'
-import { reducedMotion } from '@/settings'
+import { reducedMotion } from '@/stores/settings'
 import StickyBar from '@/components/StickyBar.vue'
 import { DATASET, useDataset } from '@/components/dataset/context'
 import DatasetGrid from '@/components/dataset/DatasetGrid.vue'

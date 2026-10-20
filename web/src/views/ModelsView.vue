@@ -7,8 +7,8 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { engine, type ModelFamily, type ModelFolder } from '@/api/engine'
 import FileState from '@/components/FileState.vue'
 import StarButton from '@/components/StarButton.vue'
-import { isStarred, starred, starredFirst } from '@/favorites'
-import { finished, fmtAdded, fmtBytes, hfToken, isNew, startDownloadSync, targets } from '@/downloads'
+import { isStarred, starred, starredFirst } from '@/stores/favorites'
+import { finished, fmtAdded, fmtBytes, hfToken, isNew, startDownloadSync, targets } from '@/stores/downloads'
 import StickyBar from '@/components/StickyBar.vue'
 
 const families = ref<ModelFamily[]>([])

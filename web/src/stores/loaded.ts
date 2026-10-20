@@ -2,7 +2,7 @@
 // shows them: the sidebar, a run's page, the log drawer.
 
 import { computed, ref } from 'vue'
-import { engine, type LoadedModel } from './api/engine'
+import { engine, type LoadedModel } from '@/api/engine'
 
 export const loadedModels = ref<LoadedModel[]>([])
 let users = 0

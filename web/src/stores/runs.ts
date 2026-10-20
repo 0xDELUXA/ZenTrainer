@@ -2,8 +2,8 @@
 // fresh from ComfyUI's websocket. The sidebar and the runs list both read it.
 
 import { computed, reactive, ref } from 'vue'
-import { onComfyMessage } from './api/comfy'
-import { ACTIVE, EVENTS, engine, type MetricRow, type QueueState, type RunMeta, type RunStatus } from './api/engine'
+import { onComfyMessage } from '@/api/comfy'
+import { ACTIVE, EVENTS, engine, type MetricRow, type QueueState, type RunMeta, type RunStatus } from '@/api/engine'
 
 export const runs = ref<RunMeta[]>([])
 export const latest = reactive<Record<string, MetricRow>>({})

@@ -5,9 +5,9 @@
 // VRAM and RAM with the log's model loads and errors marked on the time axis.
 import { ZenInput } from '@nynxz/zenkit-ui'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { DRAWER_HEIGHT_KEY, DRAWER_MIN_H, clearLogs, drawerHeight, drawerOpen, logCounts, logLines, logPartial, toggleDrawer, type LogLevel } from '@/logs'
-import { RAM_SERIES, VRAM_SERIES } from '@/memSeries'
-import { gb, memLatest, samples, startSystemSync } from '@/system'
+import { DRAWER_HEIGHT_KEY, DRAWER_MIN_H, clearLogs, drawerHeight, drawerOpen, logCounts, logLines, logPartial, toggleDrawer, type LogLevel } from '@/stores/logs'
+import { RAM_SERIES, VRAM_SERIES } from '@/lib/memSeries'
+import { gb, memLatest, samples, startSystemSync } from '@/stores/system'
 import LoadedModels from './LoadedModels.vue'
 import MemChart, { type Marker } from './MemChart.vue'
 import ScrollArea from './ScrollArea.vue'
