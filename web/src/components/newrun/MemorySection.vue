@@ -1,0 +1,55 @@
+<script setup lang="ts">
+// Memory & speed: training precision, attention, checkpointing, offloading, the int8 paths, TREAD
+// and compiling; folded away under one line saying what's on.
+import { ZenCombo, ZenField, ZenNumber, ZenSwitch } from '@nynxz/zenkit-ui'
+import { reactive } from 'vue'
+import { items, useRunFormContext } from './form'
+
+const { spec, trainAttention } = useRunFormContext()
+
+const advanced = reactive({ memory: false })
+</script>
+
+<template>
+<section class="card sec">
+  <button class="more head" @click="advanced.memory = !advanced.memory">
+    <i :class="advanced.memory ? 'mdi mdi-chevron-up' : 'mdi mdi-chevron-down'" /> Memory & speed
+    <span class="muted small">{{ spec.memory.training_dtype }} · checkpointing {{ spec.memory.gradient_checkpointing ? 'on' : 'off' }}{{ spec.memory.offloading ? ' · offload' : '' }}</span>
+  </button>
+  <div v-if="advanced.memory" class="grid-2">
+    <ZenField label="Training dtype" stack><ZenCombo v-model="spec.memory.training_dtype" :items="items(['bf16', 'fp16', 'fp32'])" :searchable="false" :sorted="false" /></ZenField>
+    <ZenField label="Attention" stack tip="Only backends with a backward pass"><ZenCombo v-model="spec.memory.attention" :items="items(trainAttention)" :searchable="false" /></ZenField>
+    <ZenField label="Gradient checkpointing" stack tip="Recompute each block in backward"><div class="sw-row"><ZenSwitch v-model="spec.memory.gradient_checkpointing" /><span class="sw-state">{{ spec.memory.gradient_checkpointing ? 'On' : 'Off' }}</span></div></ZenField>
+    <ZenField v-if="spec.memory.gradient_checkpointing" label="Keep last blocks" stack tip="checkpoint_skip: the last N blocks skip checkpointing: they keep their activations (more VRAM) and skip the recompute (faster). Spare VRAM spent on speed">
+      <ZenNumber v-model="spec.memory.checkpoint_skip" :min="0" :max="64" :step="1" :precision="0" />
+    </ZenField>
+    <ZenField label="Offload weights" stack tip="Stream weights from RAM"><div class="sw-row"><ZenSwitch v-model="spec.memory.offloading" /><span class="sw-state">{{ spec.memory.offloading ? 'On' : 'Off' }}</span></div></ZenField>
+    <ZenField label="Quantized backward" stack tip="FP8 matmuls in backward (fp8 bases)"><div class="sw-row"><ZenSwitch v-model="spec.memory.quantized_backward" /><span class="sw-state">{{ spec.memory.quantized_backward ? 'On' : 'Off' }}</span></div></ZenField>
+    <ZenField label="TREAD (video)" stack tip="On video steps this share of the clip's tokens skips the middle blocks and rejoins unchanged: those blocks do about half the work at 50%. Stills, samples and validation run whole. Best with some stills in the dataset: they anchor the LoRA. MiniMax H3">
+      <div class="sw-row">
+        <ZenSwitch :model-value="(spec.memory.tread ?? 0) > 0" @update:model-value="spec.memory.tread = $event ? 0.5 : 0" />
+        <ZenNumber v-if="(spec.memory.tread ?? 0) > 0" :model-value="Math.round((spec.memory.tread ?? 0.5) * 100)" :min="10" :max="90" :step="5" :precision="0" @update:model-value="spec.memory.tread = $event / 100" />
+        <span v-else class="sw-state">Off</span>
+      </div>
+    </ZenField>
+    <ZenField v-if="(spec.memory.tread ?? 0) > 0" label="Share of steps routed" stack tip="TREAD on only this share of clip steps; the rest run whole. Routing every step of a dataset with no stills lets the LoRA learn to make up for the routing (measured on H3: over-sharpened samples). Whole steps keep it working on the model it'll actually be used on">
+      <ZenNumber :model-value="Math.round((spec.memory.tread_steps ?? 1) * 100)" :min="0" :max="100" :step="10" :precision="0" @update:model-value="spec.memory.tread_steps = $event / 100" />
+    </ZenField>
+    <ZenField label="Compile blocks" stack tip="torch.compile on the model's repeated transformer block: the small operations around the big matmuls (norms, modulation, activations, the LoRA add) fuse into fewer kernels. The first steps and the first sample are slower while it compiles">
+      <div class="sw-row"><ZenSwitch :model-value="!!spec.memory.compile_blocks" @update:model-value="spec.memory.compile_blocks = $event" /><span class="sw-state">{{ spec.memory.compile_blocks ? 'On' : 'Off' }}</span></div>
+    </ZenField>
+    <ZenField label="int8 forward" stack tip="int8 ConvRot bases (MiniMax H3, Krea 2 int8): the frozen layers run ComfyUI's int8 kernel forward, activations quantized, instead of rebuilding a bf16 weight for each matmul. Off is slower: for comparing quality">
+      <div class="sw-row"><ZenSwitch :model-value="spec.memory.int8_forward !== false" @update:model-value="spec.memory.int8_forward = $event" /><span class="sw-state">{{ spec.memory.int8_forward !== false ? 'On' : 'Off' }}</span></div>
+    </ZenField>
+    <ZenField label="int8 backward (W8A8)" stack tip="int8 ConvRot bases (MiniMax H3, Krea 2 int8): the gradient is quantized to int8 too, so each frozen layer's input gradient runs on int8 tensor cores (about 2× the bf16 backward on an RTX 5090). Rounded stochastically so it stays unbiased; noisier per step than 16-bit">
+      <div class="sw-row"><ZenSwitch :model-value="!!spec.memory.w8a8_backward" @update:model-value="spec.memory.w8a8_backward = $event" /><span class="sw-state">{{ spec.memory.w8a8_backward ? 'On' : 'Off' }}</span></div>
+    </ZenField>
+    <ZenField label="Fused int8 backward" stack tip="int8 ConvRot bases (MiniMax H3, Krea 2 int8): each frozen layer's input gradient from a fused Triton kernel instead of a rebuilt bf16 weight (Fizgig's, by @mabseyuk). Saves the rebuilt weight's VRAM; not faster on an RTX 5090 (cuBLAS wins)">
+      <div class="sw-row"><ZenSwitch :model-value="!!spec.memory.fused_int8_backward" @update:model-value="spec.memory.fused_int8_backward = $event" /><span class="sw-state">{{ spec.memory.fused_int8_backward ? 'On' : 'Off' }}</span></div>
+    </ZenField>
+    <ZenField label="Bypass mode" stack tip="Forward hooks; automatic for quantized bases"><div class="sw-row"><ZenSwitch v-model="spec.memory.bypass_mode" /><span class="sw-state">{{ spec.memory.bypass_mode ? 'On' : 'Off' }}</span></div></ZenField>
+  </div>
+</section>
+</template>
+
+<style scoped src="./form.css"></style>

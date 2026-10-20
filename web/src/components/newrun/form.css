@@ -1,0 +1,138 @@
+/* What every section of the New run form shares: the section card and its numbered heading,
+   segmented buttons and chips, the field grid's spans, switch rows, inline pairs, the Advanced
+   toggles. Each section includes this scoped, before its own rules. */
+.sec {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+}
+h2 {
+  margin: 0;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.num {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-lg);
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  background: var(--zen-accent);
+  color: var(--zen-accent-text);
+}
+.seg {
+  display: inline-flex;
+  align-self: flex-start;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--r-lg);
+  border: 1px solid color-mix(in srgb, var(--zen-border) 70%, transparent);
+}
+.locked {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.seg button,
+.chip-btn {
+  border: none;
+  background: none;
+  color: var(--zen-muted);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+.seg button.on,
+.chip-btn.on {
+  background: var(--zen-surface-2);
+  color: var(--zen-text);
+}
+.chip-btn {
+  border: 1px solid color-mix(in srgb, var(--zen-border) 70%, transparent);
+}
+.chips {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.wide-f {
+  grid-column: 1 / -1;
+}
+.span-2 {
+  grid-column: span 2;
+}
+.full-row {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+@media (max-width: 760px) {
+  .span-2 {
+    grid-column: 1 / -1;
+  }
+}
+/* a switch field: label above like the rest, the switch on a control-height row beside its state */
+.tpl-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.tpl-row > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+.sw-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+}
+.sw-row > :deep(.zen-number) {
+  flex: 1;
+}
+.sw-state {
+  font-size: 12px;
+  color: var(--zen-muted);
+}
+.inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.inline > * {
+  flex: 1;
+}
+.inline > .muted {
+  flex: none;
+}
+.more {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: none;
+  color: var(--zen-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+}
+.more:hover {
+  color: var(--zen-text);
+}
+.more.head {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--zen-text);
+}
+.small {
+  font-size: 11px;
+  font-weight: 400;
+}
