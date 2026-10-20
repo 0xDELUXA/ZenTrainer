@@ -24,7 +24,7 @@ from . import control as control_mod
 from . import data, models, optim
 from .callbacks import Callback, Checkpoints, Metrics, Samples, Validation, write_metadata
 from . import compat
-from .streams import Streams
+from .data.streams import Streams
 from .denoiser import Denoiser
 from .memory import attention_override, gradient_checkpointing
 from . import network as network_mod
@@ -36,7 +36,7 @@ _DTYPES = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}
 
 def _has_soundtracks(root, look: int = 6) -> bool:
     """Whether the dataset's clips carry audio (the first few looked at)."""
-    from . import video
+    from .data import video
 
     clips = [it.path for it in data.scan(root, warn=False) if video.is_video(it.path)][:look]
     for p in clips:
@@ -210,7 +210,7 @@ class Trainer:
                 self._status("loading")
                 self.setup()
                 self._status("training")
-                from .compile import compiled_blocks
+                from .kernels.compile import compiled_blocks
 
                 dm = self.models.patcher.model.diffusion_model
                 # compiled first, so checkpointing wraps the compiled forward
@@ -247,7 +247,7 @@ class Trainer:
                         self.network.eject(self.models.patcher)
                         self.models.patcher.cleanup()
                         _comfy_compiler(True)  # after on_end: its final samples run without it too
-                        from .offload import overlap, watch_pins
+                        from .memory.offload import overlap, watch_pins
 
                         overlap(False)
                         watch_pins(False)
@@ -260,7 +260,7 @@ class Trainer:
                 raise
             finally:
                 mm.training_fp8_bwd = False
-                from . import int8_backward
+                from .kernels import int8_backward
 
                 int8_backward.uninstall()  # the model is cached: leave its layers as they were
                 self._release()
@@ -276,7 +276,7 @@ class Trainer:
         import comfy.model_management as mm
 
         job = self.sample_job
-        from . import int8_backward
+        from .kernels import int8_backward
 
         samples = self._samples
         out = "error"
@@ -343,7 +343,7 @@ class Trainer:
 
         s = self.spec
         compat.apply()  # ComfyUI model fixes for training (see compat.py)
-        from . import int8_backward
+        from .kernels import int8_backward
 
         int8_backward.enable("w8a8" if s.memory.w8a8_backward else "fused" if s.memory.fused_int8_backward else "")
         lora_root(s.output.lora_dir)  # a bad save folder fails now, not at the first save
@@ -356,7 +356,7 @@ class Trainer:
         compat.prune_unused(patcher)
         self._auto_offload(patcher)
         self._offload_skip()
-        from . import int8_backward
+        from .kernels import int8_backward
 
         # weight-only int8 layers that need a gradient: int8 forward instead of a dequantized bf16 one
         n8 = int8_backward.install(patcher.model) if s.memory.int8_forward else 0
@@ -371,7 +371,7 @@ class Trainer:
         self.encoder_id, self.cache_dir = encoder_id, cache
         if s.dataset.video_audio and self.models.audio_vae is None:
             raise ValueError("training on video sound needs the model's audio VAE: set Model -> Audio VAE")
-        from .edit import is_h3
+        from .data.edit import is_h3
 
         self.h3 = is_h3(patcher.model)
         if s.dataset.keyframes and not self.h3:
@@ -381,7 +381,7 @@ class Trainer:
                                   audio_vae=self.models.audio_vae, h3=self.h3)
         self.edit_method = None
         if s.dataset.edit:
-            from .edit import method, takes_references
+            from .data.edit import method, takes_references
 
             if not takes_references(patcher.model):
                 raise ValueError(f"{type(patcher.model).__name__} doesn't take reference images, so it can't train "
@@ -605,11 +605,11 @@ class Trainer:
 
         patcher = self.models.patcher
         if self.spec.memory.offloading:
-            from .offload import watch_pins
+            from .memory.offload import watch_pins
 
             watch_pins(True)  # before loading: ComfyUI pins the offloaded weights as it loads them
             if not getattr(self, "_own_ram", False) and torch.cuda.is_available():
-                from .offload import own_ram
+                from .memory.offload import own_ram
 
                 self._own_ram = True  # once: what loads later is already in RAM
                 n, size = own_ram(patcher.model.diffusion_model)
@@ -638,7 +638,7 @@ class Trainer:
         mm.in_training = True
         _comfy_compiler(False)
         if self.spec.memory.offloading:
-            from .offload import overlap
+            from .memory.offload import overlap
 
             overlap(True)
         if getattr(self, "_compiled", 0):
@@ -649,7 +649,7 @@ class Trainer:
         import comfy.model_management as mm
 
         mm.in_training = False
-        from .offload import overlap, watch_pins
+        from .memory.offload import overlap, watch_pins
 
         overlap(False)
         watch_pins(False)  # samples load models of their own: ComfyUI's streams as they are
@@ -749,7 +749,7 @@ class Trainer:
 
     def _recompile_if_moved(self) -> None:
         if getattr(self, "_compiled", 0):
-            from .compile import reset_if_moved
+            from .kernels.compile import reset_if_moved
 
             dm = self.models.patcher.model.diffusion_model
             self._residency = reset_if_moved(dm, getattr(self, "_residency", None))
@@ -776,7 +776,7 @@ class Trainer:
         """Pinned copies of offloaded weights ComfyUI couldn't pin in place (see offload.py)."""
         if not self.spec.memory.offloading or not torch.cuda.is_available():
             return
-        from .offload import pin_offloaded
+        from .memory.offload import pin_offloaded
 
         n, size = pin_offloaded(self.models.patcher.model.diffusion_model)
         if n:
@@ -873,7 +873,7 @@ class Trainer:
         (out / f"profile-step{self.step:06d}.txt").write_text(f"{table}\n\nby input shape\n{shapes}\n")
         prof.export_chrome_trace(str(out / f"profile-step{self.step:06d}.json"))
         logging.info("[ZenTrainer] profiled step %d: %s", self.step, out / f"profile-step{self.step:06d}.txt")
-        from . import int8_backward
+        from .kernels import int8_backward
 
         logging.info("[ZenTrainer] int8 backward paths so far: %s", dict(int8_backward.stats))
 
@@ -950,7 +950,7 @@ class Trainer:
         dm = self.models.patcher.model.diffusion_model
         if "minimax" not in type(dm).__module__.lower() or not hasattr(dm, "blocks"):
             return None
-        from .tread import patches
+        from .memory.tread import patches
 
         p = patches(len(dm.blocks), share, self.generator)
         return {"patches_replace": {"dit": p}} if p else None
@@ -996,7 +996,7 @@ class Trainer:
                 empty = cap == self.dataset.empty_caption and sample.cond_empty is not None
                 cond = sample.cond_empty if empty else sample.cond
             if sample.refs:
-                from .edit import with_refs
+                from .data.edit import with_refs
 
                 cond = with_refs(cond, sample.refs, self.edit_method)
             with torch.no_grad():

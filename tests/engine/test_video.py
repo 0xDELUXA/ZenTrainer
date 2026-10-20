@@ -6,8 +6,9 @@ import types
 import pytest
 import torch
 
-from zentrainer.harness import data, video
-from zentrainer.harness.video import Probe
+from zentrainer.harness import data
+from zentrainer.harness.data import video
+from zentrainer.harness.data.video import Probe
 
 # the temporal formulas of two real video VAEs (comfy/sd.py)
 H3 = types.SimpleNamespace(downscale_ratio=(lambda a: max(1, (a - 5) // 17 * 5 + 2) if a > 1 else 1, 16, 16),

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 import torch
 
-from ..spec import OptimSpec
+from ...spec import OptimSpec
 
 
 class Lion(torch.optim.Optimizer):

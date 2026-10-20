@@ -24,7 +24,7 @@ from pathlib import Path
 
 import torch
 
-from ..spec import DatasetSpec
+from ...spec import DatasetSpec
 from . import video
 from .video import VIDEO_EXTS, is_video
 

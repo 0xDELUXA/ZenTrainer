@@ -357,7 +357,7 @@ def run(job: CaptionJob) -> None:
             clip = _with_loras(clip, job)
             if not hasattr(clip, "generate"):
                 raise RuntimeError(f"{job.clip_name} can't generate text; pick a vision-language model (Qwen-VL, Gemma)")
-            from ..harness import video
+            from ..harness.data import video
             # Gemma 4 takes a clip as a timestamped video and can hear it (its own chat template
             # carries the media tokens); the others see VIDEO_FRAMES stills
             gemma4 = "gemma4" in getattr(clip.tokenizer, "clip_name", "")
@@ -517,7 +517,7 @@ GEMMA_FPS = 2  # frames a second Gemma 4 sees of a clip (it subsamples whatever 
 
 def _gemma4_tokens(clip, job: CaptionJob, path: Path, is_video: bool, hears: bool):
     """Gemma 4's prompt: the picture, or the clip as frames at GEMMA_FPS with its soundtrack."""
-    from ..harness import video
+    from ..harness.data import video
 
     if not is_video:
         return clip.tokenize(instruction(job), image=_picture(path), skip_template=False, min_length=1)
@@ -544,7 +544,7 @@ def _picture(path: Path):
     import torch
     from PIL import Image
 
-    from ..harness import video
+    from ..harness.data import video
 
     if video.is_video(path):
         p = video.probe(path)

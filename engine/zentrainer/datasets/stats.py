@@ -51,7 +51,7 @@ def _look(path: Path) -> dict | None:
     import numpy as np
     from PIL import Image
 
-    from ..harness import video
+    from ..harness.data import video
 
     try:
         if video.is_video(path):
@@ -175,7 +175,7 @@ def compute(name: str, set_name: str = "default") -> dict:
     from PIL import Image
 
     from . import folders as datasets, faces
-    from ..harness import video
+    from ..harness.data import video
     from ..harness.data import muted, scan
 
     root = datasets.folder(name)

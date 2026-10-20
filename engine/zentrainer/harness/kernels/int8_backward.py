@@ -53,7 +53,7 @@ def _hadamard(size: int, device, dtype) -> torch.Tensor:
 
 def input_grad(grad_2d: torch.Tensor, q: torch.Tensor, scale: torch.Tensor, group: int) -> torch.Tensor:
     """grad_out @ dequantized ConvRot weight, without dequantizing it. grad_2d (M, out) bf16."""
-    from .kernels.w8a16_backward import fused_w8a16_input_grad
+    from .w8a16_backward import fused_w8a16_input_grad
 
     # fp32 out of the kernel and through the rotation, rounded once at the end like the eager path
     g = fused_w8a16_input_grad(grad_2d.to(torch.bfloat16), q, scale, out_dtype=torch.float32)  # (M, in), rotated
@@ -72,7 +72,7 @@ def w8a8_input_grad(grad_2d: torch.Tensor, q: torch.Tensor, scale: torch.Tensor,
     if m <= 16 or n % 8 or k % 8:
         return None
     try:
-        from .kernels.w8a8_backward import TRITON_AVAILABLE, int8_matmul, quantize_rows
+        from .w8a8_backward import TRITON_AVAILABLE, int8_matmul, quantize_rows
     except Exception:
         TRITON_AVAILABLE = False
     if TRITON_AVAILABLE:  # two fused kernels (kernels/w8a8_backward.py), then the rotation in bf16

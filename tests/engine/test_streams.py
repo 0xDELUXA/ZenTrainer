@@ -7,7 +7,7 @@ import types
 import pytest
 import torch
 
-from zentrainer.harness.streams import Streams, first_stream
+from zentrainer.harness.data.streams import Streams, first_stream
 
 
 class _Nested:
@@ -313,7 +313,7 @@ def test_preview_adapter_only_while_sampling():
 def test_tread_routes_video_tokens_around_the_middle_blocks():
     import types as _t
 
-    from zentrainer.harness.tread import patches
+    from zentrainer.harness.memory.tread import patches
 
     n_blocks, N, C = 10, 40, 3
     layout = _t.SimpleNamespace(segments=[(0, 6, "text"), (6, 34, "video"), (34, 40, "audio")])
@@ -401,7 +401,7 @@ def test_edit_pairs_scan_and_reference_conditioning(tmp_path):
     from PIL import Image
 
     from zentrainer.harness.data import scan
-    from zentrainer.harness.edit import with_refs
+    from zentrainer.harness.data.edit import with_refs
 
     for name in ("a.png", "a_control.png", "a_control2.jpg", "b.png"):
         Image.new("RGB", (8, 8)).save(tmp_path / name)
@@ -421,7 +421,7 @@ def test_edit_pairs_scan_and_reference_conditioning(tmp_path):
 def test_grounded_template_keeps_the_encoders_own_system_prompt():
     from types import SimpleNamespace
 
-    from zentrainer.harness.edit import VISION, grounded_template, instruction
+    from zentrainer.harness.data.edit import VISION, grounded_template, instruction
 
     krea = "<|im_start|>system\nDescribe the image<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n"
     clip = SimpleNamespace(tokenizer=SimpleNamespace(llama_template=krea))
@@ -457,7 +457,7 @@ def test_w8a8_kernels_match_torch():
 
 
 def test_compiled_blocks_are_undone():
-    from zentrainer.harness.compile import compiled_blocks
+    from zentrainer.harness.kernels.compile import compiled_blocks
 
     class Net(torch.nn.Module):
         def __init__(self):
@@ -499,7 +499,7 @@ def test_failed_run_frames_let_go_of_their_tensors():
 def test_sharpest_frame_picks_the_detailed_one(tmp_path):
     import numpy as np
 
-    from zentrainer.harness import video
+    from zentrainer.harness.data import video
 
     frames = []
     rng = np.random.default_rng(0)
@@ -603,8 +603,8 @@ def _automagic3_run(cls, dtype, steps=30, **kw):
 
 
 def test_automagic3_batched_matches_the_vendored_step():
-    from zentrainer.harness.automagic3 import Automagic3
-    from zentrainer.harness.automagic3_batched import Automagic3Batched
+    from zentrainer.harness.optim.automagic3 import Automagic3
+    from zentrainer.harness.optim.automagic3_batched import Automagic3Batched
 
     # 12 steps: the sign window (8) fills and the lr vote runs; far longer and the toy's lr grows
     # until reduction-order rounding (~1e-7) compounds visibly
@@ -622,7 +622,7 @@ def test_automagic3_batched_matches_the_vendored_step():
 
 
 def test_automagic3_batched_bf16_trains():
-    from zentrainer.harness.automagic3_batched import Automagic3Batched
+    from zentrainer.harness.optim.automagic3_batched import Automagic3Batched
 
     ps, _ = _automagic3_run(Automagic3Batched, torch.bfloat16, steps=60)
     assert all(p.dtype == torch.bfloat16 and torch.isfinite(p).all() for p in ps)
@@ -712,7 +712,7 @@ def test_a_fit_that_slows_the_steps_is_undone(monkeypatch):
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="pinning needs CUDA")
 def test_offloaded_weights_get_pinned_copies(monkeypatch):
-    from zentrainer.harness import offload
+    from zentrainer.harness.memory import offload
 
     monkeypatch.setattr(offload, "PIN_RAM_SPARE", 0)
     m = torch.nn.Sequential(torch.nn.Linear(8, 8), torch.nn.Linear(8, 8))

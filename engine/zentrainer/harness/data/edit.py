@@ -143,7 +143,7 @@ def h3_reference_cond(clip, vae, audio_vae, text: str, inputs: list, width: int,
 
     from comfy_extras.nodes_minimax_h3 import MiniMaxH3ReferenceToVideo
 
-    from .data import IMAGE_EXTS, VIDEO_EXTS
+    from . import IMAGE_EXTS, VIDEO_EXTS
 
     images, videos, sounds, audios = {}, {}, {}, {}
     for p in map(Path, inputs):

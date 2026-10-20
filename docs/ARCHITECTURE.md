@@ -24,14 +24,15 @@ and calls ComfyUI **as a library** for everything else.
  │   harness/                                             │
  │     trainer.py    the loop: setup → steps → save       │
  │     models.py     comfy.sd loaders (non-dynamic copy)  │
- │     data.py       scan, buckets, cached VAE/CLIP encode│
+ │     data/         scan, buckets, cached VAE/CLIP encode│
  │     network.py    comfy.weight_adapter LoRA/LoHa/…     │
  │     denoiser.py   process_conds → apply_model          │
  │     objective.py  targets, timestep sampling, losses   │
- │     optim.py      optimizers + LR schedules            │
+ │     optim/        optimizers + LR schedules            │
  │     callbacks.py  metrics, checkpoints, samples        │
  │     control.py    pause/resume/stop/save/sample/set_lr │
- │     memory.py     grad checkpointing, attention pin    │
+ │     memory/       checkpointing, offload streams, TREAD│
+ │     kernels/      int8 backward, torch.compile         │
  │  comfy/  model mgmt, offload, quant ops, attention,    │
  │          model_sampling, samplers, folder_paths        │
  └────────────────────────────────────────────────────────┘

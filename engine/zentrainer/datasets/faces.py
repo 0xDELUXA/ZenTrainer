@@ -68,7 +68,7 @@ def detect(rgb: np.ndarray) -> list[dict]:
 
 def _frames(path: Path, n: int) -> list[np.ndarray]:
     """A picture, or n frames spread over a clip, as uint8 RGB."""
-    from ..harness import video
+    from ..harness.data import video
 
     if video.is_video(path):
         p = video.probe(path)

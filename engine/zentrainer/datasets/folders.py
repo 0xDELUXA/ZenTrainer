@@ -10,7 +10,7 @@ import re
 from pathlib import Path
 
 from .. import safeio
-from ..harness import video
+from ..harness.data import video
 from ..harness.data import IMAGE_EXTS, MASK_SUFFIXES, MEDIA_EXTS, SET_NAME, caption_path, caption_sets, find_mask, scan
 
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.\-]{0,99}$")

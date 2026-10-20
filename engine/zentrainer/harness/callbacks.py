@@ -18,7 +18,7 @@ import torch
 
 from .. import events
 from . import optim
-from .streams import first_stream
+from .data.streams import first_stream
 
 SAMPLE_HEADROOM = 6 * 1024 ** 3  # extra VRAM kept free while an offloaded model samples (see render)
 
@@ -423,7 +423,7 @@ class Samples(Callback):
                     it = self.items[i]
                     if it.control and not getattr(t, "h3", False):  # an edit sample: the picture to edit as the reference, at its own shape
                         ref, it = _control(t, it, comp)
-                        from .edit import with_refs
+                        from .data.edit import with_refs
 
                         how = getattr(t, "edit_method", None)
                         pos, neg = with_refs(pos, [ref], how), with_refs(neg, [ref], how)
@@ -442,7 +442,7 @@ class Samples(Callback):
                     img = vae.decode(first_stream(out))
                     img = img.reshape(-1, *img.shape[-3:])  # (frames, H, W, 3)
                     if t_lat:
-                        from . import video
+                        from .data import video
 
                         name = f"manual_{manual:03d}_{'base' if base else f'step{t.step:06d}'}.mp4" if manual is not None else f"step{t.step:06d}_{i:02d}.mp4"
                         video.write(Path(out_dir) / name, img, s.fps, _sound(t, out))
@@ -567,7 +567,7 @@ def _sample_text(t, prompt: str) -> str:
     text = prompt.replace("[trigger]", trig) if trig else prompt.replace("[trigger]", "")
     d = t.spec.dataset
     if d.edit and d.edit_template:
-        from .edit import instruction
+        from .data.edit import instruction
 
         text = instruction(text, d.edit_template)
     return text
@@ -595,7 +595,7 @@ def _special(t, it):
     path = _control_path(t, it.control)
     base = f"{path}|{path.stat().st_mtime_ns}"
     if getattr(t, "h3", False):
-        from . import edit
+        from .data import edit
 
         size = (it.width, it.height, it.frames)
         if d.edit:
@@ -608,7 +608,7 @@ def _special(t, it):
             return edit.h3_keyframe_cond(clip, t.models.vae, text, px, None, *size), None
         return f"h3first|{base}|{size}", first
     if d.edit_grounded:
-        from .edit import encode_grounded, grounding_pixels
+        from .data.edit import encode_grounded, grounding_pixels
 
         def grounded(clip, text, negative):
             px = [grounding_pixels(path)]
