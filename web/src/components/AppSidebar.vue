@@ -10,7 +10,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { activeRuns, latest, lossTrail, queue } from '@/stores/runs'
 import { activeCaptions, startCaptionSync } from '@/stores/captions'
 import { settings } from '@/stores/settings'
-import { comfyBehind, comfyOld, engineStale, restartEngine, restarting, startStatusSync } from '@/stores/status'
+import { comfyBehind, comfyOld, engineStale, restartEngine, restarting, startStatusSync, webBuildable, webNewer, webStale } from '@/stores/status'
 import { activeDownloads, fmtBytes, startDownloadSync } from '@/stores/downloads'
 import { disks, gb, memLatest, startSystemSync } from '@/stores/system'
 import { drawerOpen, toggleDrawer, unseenErrors } from '@/stores/logs'
@@ -106,12 +106,21 @@ const cap = computed(() => {
   return { job: cur, pct: total ? cur.done / total : 0, meta, more: list.length - 1 }
 })
 
-// ---- housekeeping: restart to load an update, or ComfyUI has one -----------------------
-const housekeeping = computed(() => !!(comfyOld.value || engineStale.value || comfyBehind.value))
+// ---- housekeeping: an update to load (rebuild the page, restart ComfyUI), or ComfyUI has one -
+const housekeeping = computed(() => !!(comfyOld.value || engineStale.value || webStale.value || webNewer.value || comfyBehind.value))
+const reload = () => location.reload()
 const trainingNow = computed(() => activeRuns.value.some((r) => r.status === 'training' || r.status === 'loading'))
-async function onRestart() {
-  if (trainingNow.value) return
-  if (!confirm('Restart ComfyUI to load the updated engine? It takes about a minute.')) return
+// what the square does: rebuild the page and/or restart ComfyUI, whichever is behind
+const update = computed(() => {
+  const what = [webStale.value && 'rebuild the web app', engineStale.value && 'restart ComfyUI to load the engine'].filter(Boolean).join(', then ')
+  if (engineStale.value && trainingNow.value) return { ok: false, title: 'An update is waiting: it loads once nothing is training' }
+  if (webStale.value && !webBuildable.value)
+    return { ok: false, title: 'The web app’s source changed (a pull?), but pnpm isn’t here to rebuild it: run `pnpm install && pnpm build` in web/' }
+  return { ok: true, title: `Updated code is on disk: ${what}`, confirm: `Update now: ${what}?${engineStale.value ? ' The restart takes about a minute.' : ''}` }
+})
+async function onUpdate() {
+  const u = update.value
+  if (!u.ok || !confirm(u.confirm)) return
   await restartEngine().catch((e) => alert(String((e as Error).message ?? e)))
 }
 
@@ -279,13 +288,16 @@ onUnmounted(() => {
         <template v-if="!collapsed || mobileOpen">
           <span v-if="comfyOld" class="sq warn" :title="comfyOld"><i class="mdi mdi-alert-outline" /></span>
           <button
-            v-else-if="engineStale"
+            v-else-if="engineStale || webStale"
             class="sq"
-            :disabled="trainingNow || restarting"
-            :title="restarting ? 'Restarting…' : trainingNow ? 'Updated engine code is waiting: restart once nothing is training' : 'The engine’s code changed since it started: restart ComfyUI to load it'"
-            @click="onRestart"
+            :disabled="!update.ok || restarting"
+            :title="restarting ? 'Updating…' : update.title"
+            @click="onUpdate"
           >
             <i :class="restarting ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-restart'" />
+          </button>
+          <button v-else-if="webNewer" class="sq" title="The web app was rebuilt: reload to see the new version" @click="reload()">
+            <i class="mdi mdi-refresh" />
           </button>
           <RouterLink v-else-if="comfyBehind" to="/settings" class="sq" :title="`ComfyUI update available: ${comfyBehind} commits behind upstream`" @click="emit('navigate')">
             <i class="mdi mdi-arrow-up-circle-outline" />

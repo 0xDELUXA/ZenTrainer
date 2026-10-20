@@ -71,6 +71,12 @@ export interface Health {
   }
   /** ComfyUI is older than ZenTrainer needs: the message says what to do */
   comfy_old?: string | null
+  /** when web/dist was built (changes when a rebuild lands) */
+  web_built?: number | null
+  /** the web source on disk is newer than the build (a pull: dist isn't in git) */
+  web_stale?: boolean
+  /** pnpm is here, so the engine can rebuild it */
+  web_buildable?: boolean
 }
 
 export const hostApi = {
@@ -82,5 +88,6 @@ export const hostApi = {
     call<{ freed: number; runs?: number }>('/storage/clean', { method: 'POST', body: JSON.stringify(body) }),
   loadedModels: () => call<{ models: LoadedModel[] }>('/system/models').then((r) => r.models),
   comfyui: (check = false) => call<ComfyVersion>(`/comfyui${check ? '?check=1' : ''}`),
+  buildWeb: () => call<Pick<Health, 'web_built' | 'web_stale'>>('/web/build', { method: 'POST' }),
   restart: (force = false) => call<{ ok: true }>('/restart', { method: 'POST', body: JSON.stringify({ force }) }),
 }

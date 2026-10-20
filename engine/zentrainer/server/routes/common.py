@@ -212,6 +212,19 @@ def _code_stale() -> bool:
     return any(p.stat().st_mtime > _LOADED_AT for p in root.rglob("*.py") if "__pycache__" not in p.parts)
 
 
+def _web_state() -> dict:
+    """The web app as built against its source on disk. web/dist isn't in git, so a pull brings new
+    source while the page stays the old build until it's rebuilt (`web_stale`). `web_built` changes
+    when a rebuild lands, so an open tab can offer to reload."""
+    web_root = WEB_DIST.parent
+    index = WEB_DIST / "index.html"
+    built = index.stat().st_mtime if index.is_file() else None
+    sources = [*(web_root / "src").rglob("*"), *(web_root / "public").rglob("*"),
+               *(web_root / n for n in ("index.html", "package.json", "pnpm-lock.yaml", "vite.config.ts"))]
+    newest = max((p.stat().st_mtime for p in sources if p.is_file()), default=0.0)
+    return {"web_built": built, "web_stale": built is not None and newest > built, "web_buildable": shutil.which("pnpm") is not None}
+
+
 def _capabilities() -> dict:
     from ...harness import optim
 

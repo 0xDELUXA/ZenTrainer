@@ -1,8 +1,10 @@
-"""This process and machine: health, themes, memory telemetry, disk use, ComfyUI's version, restart."""
+"""This process and machine: health, themes, memory telemetry, disk use, ComfyUI's version, restart,
+rebuilding the web app."""
 
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 from pathlib import Path
 
@@ -11,7 +13,7 @@ from aiohttp import web
 from ... import __version__, state
 from .. import system
 from ...harness import control
-from .common import _bad, _capabilities, _code_stale, _comfy_version, _exec_self, comfy_too_old
+from .common import WEB_DIST, _bad, _capabilities, _code_stale, _comfy_version, _exec_self, _web_state, comfy_too_old
 
 
 def register(server) -> None:
@@ -20,7 +22,7 @@ def register(server) -> None:
     @routes.get("/zentrainer/api/health")
     async def health(_request):
         return web.json_response({"version": __version__, "capabilities": _capabilities(), "stale": _code_stale(),
-                                  "comfy_old": comfy_too_old()})
+                                  "comfy_old": comfy_too_old(), **_web_state()})
 
     @routes.get("/zentrainer/api/themes")
     async def themes(_request):
@@ -101,6 +103,24 @@ def register(server) -> None:
         """This ComfyUI's version and commit, the pin in comfy.lock, and (with ?check=1)
         how far upstream has moved. The check fetches, so it only runs when asked."""
         return web.json_response(await asyncio.to_thread(_comfy_version, request.query.get("check") == "1"))
+
+    building = asyncio.Lock()
+
+    @routes.post("/zentrainer/api/web/build")
+    async def build_web(_request):
+        """Rebuild web/dist from the source on disk: after a pull, since dist isn't in git."""
+        pnpm = shutil.which("pnpm")
+        if not pnpm:
+            return _bad("pnpm isn't installed here: run `pnpm install && pnpm build` in web/", 501)
+        async with building:
+            # CI: pnpm never stops to ask (it would wait on a prompt nobody sees)
+            for args in (["install", "--frozen-lockfile"], ["build"]):
+                proc = await asyncio.create_subprocess_exec(pnpm, *args, cwd=WEB_DIST.parent, env={**os.environ, "CI": "1"},
+                                                            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+                out, _ = await proc.communicate()
+                if proc.returncode:
+                    return _bad(f"pnpm {args[0]} failed:\n{out.decode(errors='replace')[-2000:]}", 500)
+        return web.json_response({"ok": True, **_web_state()})
 
     @routes.post("/zentrainer/api/restart")
     async def restart(request):
