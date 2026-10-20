@@ -235,6 +235,27 @@ def test_queue_order_pause_and_persistence(tmp_path):
     assert Queue(tmp_path / "queue.json").snapshot()["order"] == ["a"]  # survives a restart
 
 
+def test_forward_only_attention_trains_with_pytorch(monkeypatch):
+    # comfy_kitchen_int8 (like sage) has no backward and refuses autocast's fp32 q/k beside a bf16 v:
+    # a run set to it (from before it was hidden in the form) trains with pytorch instead
+    import sys
+    import types
+
+    from zentrainer.harness.memory import attention_override
+
+    calls = []
+    mod = types.ModuleType("comfy.ldm.modules.attention")
+    mod.get_attention_function = lambda name: (lambda *a, **k: calls.append(name))
+    for name in ("comfy", "comfy.ldm", "comfy.ldm.modules"):
+        monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
+    monkeypatch.setitem(sys.modules, "comfy.ldm.modules.attention", mod)
+
+    attention_override("comfy_kitchen_int8")["optimized_attention_override"](None, 1, 2, 3)
+    attention_override("xformers")["optimized_attention_override"](None, 1, 2, 3)
+    assert calls == ["pytorch", "xformers"]
+    assert attention_override("default") == {}
+
+
 def test_checkpointing_wraps_each_block_not_the_whole_model():
     import torch.nn as nn
 

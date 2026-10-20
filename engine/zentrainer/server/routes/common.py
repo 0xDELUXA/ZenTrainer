@@ -232,8 +232,10 @@ def _capabilities() -> dict:
     try:
         from comfy.ldm.modules.attention import REGISTERED_ATTENTION_FUNCTIONS
 
+        from ...harness.memory import TRAINABLE_ATTENTION
+
         # Only backends with a backward pass are offered for training.
-        caps["train_attention"] = [n for n in REGISTERED_ATTENTION_FUNCTIONS if n not in ("flash", "sage", "sage3")]
+        caps["train_attention"] = [n for n in REGISTERED_ATTENTION_FUNCTIONS if n in TRAINABLE_ATTENTION]
         caps["infer_attention"] = list(REGISTERED_ATTENTION_FUNCTIONS)
     except Exception:
         pass

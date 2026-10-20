@@ -93,16 +93,24 @@ def gradient_checkpointing(diffusion_model, enabled: bool, depth: int, offloadin
             unpatch(m)
 
 
-def attention_override(backend: str):
-    """transformer_options entry routing every attention call to `backend`.
+# Attention backends with a backward pass. The rest ComfyUI registers are forward-only custom ops
+# (flash, sage, sage3, comfy_kitchen_int8), and comfy_kitchen_int8 also refuses the fp32 q/k that
+# autocast's qk-norms hand it beside a bf16 v ("q, k, and v must have the same dtype"). An allow-list,
+# so a backend ComfyUI adds later isn't offered for training until it's known to train.
+TRAINABLE_ATTENTION = ("pytorch", "xformers", "sub_quad", "split")
 
-    Flash (a custom op with no registered autograd) and sage are forward-only, so a
-    server launched with --use-sage-attention would fail on the first backward.
-    """
+
+def attention_override(backend: str):
+    """transformer_options entry routing every attention call to `backend`, so a server launched
+    with --use-sage-attention (or --use-ck-attention) still trains. A backend that can't train (a
+    preset or an older run) falls back to pytorch."""
     if not backend or backend == "default":
         return {}
     from comfy.ldm.modules.attention import get_attention_function
 
+    if backend not in TRAINABLE_ATTENTION:
+        logging.warning("[ZenTrainer] attention %r has no backward pass: training with pytorch", backend)
+        backend = "pytorch"
     fn = get_attention_function(backend)
 
     def override(_func, *args, **kwargs):
