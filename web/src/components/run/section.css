@@ -1,0 +1,19 @@
+/* The run page's card headers: a title, a muted line beside it, then whatever the card puts
+   at its right. Each of the page's parts includes this scoped, before its own rules. */
+.sec-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 12px;
+  min-height: 20px;
+}
+.sec-title {
+  font-weight: 650;
+}
+.sec-sub {
+  font-size: 11px;
+  color: var(--zen-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
