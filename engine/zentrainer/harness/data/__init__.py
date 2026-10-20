@@ -7,6 +7,11 @@ re-run on the same data skips straight to training.
 Masks (optional, white = learn, black = ignore) are found per image as
 `_masks/<stem>.<ext>`, `<stem>-masklabel.<ext>` (OneTrainer) or `<stem>.mask.<ext>`, get
 the image's exact resize/crop, and are stored at latent resolution for the loss.
+
+Control sets (edit training's input pictures) are named layers beside the pictures, so a dataset
+stays a dataset: `_controls/<set>/<stem>.<ext>` is a picture's input in that set, `<stem>.2.<ext>`
+its second. Older `<stem>_control.<ext>` files beside the picture are the set "control". A run
+picks the sets it trains from (DatasetSpec.control_sets).
 """
 
 from __future__ import annotations
@@ -46,7 +51,8 @@ class Item:
     repeats: int = 1
     mask: Path | None = None
     captions: dict[str, str] = field(default_factory=dict)  # set name -> text, "default" included
-    controls: list[Path] = field(default_factory=list)  # edit pairs: the input picture(s)
+    controls: list[Path] = field(default_factory=list)  # the input picture(s) this run uses (pick_controls)
+    control_sets: dict[str, list[Path]] = field(default_factory=dict)  # every set's input(s), by set name
 
 
 @dataclass
@@ -105,6 +111,45 @@ def is_control_file(p: Path) -> bool:
 CONTROL_EXTS = MEDIA_EXTS | {".wav", ".flac", ".mp3", ".m4a", ".ogg", ".opus", ".aac"}
 
 
+CONTROLS_DIR = "_controls"
+LEGACY_SET = "control"
+
+
+def control_index(folder: Path) -> dict[str, dict[str, Path]]:
+    """A folder's control sets: set name -> {file stem ("a", "a.2"): path}, read once per folder."""
+    out: dict[str, dict[str, Path]] = {}
+    base = folder / CONTROLS_DIR
+    if not base.is_dir():
+        return out
+    for d in sorted(base.iterdir()):
+        if d.is_dir() and SET_NAME.match(d.name):
+            out[d.name] = {f.stem: f for f in sorted(d.iterdir()) if f.is_file() and f.suffix.lower() in CONTROL_EXTS}
+    return out
+
+
+def find_control_sets(img: Path, index: dict[str, dict[str, Path]] | None = None) -> dict[str, list[Path]]:
+    """A picture's inputs in every control set: <stem>, then <stem>.2, <stem>.3... in the set."""
+    index = control_index(img.parent) if index is None else index
+    out = {}
+    legacy = find_controls(img)
+    if legacy:
+        out[LEGACY_SET] = legacy
+    for name, files in index.items():
+        hits = []
+        for n in ["", *(f".{k}" for k in range(2, 10))]:
+            if (hit := files.get(img.stem + n)) is None:
+                break
+            hits.append(hit)
+        if hits:
+            out.setdefault(name, hits)  # _control files beside the picture win over a _controls/control folder
+    return out
+
+
+def pick_controls(item: Item, sets: list[str]) -> list[Path]:
+    """The inputs a run trains from: each chosen set's, in the sets' order."""
+    return [p for s in sets for p in item.control_sets.get(s, [])]
+
+
 def find_controls(img: Path) -> list[Path]:
     """An edit pair's input(s): <stem>_control, then _control2, _control3... Pictures for every
     model; videos and audio too for MiniMax H3's references."""
@@ -140,6 +185,7 @@ def scan(root: Path, caption_ext: str = ".txt", warn: bool = True) -> list[Item]
         head = d.name.split("_", 1)[0] if d != root else ""
         if head.isdigit() and "_" in d.name:
             repeats = max(1, int(head))
+        index = control_index(d)
         for f in sorted(files):
             p = d / f
             if p.suffix.lower() not in MEDIA_EXTS or is_mask_file(p) or is_control_file(p):
@@ -147,7 +193,8 @@ def scan(root: Path, caption_ext: str = ".txt", warn: bool = True) -> list[Item]
             caps = caption_sets(p, caption_ext)
             if "default" not in caps and warn:
                 logging.warning("[ZenTrainer] no caption for %s; training it with an empty caption", p.name)
-            items.append(Item(p, caps.get("default", ""), repeats, find_mask(p), caps, find_controls(p)))
+            sets = find_control_sets(p, index)
+            items.append(Item(p, caps.get("default", ""), repeats, find_mask(p), caps, sets.get(LEGACY_SET, []), sets))
     return items
 
 
@@ -260,6 +307,13 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
             logging.info("[ZenTrainer] %d muted picture(s) sit out (caption set %s)", before - len(items), ", ".join(used))
         if not items:
             raise FileNotFoundError(f"every picture in {root} is muted in {', '.join(used)}")
+    for it in items:  # the input pictures this run trains from, in its control sets' order
+        it.controls = pick_controls(it, spec.control_sets) if spec.edit else []
+    if spec.edit and len(spec.control_sets) > 1:
+        partial = sum(1 for it in items if it.controls and not all(it.control_sets.get(c) for c in spec.control_sets))
+        if partial:
+            logging.warning("[ZenTrainer] %d picture(s) have inputs in only some of the control sets %s: "
+                            "they train with the inputs they have", partial, ", ".join(spec.control_sets))
     variants: list[list[str]] = []
     for it in items:  # pick each image's caption(s), trigger applied, before the cache key
         rel = str(it.path.relative_to(root))

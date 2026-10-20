@@ -86,26 +86,46 @@ export function useRunForm() {
   const runPresets = ref<Preset<Partial<TrainSpec>>[]>([])
   const promptSets = ref<Preset<Partial<TrainSpec['samples']>>[]>([])
 
-  // ---- edit pairs: the chosen dataset's <name>_control pictures ---------------------------------
-  const pairCount = computed(() => datasets.value.find((d) => d.folder === spec.dataset.folder)?.pairs ?? 0)
+  // ---- edit inputs: the chosen dataset's control sets (named layers of input pictures) ----------
+  // the sets on offer, and how many pictures have an input in each
+  const controlCounts = computed(() => datasets.value.find((d) => d.folder === spec.dataset.folder)?.control_sets ?? {})
+  const chosenInputs = computed(() => spec.dataset.control_sets ?? [])
+  const pairCount = computed(() => Math.max(0, ...chosenInputs.value.map((c) => controlCounts.value[c] ?? 0)))
+  // a picture's inputs in this run: each chosen set's, in order
+  const runInputs = (it: DatasetItem) => chosenInputs.value.flatMap((c) => it.control_sets?.[c] ?? [])
+  function toggleInput(set: string) {
+    const now = chosenInputs.value
+    spec.dataset.control_sets = now.includes(set) ? now.filter((c) => c !== set) : [...now, set]
+    spec.dataset.edit = spec.dataset.control_sets.length > 0
+  }
   const pairItems = ref<DatasetItem[]>([])
   watch(
-    () => [spec.dataset.folder, spec.dataset.edit] as const,
-    async ([folder, edit]) => {
+    () => [spec.dataset.folder, chosenInputs.value.join(',')] as const,
+    async ([folder, sets]) => {
       pairItems.value = []
-      if (!folder || !edit) return
+      if (!folder || !sets) return
       try {
-        pairItems.value = (await engine.dataset(folder)).items.filter((it) => it.controls?.length)
+        pairItems.value = (await engine.dataset(folder)).items.filter((it) => runInputs(it).length)
       } catch {
         // the dataset moved: nothing to pick from
       }
     },
     { immediate: true },
   )
-  // a dataset of pairs is an edit run unless turned off
-  watch(pairCount, (n, before) => {
-    if (n && !before && !resuming.value) spec.dataset.edit = true
+  // a dataset with old-style <name>_control pairs beside its pictures is an edit run unless turned off;
+  // control sets in _controls/ are layers a run opts into
+  watch(controlCounts, (c, before) => {
+    if (c.control && !before?.control && !resuming.value && !chosenInputs.value.length) toggleInput('control')
   })
+  // another dataset: keep only the sets it has
+  watch(
+    () => spec.dataset.folder,
+    (folder, was) => {
+      if (was === undefined || folder === was || !chosenInputs.value.length) return
+      spec.dataset.control_sets = chosenInputs.value.filter((c) => c in controlCounts.value)
+      spec.dataset.edit = spec.dataset.control_sets.length > 0
+    },
+  )
 
   // ---- editing a run that exists ------------------------------------------------------------
   const editing = ref<string | null>(null)
@@ -158,6 +178,8 @@ export function useRunForm() {
         error.value = "That run can't be loaded to edit."
       }
     }
+    // a run from before control sets trained edits from its <name>_control files: the "control" set
+    if (spec.dataset.edit && !spec.dataset.control_sets?.length) spec.dataset.control_sets = ['control']
     // "Train more" on a checkpoint: continue from that LoRA
     if (typeof route.query.init === 'string' && route.query.init) spec.network.init_from = route.query.init
     // a new run (not a duplicate) starts from the remembered saving choices
@@ -245,6 +267,7 @@ export function useRunForm() {
   return {
     spec, loraPlaces, choices, modelMissing, sampleSuggestion, profile, familyId,
     datasets, optimizers, trainAttention, runPresets, promptSets, pairCount, pairItems,
+    controlCounts, chosenInputs, runInputs, toggleInput,
     editing, retrying, resuming, resumeStep, error,
     applied, applyPreset, savePreset, isVideoModel, stage0, dataset, opt, epochs, modelLabel, noise,
   }

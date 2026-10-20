@@ -46,10 +46,14 @@ class DatasetSpec:
     # pixels, sides multiples of bucket_step. Off = center-crop squares.
     buckets: bool = True
     bucket_step: int = 64
-    # Edit training: each image's <name>_control picture is the input the model edits from
-    # (passed as reference latents), the caption is the instruction. Models that take reference
-    # images (Flux 3 Klein, Flux 2, Kontext, Qwen Image Edit...).
+    # Edit training: each image's input picture(s) from the chosen control sets are what the model
+    # edits from (passed as reference latents), the caption is the instruction. Models that take
+    # reference images (Flux 3 Klein, Flux 2, Kontext, Qwen Image Edit...).
     edit: bool = False
+    # Control sets, in order: named layers of input pictures beside the dataset
+    # (_controls/<set>/<stem>.<ext>; older <stem>_control files are the "control" set). Several
+    # sets give each image several inputs. Any set turns edit on; edit with none means "control".
+    control_sets: list[str] = field(default_factory=list)
     # how the input picture joins the sequence: "" = the model's own way ("index" for models
     # without one, like Krea 2), or "index", "offset", "index_timestep_zero"
     edit_method: str = ""
@@ -387,6 +391,12 @@ class TrainSpec:
             raise SpecError("dataset.edit_method is one of index, offset, index_timestep_zero (or empty for the model's own)")
         if not 0.0 <= self.memory.tread_steps <= 1.0:
             raise SpecError("memory.tread_steps is a share between 0 and 1")
+        if any(not isinstance(c, str) or not CONTROL_SET_NAME.match(c) for c in self.dataset.control_sets):
+            raise SpecError("dataset.control_sets are set names: lowercase letters, digits, - and _")
+        if self.dataset.control_sets:
+            self.dataset.edit = True
+        elif self.dataset.edit:
+            self.dataset.control_sets = ["control"]  # specs from before control sets: the _control files
         if self.dataset.keyframes not in ("", "first", "first_last"):
             raise SpecError("dataset.keyframes is first, first_last or empty")
         if self.dataset.edit_template and "{}" not in self.dataset.edit_template:
@@ -414,6 +424,10 @@ class TrainSpec:
 
 class SpecError(ValueError):
     pass
+
+
+# a control set's name, as caption sets' (harness/data SET_NAME)
+CONTROL_SET_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,23}$")
 
 
 def _choice(name: str, value: str, options: tuple[str, ...]) -> None:

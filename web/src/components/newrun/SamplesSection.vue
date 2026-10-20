@@ -8,7 +8,7 @@ import SamplePromptList from '@/components/SamplePromptList.vue'
 import { downloadFor, fmtBytes } from '@/stores/downloads'
 import { items, merge, useRunFormContext } from './form'
 
-const { spec, choices, sampleSuggestion, promptSets, pairItems, isVideoModel } = useRunFormContext()
+const { spec, choices, sampleSuggestion, promptSets, pairItems, runInputs, isVideoModel } = useRunFormContext()
 
 const advanced = reactive({ samples: false })
 const usingSuggestion = computed(
@@ -32,10 +32,10 @@ const insertTrigger = () => {
 }
 // edit pairs: a sample's input picture comes from the dataset's pairs
 const controlOptions = computed(() =>
-  pairItems.value.flatMap((it) => (it.controls ?? []).map((c) => ({ value: c, thumb: thumbUrl(spec.dataset.folder, c, 128) }))),
+  pairItems.value.flatMap((it) => runInputs(it).map((c) => ({ value: c, thumb: thumbUrl(spec.dataset.folder, c, 128) }))),
 )
 function samplesFromPairs() {
-  spec.samples.prompts = pairItems.value.slice(0, 2).map((it) => ({ prompt: it.caption, control: it.controls![0] }))
+  spec.samples.prompts = pairItems.value.slice(0, 2).map((it) => ({ prompt: it.caption, control: runInputs(it)[0] }))
 }
 
 // ---- prompt sets ---------------------------------------------------------------------------

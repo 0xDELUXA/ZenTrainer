@@ -6,7 +6,7 @@ import { computed } from 'vue'
 import { thumbUrl, type DatasetInfo, type TrainSpec } from '@/api/engine'
 import { items, useRunFormContext } from './form'
 
-const { spec, choices, datasets, dataset, pairCount, stage0, resuming } = useRunFormContext()
+const { spec, choices, datasets, dataset, pairCount, stage0, resuming, controlCounts, chosenInputs, toggleInput } = useRunFormContext()
 
 const NK2E_TEMPLATE =
   'Make the following edit to the reference image, changing only what is requested and keeping everything else identical: {}'
@@ -111,8 +111,27 @@ const VIDEO_MODES: [TrainSpec['dataset']['video_mode'], string][] = [
     <ZenField label="Caption dropout" stack tip="Share of steps with an empty caption">
       <ZenNumber v-model="spec.dataset.caption_dropout" :min="0" :max="1" :step="0.05" :precision="2" />
     </ZenField>
-    <ZenField label="Edit training" stack :tip="`Each image's <name>_control picture is the input the model edits from; the caption is the instruction. For models that take reference images (Flux 3 Klein, Flux 2, Kontext, Qwen Image Edit)${pairCount ? `. This dataset has ${pairCount} pairs` : ''}`">
-      <div class="sw-row"><ZenSwitch :model-value="!!spec.dataset.edit" @update:model-value="spec.dataset.edit = $event" /><span class="sw-state">{{ spec.dataset.edit ? `On · ${pairCount} pairs` : 'Off' }}</span></div>
+    <ZenField
+      label="Edit inputs"
+      stack
+      tip="Edit training: pick an input set (made on the dataset's page) and each picture's input there is what the model edits from; the caption is the instruction. Several sets give each picture several inputs, in the order picked. None: ordinary training. For models that take reference images (Flux 3 Klein, Flux 2, Kontext, Qwen Image Edit)"
+    >
+      <div class="input-chips">
+        <button
+          v-for="(n, c) in controlCounts"
+          :key="c"
+          class="chip-btn"
+          :class="{ on: chosenInputs.includes(c) }"
+          :title="`${n} picture${n === 1 ? '' : 's'} with an input in “${c}”`"
+          @click="toggleInput(String(c))"
+        >
+          <span v-if="chosenInputs.length > 1 && chosenInputs.includes(c)" class="mono">{{ chosenInputs.indexOf(c) + 1 }}</span>
+          {{ c }} · {{ n }}
+        </button>
+        <span v-if="!Object.keys(controlCounts).length" class="muted small">None: this dataset has no input sets</span>
+        <span v-else-if="!chosenInputs.length" class="muted small">Off: ordinary training</span>
+        <span v-else class="muted small">{{ pairCount }} pair{{ pairCount === 1 ? '' : 's' }}</span>
+      </div>
     </ZenField>
     <template v-if="spec.dataset.edit">
       <ZenField label="Instruction template" stack tip="Wraps every instruction ({} is the caption), in training and samples alike. Training on top of NK2E? Use its template: its LoRA learned wrapped instructions">
@@ -181,6 +200,14 @@ const VIDEO_MODES: [TrainSpec['dataset']['video_mode'], string][] = [
 
 <style scoped src="./form.css"></style>
 <style scoped>
+.input-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  min-height: 30px;
+}
+
 .video-opts {
   margin-top: 16px;
   padding-top: 14px;

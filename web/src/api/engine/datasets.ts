@@ -40,8 +40,10 @@ export interface DatasetInfo {
   masked?: number
   /** the last stats snapshot's 0-1 scores (captions, consistency, resolution, uniqueness, faces|balance) */
   health?: { scores: Record<string, number>; set: string } | null
-  /** images with a <name>_control input picture (edit pairs) */
+  /** pictures with an input in any control set (edit pairs) */
   pairs?: number
+  /** control sets (edit training's inputs) and how many pictures have an input in each */
+  control_sets?: Record<string, number>
   /** total size of the media files */
   bytes?: number
   /** newest media file's mtime (s) */
@@ -92,8 +94,8 @@ export interface DatasetItem {
   captions: Record<string, string>
   /** caption sets it's muted in: kept, but not trained on in those sets */
   muted?: string[]
-  /** edit pairs: the input picture(s), dataset-relative */
-  controls?: string[]
+  /** edit training's input picture(s) per control set, dataset-relative */
+  control_sets?: Record<string, string[]>
   kind?: 'video'
   fps?: number | null
   frames?: number | null
@@ -193,7 +195,8 @@ export const datasetsApi = {
       body: JSON.stringify({ link, file, id }),
     }),
   datasets: () => call<{ datasets: DatasetInfo[] }>('/datasets').then((r) => r.datasets),
-  dataset: (name: string) => call<{ folder: string; items: DatasetItem[]; sets: string[]; settings?: DatasetSettings }>(dsPath(name)),
+  dataset: (name: string) =>
+    call<{ folder: string; items: DatasetItem[]; sets: string[]; control_sets: string[]; settings?: DatasetSettings }>(dsPath(name)),
   datasetSettings: (name: string, changes: Partial<DatasetSettings>) =>
     call<DatasetSettings>(`${dsPath(name)}/settings`, { method: 'PUT', body: JSON.stringify(changes) }),
   createDataset: (name: string) => call<{ ok: true }>('/datasets', { method: 'POST', body: JSON.stringify({ name }) }),
@@ -219,4 +222,21 @@ export const datasetsApi = {
     if (!res.ok) throw new EngineError(res.statusText, res.status, null)
     return res.json()
   },
+  // control sets: edit training's input pictures, a named layer per set
+  createControlSet: (name: string, set: string) => call<{ ok: true }>(ctlPath(name, set), { method: 'POST' }),
+  /** files named like the pictures they're the input of (`<name>.png`, `<name>.2.png` for a second) */
+  async uploadControls(name: string, set: string, files: File[]): Promise<{ saved: string[]; errors: string[] }> {
+    const form = new FormData()
+    for (const f of files) form.append('file', f, f.name)
+    const res = await fetch(`/zentrainer/api${ctlPath(name, set)}`, { method: 'POST', body: form })
+    if (!res.ok) throw new EngineError(res.statusText, res.status, null)
+    return res.json()
+  },
+  deleteControl: (name: string, set: string, path: string) =>
+    call<{ ok: true }>(`${ctlPath(name, set)}?path=${encodeURIComponent(path)}`, { method: 'DELETE' }),
+  deleteControlSet: (name: string, set: string) => call<{ deleted: number }>(ctlPath(name, set), { method: 'DELETE' }),
+  renameControlSet: (name: string, set: string, to: string) =>
+    call<{ moved: number }>(`${ctlPath(name, set)}/rename`, { method: 'POST', body: JSON.stringify({ to }) }),
 }
+
+const ctlPath = (name: string, set: string) => `${dsPath(name)}/controls/${encodeURIComponent(set)}`

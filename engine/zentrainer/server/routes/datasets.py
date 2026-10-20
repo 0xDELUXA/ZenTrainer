@@ -309,6 +309,39 @@ def register(server) -> None:
         name, rel = request.match_info["name"], request.query.get("path", "")
         return await _ds(lambda: datasets.delete(name, rel) or {"ok": True})
 
+    # ---- control sets: edit training's input pictures, a named layer per set ------------------
+    @routes.post("/zentrainer/api/datasets/{name}/controls/{set}")
+    async def control_set_create_or_upload(request):
+        """Upload input pictures into a set (each matched to its picture by name), or with no
+        files, just make the set."""
+        name, set_name = request.match_info["name"], request.match_info["set"]
+        if not request.content_type.startswith("multipart/"):
+            return await _ds(lambda: datasets.create_control_set(name, set_name) or {"ok": True})
+        saved, errors = [], []
+        reader = await request.multipart()
+        async for part in reader:
+            if part.filename:
+                data = await part.read(decode=False)
+                try:
+                    saved.append(await asyncio.to_thread(datasets.save_control, name, set_name, part.filename, bytes(data)))
+                except (datasets.DatasetError, FileNotFoundError) as e:
+                    errors.append(str(e))
+        return web.json_response({"saved": saved, "errors": errors})
+
+    @routes.delete("/zentrainer/api/datasets/{name}/controls/{set}")
+    async def control_set_delete(request):
+        """One input (?path=) or, without one, the whole set."""
+        name, set_name, rel = request.match_info["name"], request.match_info["set"], request.query.get("path")
+        if rel:
+            return await _ds(lambda: datasets.delete_control(name, set_name, rel) or {"ok": True})
+        return await _ds(lambda: {"deleted": datasets.delete_control_set(name, set_name)})
+
+    @routes.post("/zentrainer/api/datasets/{name}/controls/{set}/rename")
+    async def control_set_rename(request):
+        name, set_name = request.match_info["name"], request.match_info["set"]
+        to = (await request.json()).get("to", "")
+        return await _ds(lambda: {"moved": datasets.rename_control_set(name, set_name, to)})
+
     @routes.post("/zentrainer/api/datasets/{name}/upload")
     async def upload(request):
         name = request.match_info["name"]

@@ -4,7 +4,7 @@
 import { ZenTip } from '@nynxz/zenkit-ui'
 import { fileInfo, pct, secs, useDatasetContext } from './context'
 
-const { zoom, fit, showMasks, activeSet, cap, selected, isMuted, setMuted, imageFlags, faceOf, faceIssue, faceNote, shown, toggleSelect, onItemClick, onItemMenu, full, thumb, thumbSize } = useDatasetContext()
+const { zoom, inputs, fit, showMasks, activeSet, cap, selected, isMuted, setMuted, imageFlags, faceOf, faceIssue, faceNote, shown, toggleSelect, onItemClick, onItemMenu, full, thumb, thumbSize } = useDatasetContext()
 </script>
 
 <template>
@@ -28,7 +28,7 @@ const { zoom, fit, showMasks, activeSet, cap, selected, isMuted, setMuted, image
           :style="{ objectFit: fit, maskImage: `url(${thumb({ path: it.mask }, thumbSize)})`, WebkitMaskImage: `url(${thumb({ path: it.mask }, thumbSize)})`, maskSize: fit, WebkitMaskSize: fit }"
         />
         <!-- an edit pair: its input picture in the corner (the big one is the target) -->
-        <img v-if="it.controls?.length" :src="thumb({ path: it.controls[0]! }, 256)" loading="lazy" alt="" class="control-inset" :title="`Input: ${it.controls.join(', ')}`" />
+        <img v-if="inputs(it).length" :src="thumb({ path: inputs(it)[0]! }, 256)" loading="lazy" alt="" class="control-inset" :title="`Input: ${inputs(it).join(', ')}`" />
         <span class="badges">
           <span v-if="it.mask" class="badge" :class="{ warn: it.mask_mismatch }" :title="it.mask_mismatch ? 'This mask is a different shape from its image: it won\'t line up' : `Masked: ${pct(it.mask_coverage)} trains at full weight`">
             <i :class="it.mask_mismatch ? 'mdi mdi-alert-outline' : 'mdi mdi-layers-outline'" /> {{ pct(it.mask_coverage) }}

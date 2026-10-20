@@ -11,7 +11,8 @@ from pathlib import Path
 
 from .. import safeio
 from ..harness.data import video
-from ..harness.data import IMAGE_EXTS, MASK_SUFFIXES, MEDIA_EXTS, SET_NAME, caption_path, caption_sets, find_mask, scan
+from ..harness.data import (CONTROL_EXTS, CONTROLS_DIR, IMAGE_EXTS, MASK_SUFFIXES, MEDIA_EXTS, SET_NAME, caption_path,
+                            caption_sets, find_control_sets, find_mask, glob_escape, scan)
 
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.\-]{0,99}$")
 
@@ -56,7 +57,8 @@ def summary() -> list[dict]:
             "folder": d.name,
             "images": len(items),
             "masked": sum(1 for i in items if getattr(i, "mask", None)),
-            "pairs": sum(1 for i in items if getattr(i, "controls", None)),
+            "pairs": sum(1 for i in items if i.control_sets),
+            "control_sets": control_counts(items),
             "health": _health(d.name),
             "bytes": sum(st.st_size for st in stats),
             "modified": max((st.st_mtime for st in stats), default=0),
@@ -140,7 +142,8 @@ def items(name: str, caption_ext: str = ".txt") -> dict:
             "bytes": it.path.stat().st_size,
             "mask": str(it.mask.relative_to(d)) if it.mask else None,
             "captions": it.captions,
-            "controls": [str(c.relative_to(d)) for c in it.controls],  # edit pairs: the input picture(s)
+            # edit training's inputs, per control set
+            "control_sets": {k: [str(c.relative_to(d)) for c in v] for k, v in it.control_sets.items()},
             "muted": sorted(s for s, paths in mutes.items() if str(it.path.relative_to(d)) in paths),
         })
         if video.is_video(it.path):
@@ -152,7 +155,8 @@ def items(name: str, caption_ext: str = ".txt") -> dict:
             # a mask is stretched to its image: a different shape means it won't line up
             rows[-1]["mask_mismatch"] = bool(w and h and abs(mw / mh - w / h) > 0.02)
     sets = sorted({s for r in rows for s in r["captions"]} | {"default"}, key=lambda s: (s != "default", s))
-    return {"folder": name, "items": rows, "sets": sets, "settings": get_settings(name)}
+    controls = sorted({c for r in rows for c in r["control_sets"]} | set(_empty_control_sets(d)))
+    return {"folder": name, "items": rows, "sets": sets, "control_sets": controls, "settings": get_settings(name)}
 
 
 def set_muted(name: str, set_name: str, paths: list[str], on: bool) -> dict[str, list[str]]:
@@ -259,6 +263,116 @@ def delete(name: str, rel: str, caption_ext: str = ".txt") -> None:
             cap.unlink(missing_ok=True)
     if mask:
         mask.unlink(missing_ok=True)
+    for inputs in find_control_sets(img).values():  # its input pictures go with it
+        for c in inputs:
+            c.unlink(missing_ok=True)
+
+
+# ---- control sets: named layers of input pictures for edit training (harness/data) ----------------
+
+def control_counts(items) -> dict[str, int]:
+    """How many pictures have an input in each control set."""
+    out: dict[str, int] = {}
+    for it in items:
+        for k in it.control_sets:
+            out[k] = out.get(k, 0) + 1
+    return dict(sorted(out.items()))
+
+
+def _empty_control_sets(d: Path) -> list[str]:
+    """Sets made but not filled yet (a folder under _controls), so they show up to upload into."""
+    base = d / CONTROLS_DIR
+    return [p.name for p in base.iterdir() if p.is_dir() and SET_NAME.match(p.name)] if base.is_dir() else []
+
+
+def _control_set(name: str) -> str:
+    if not SET_NAME.match(name or ""):
+        raise DatasetError(f"bad control set name {name!r}: lowercase letters, digits, - and _")
+    return name
+
+
+def _input_name(stem: str, n: int) -> str:
+    return stem if n == 1 else f"{stem}.{n}"
+
+
+def create_control_set(name: str, set_name: str) -> None:
+    (folder(name) / CONTROLS_DIR / _control_set(set_name)).mkdir(parents=True, exist_ok=True)
+
+
+def save_control(name: str, set_name: str, filename: str, data: bytes) -> str:
+    """An input picture for a control set, matched to its picture by name: `<stem>.<ext>` is the
+    input of the picture `<stem>`, `<stem>.2.<ext>` its second. Stored beside that picture as
+    `_controls/<set>/<stem>.<ext>`, replacing the input it had there."""
+    _control_set(set_name)
+    p = Path(Path(filename).name)
+    if p.suffix.lower() not in CONTROL_EXTS or p.name.startswith("."):
+        raise DatasetError(f"{p.name!r}: inputs are images, videos or audio")
+    d = folder(name)
+    stem, n = p.stem, 1
+    if (m := re.fullmatch(r"(.+)\.([2-9])", stem)) and not any(i.path.stem == stem for i in scan(d, warn=False)):
+        stem, n = m.group(1), int(m.group(2))
+    owners = [i.path for i in scan(d, warn=False) if i.path.stem == stem]
+    if not owners:
+        raise DatasetError(f"{p.name!r}: no picture called {stem!r} in this dataset to be its input")
+    if len({o.parent for o in owners}) > 1:
+        raise DatasetError(f"{p.name!r}: pictures called {stem!r} sit in several folders; rename one first")
+    dest = owners[0].parent / CONTROLS_DIR / set_name
+    dest.mkdir(parents=True, exist_ok=True)
+    for old in dest.glob(f"{glob_escape(_input_name(stem, n))}.*"):
+        if old.stem == _input_name(stem, n):
+            old.unlink()
+    target = dest / f"{_input_name(stem, n)}{p.suffix.lower()}"
+    safeio.write_bytes(target, data)
+    return str(target.relative_to(d))
+
+
+def delete_control(name: str, set_name: str, rel: str) -> None:
+    """One input picture out of a set (the picture itself stays)."""
+    d = folder(name)
+    p = _inside(d, rel)
+    owned = any(p in v for it in scan(d, warn=False) for k, v in it.control_sets.items() if k == set_name)
+    if not owned or not p.is_file():
+        raise DatasetError(f"{rel!r} isn't an input in control set {set_name!r}")
+    p.unlink()
+
+
+def _set_inputs(d: Path, set_name: str) -> list[tuple[Path, int, Path]]:
+    """(picture, input number, input file) for every input in a set."""
+    return [(it.path, k + 1, c) for it in scan(d, warn=False) for k, c in enumerate(it.control_sets.get(set_name, []))]
+
+
+def delete_control_set(name: str, set_name: str) -> int:
+    """A whole control set, every input in it (the old <stem>_control files too, for "control")."""
+    d = folder(name)
+    inputs = _set_inputs(d, _control_set(set_name))
+    for _, _, c in inputs:
+        c.unlink(missing_ok=True)
+    for base in d.rglob(CONTROLS_DIR):
+        sub = base / set_name
+        if sub.is_dir() and not any(sub.iterdir()):
+            sub.rmdir()
+    return len(inputs)
+
+
+def rename_control_set(name: str, old: str, new: str) -> int:
+    """Rename a set: its inputs move to _controls/<new>/ (the old <stem>_control files of
+    "control" move too, into the folder layout)."""
+    d = folder(name)
+    _control_set(old), _control_set(new)
+    if new in {k for it in scan(d, warn=False) for k in it.control_sets} or new in _empty_control_sets(d):
+        raise DatasetError(f"there's already a control set called {new!r}")
+    inputs = _set_inputs(d, old)
+    for pic, n, c in inputs:
+        dest = pic.parent / CONTROLS_DIR / new
+        dest.mkdir(parents=True, exist_ok=True)
+        c.rename(dest / f"{_input_name(pic.stem, n)}{c.suffix.lower()}")
+    for base in d.rglob(CONTROLS_DIR):
+        sub = base / old
+        if sub.is_dir() and not any(sub.iterdir()):
+            sub.rmdir()
+    if (d / CONTROLS_DIR / old).is_dir():  # an empty set: just the folder
+        (d / CONTROLS_DIR / old).rename(d / CONTROLS_DIR / new)
+    return len(inputs)
 
 
 def create(name: str) -> None:

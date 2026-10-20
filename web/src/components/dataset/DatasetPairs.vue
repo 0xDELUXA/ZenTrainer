@@ -5,7 +5,7 @@ import { ZenCompare } from '@nynxz/zenkit-ui'
 import { vAutosize } from '@/lib/autosize'
 import { aspect, isSimplePair, isVideoPath, useDatasetContext } from './context'
 
-const { zoom, cap, k, drafts, saving, save, selected, shown, toggleSelect, onItemClick, onItemMenu, ctrlView, full, thumb } = useDatasetContext()
+const { zoom, inputs, cap, k, drafts, saving, save, selected, shown, toggleSelect, onItemClick, onItemMenu, ctrlView, full, thumb } = useDatasetContext()
 </script>
 
 <template>
@@ -16,20 +16,20 @@ const { zoom, cap, k, drafts, saving, save, selected, shown, toggleSelect, onIte
       </label>
       <div class="pair-media">
         <!-- one picture in, one out, same shape: drag across to compare -->
-        <div v-if="isSimplePair(it)" class="pane compare" :style="{ aspectRatio: aspect(it) }">
-          <ZenCompare :before="thumb({ path: it.controls![0]! }, 768)" :after="thumb(it, 768)" before-label="Input" after-label="Result" track-closest=".pair" />
+        <div v-if="isSimplePair(it, inputs(it))" class="pane compare" :style="{ aspectRatio: aspect(it) }">
+          <ZenCompare :before="thumb({ path: inputs(it)[0]! }, 768)" :after="thumb(it, 768)" before-label="Input" after-label="Result" track-closest=".pair" />
         </div>
         <template v-else>
-          <button v-for="(c, n) in it.controls ?? []" :key="c" class="pane" :title="c" :data-peek="ctrlView(it, c)" @click="onItemClick(it, i, $event)">
+          <button v-for="(c, n) in inputs(it)" :key="c" class="pane" :title="c" :data-peek="ctrlView(it, c)" @click="onItemClick(it, i, $event)">
             <video v-if="isVideoPath(c)" :src="ctrlView(it, c)" muted loop playsinline preload="metadata" @mouseenter="($event.target as HTMLVideoElement).play()" @mouseleave="($event.target as HTMLVideoElement).pause()" />
             <img v-else :src="thumb({ path: c }, 512)" loading="lazy" alt="" />
-            <span class="pane-tag">{{ (it.controls?.length ?? 0) > 1 ? `Input ${n + 1}` : 'Input' }}</span>
+            <span class="pane-tag">{{ inputs(it).length > 1 ? `Input ${n + 1}` : 'Input' }}</span>
           </button>
-          <i v-if="it.controls?.length" class="mdi mdi-arrow-right pair-arrow" />
+          <i v-if="inputs(it).length" class="mdi mdi-arrow-right pair-arrow" />
           <button class="pane result" :title="it.path" :data-peek="full(it)" @click="onItemClick(it, i, $event)">
             <video v-if="it.kind === 'video'" :src="ctrlView(it, it.path)" muted loop playsinline preload="metadata" @mouseenter="($event.target as HTMLVideoElement).play()" @mouseleave="($event.target as HTMLVideoElement).pause()" />
             <img v-else :src="thumb(it, 512)" loading="lazy" alt="" />
-            <span class="pane-tag">{{ it.controls?.length ? 'Result' : 'No input' }}</span>
+            <span class="pane-tag">{{ inputs(it).length ? 'Result' : 'No input' }}</span>
           </button>
         </template>
       </div>
@@ -47,7 +47,7 @@ const { zoom, cap, k, drafts, saving, save, selected, shown, toggleSelect, onIte
         />
         <span class="card-meta mono">
           {{ it.path.split('/').at(-1) }}<span v-if="it.width"> · {{ it.width }}×{{ it.height }}</span>
-          <span v-if="(it.controls?.length ?? 0) > 1"> · {{ it.controls!.length }} inputs</span>
+          <span v-if="inputs(it).length > 1"> · {{ inputs(it).length }} inputs</span>
           <span v-if="saving[k(it)]"> · saving…</span>
         </span>
       </div>

@@ -28,6 +28,8 @@ export interface TrainSpec {
     caption_dropout: number
     masked_loss: boolean
     edit?: boolean
+    /** control sets (named layers of input pictures) the run edits from, in order; any turns edit on */
+    control_sets?: string[]
     edit_method?: string
     edit_template?: string
     edit_grounded?: boolean

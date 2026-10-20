@@ -388,7 +388,8 @@ class Trainer:
                                  "edits: pick an edit-capable model (Flux 3 Klein, Flux 2, Kontext, Qwen Image Edit)")
             pairs = sum(sm.refs is not None or sm.cond is not None for sm in self.dataset.samples)
             if not pairs:
-                raise ValueError("edit training, but no image has a <name>_control picture beside it")
+                raise ValueError(f"edit training, but no picture has an input in the control set(s) "
+                                 f"{', '.join(s.dataset.control_sets)}")
             self.edit_method = None if self.h3 else method(patcher.model, s.dataset.edit_method)
             logging.info("[ZenTrainer] edit training: %d of %d images have an input picture (references: %s)",
                          pairs, len(self.dataset.samples), self.edit_method or "the model's own")

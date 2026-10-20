@@ -10,7 +10,7 @@ import DatasetStats from '@/components/DatasetStats.vue'
 import { useDatasetContext } from './context'
 
 const props = defineProps<{ name: string; drawer: boolean }>()
-const { fit, showMasks, items, sets, activeSet, selected, load, review, counts, imageFlags, statsPanel, faces, facesBusy, captionSubject, facesSetting, toggleFaces, flash } =
+const { fit, showMasks, view, items, sets, activeSet, controlSets, activeControl, selected, load, review, counts, imageFlags, statsPanel, faces, facesBusy, captionSubject, facesSetting, toggleFaces, flash } =
   useDatasetContext()
 
 // The side panel stays pinned without a scrollbar of its own: under the sticky toolbar when it fits
@@ -68,6 +68,58 @@ async function undoBulk() {
   bulkUndo.value = null
   flash(`${n} caption${n === 1 ? '' : 's'} put back`)
   await load()
+}
+
+// ---- edit inputs: control sets, named layers of input pictures beside the dataset -----------
+const inputsOpen = ref(true)
+const inputCount = (set: string) => items.value.filter((it) => it.control_sets?.[set]?.length).length
+const SET_RE = /^[a-z0-9][a-z0-9_-]{0,23}$/
+function askSetName(text: string, now = ''): string | null {
+  const v = prompt(text, now)?.trim().toLowerCase()
+  if (!v) return null
+  if (!SET_RE.test(v)) {
+    alert('Use lowercase letters, digits, - and _ (max 24).')
+    return null
+  }
+  return v
+}
+async function newInputSet() {
+  const set = askSetName('New input set (e.g. faceswap, depth, sketch):')
+  if (!set) return
+  await engine.createControlSet(props.name, set)
+  await load()
+  activeControl.value = set
+}
+async function renameInputSet() {
+  const from = activeControl.value
+  const to = askSetName(`Rename “${from}” to:`, from)
+  if (!to || to === from) return
+  try {
+    await engine.renameControlSet(props.name, from, to)
+  } catch (e) {
+    return alert(String((e as Error).message ?? e))
+  }
+  await load()
+  activeControl.value = to
+}
+async function deleteInputSet() {
+  const set = activeControl.value
+  const n = items.value.reduce((sum, it) => sum + (it.control_sets?.[set]?.length ?? 0), 0) // files, not pictures
+  if (!confirm(`Delete the input set “${set}”${n ? ` and its ${n} input picture${n === 1 ? '' : 's'}` : ''}? The dataset's pictures stay.`)) return
+  await engine.deleteControlSet(props.name, set)
+  flash(`“${set}” deleted`)
+  await load()
+}
+const inputFiles = ref<HTMLInputElement | null>(null)
+async function addInputs(files: FileList | null) {
+  if (!files?.length) return
+  const set = activeControl.value
+  const r = await engine.uploadControls(props.name, set, [...files])
+  if (inputFiles.value) inputFiles.value.value = ''
+  flash(`${r.saved.length} input${r.saved.length === 1 ? '' : 's'} added to “${set}”`)
+  if (r.errors.length) alert(`${r.errors.length} not added:\n${r.errors.slice(0, 12).join('\n')}`)
+  await load()
+  if (r.saved.length) view.value = 'pairs'
 }
 
 // ---- auto-caption: CaptionPanel runs it as a job -----------------------------------------
@@ -130,6 +182,44 @@ function onCaptioned(set: string) {
         <ZenButton size="sm" :disabled="!findText" title="Replace 'find' with the text everywhere" @click="bulk('replace')">Replace</ZenButton>
         <ZenButton v-if="bulkUndo" size="sm" icon="mdi mdi-undo" :title="`Put the captions in “${bulkUndo.set}” back as they were before the last bulk edit`" @click="undoBulk">Undo last edit</ZenButton>
       </div>
+    </section>
+    <section class="side-sec">
+      <header class="side-head clickable" @click="inputsOpen = !inputsOpen">
+        <span>Edit inputs</span><i :class="inputsOpen ? 'mdi mdi-chevron-up' : 'mdi mdi-chevron-down'" />
+      </header>
+      <template v-if="inputsOpen">
+        <p v-if="!controlSets.length" class="side-note">
+          Input pictures for edit training, in named sets beside these pictures. The dataset stays as it is: a run chooses whether to use a set.
+        </p>
+        <div v-else class="input-sets" role="radiogroup" aria-label="Input set shown">
+          <button
+            v-for="c in controlSets"
+            :key="c"
+            class="input-set"
+            :class="{ on: c === activeControl }"
+            role="radio"
+            :aria-checked="c === activeControl"
+            :title="`Show “${c}”'s inputs in the pairs view, the grid and the lightbox`"
+            @click="activeControl = c"
+          >
+            <i :class="c === activeControl ? 'mdi mdi-radiobox-marked' : 'mdi mdi-radiobox-blank'" />
+            <span class="ellipsis">{{ c }}</span>
+            <span class="spacer" />
+            <span class="mono small muted">{{ inputCount(c) }}/{{ items.length }}</span>
+          </button>
+        </div>
+        <div class="side-row">
+          <ZenButton size="sm" icon="mdi mdi-plus" title="A new, empty input set" @click="newInputSet">New set</ZenButton>
+          <ZenButton v-if="activeControl" size="sm" icon="mdi mdi-upload" :title="`Add input pictures to “${activeControl}”`" @click="inputFiles?.click()">Add inputs</ZenButton>
+          <span class="spacer" />
+          <button v-if="activeControl" class="icon-btn" :title="`Rename “${activeControl}”`" @click="renameInputSet"><i class="mdi mdi-pencil-outline" /></button>
+          <button v-if="activeControl" class="icon-btn" :title="`Delete “${activeControl}” and its inputs`" @click="deleteInputSet"><i class="mdi mdi-delete-outline" /></button>
+        </div>
+        <p v-if="activeControl" class="side-note">
+          Name each input like its picture: <span class="mono">photo.png</span>, and <span class="mono">photo.2.png</span> for a second.
+        </p>
+        <input ref="inputFiles" type="file" multiple hidden accept="image/*,video/*,audio/*" @change="addInputs(($event.target as HTMLInputElement).files)" />
+      </template>
     </section>
     <section class="side-sec">
       <header class="side-head"><span>Display</span></header>
@@ -209,6 +299,52 @@ function onCaptioned(set: string) {
   flex-direction: column;
   gap: 6px;
   margin-top: 8px;
+}
+.input-sets {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+}
+.input-set {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--zen-muted);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.input-set:hover {
+  color: var(--zen-text);
+  background: var(--zen-surface-2);
+}
+.input-set.on {
+  color: var(--zen-text);
+}
+.input-set.on i {
+  color: var(--zen-accent);
+}
+.icon-btn {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--zen-muted);
+  cursor: pointer;
+}
+.icon-btn:hover {
+  color: var(--zen-text);
+  background: var(--zen-surface-2);
 }
 .side-caption {
   margin-top: 8px;

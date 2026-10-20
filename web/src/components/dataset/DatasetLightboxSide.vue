@@ -7,7 +7,7 @@ import { vAutosize } from '@/lib/autosize'
 import { isVideoPath, kb, pct, secs, useDatasetContext } from './context'
 
 const props = defineProps<{ it: DatasetItem; name: string }>()
-const { activeSet, cap, k, drafts, saving, save, ctrlView, thumb } = useDatasetContext()
+const { activeSet, activeControl, inputs, cap, k, drafts, saving, save, ctrlView, thumb } = useDatasetContext()
 
 // the image's captions in the other sets, to compare (and copy one across)
 const otherSets = (it: DatasetItem) => Object.entries(it.captions ?? {}).filter(([st, t]) => st !== activeSet.value && t)
@@ -22,16 +22,16 @@ const toggleSet = (st: string) => (openSets.has(st) ? openSets.delete(st) : open
 
 <template>
   <div class="side">
-    <template v-if="it.controls?.length">
-      <div class="eyebrow">{{ it.controls!.length > 1 ? 'Inputs' : 'Input' }}</div>
+    <template v-if="inputs(it).length">
+      <div class="eyebrow">{{ inputs(it).length > 1 ? 'Inputs' : 'Input' }} · {{ activeControl }}</div>
       <div class="side-inputs">
-        <template v-for="c in it.controls" :key="c">
+        <template v-for="c in inputs(it)" :key="c">
           <video v-if="isVideoPath(c)" :src="ctrlView(it, c)" muted loop autoplay playsinline :title="c" />
           <img v-else :src="thumb({ path: c }, 384)" alt="" :title="c" />
         </template>
       </div>
     </template>
-    <div class="eyebrow">{{ it.controls?.length ? 'Instruction' : 'Caption' }}</div>
+    <div class="eyebrow">{{ inputs(it).length ? 'Instruction' : 'Caption' }}</div>
     <textarea
       v-autosize
       class="side-cap"

@@ -241,7 +241,7 @@ def compute(name: str, set_name: str = "default") -> dict:
         "image_issues": sum(1 for f in flags.values() if set(f) - {"near-duplicate", "similar"}),
         "muted": len(off),
         "masked": sum(1 for it in items if it.mask),
-        "pairs": sum(1 for it in items if it.controls),
+        "pairs": sum(1 for it in items if it.control_sets),
     }
     face_scores = None
     if faces.available():
@@ -298,7 +298,7 @@ def _fingerprint(name: str, set_name: str) -> str:
     h = hashlib.sha256(json.dumps(sorted(muted(root).get(set_name, ()))).encode())
     for it in scan(root, warn=False):
         s = it.path.stat()
-        h.update(f"{it.path.name}|{s.st_mtime_ns}|{s.st_size}|{it.captions.get(set_name, '')}|{bool(it.mask)}|{len(it.controls)}".encode())
+        h.update(f"{it.path.name}|{s.st_mtime_ns}|{s.st_size}|{it.captions.get(set_name, '')}|{bool(it.mask)}|{sorted((k, len(v)) for k, v in it.control_sets.items())}".encode())
     return h.hexdigest()[:20]
 
 

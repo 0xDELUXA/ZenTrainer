@@ -21,7 +21,7 @@ const router = useRouter()
 
 const ds = useDataset(() => props.name)
 provide(DATASET, ds)
-const { view, zoom, sideOpen, items, sets, activeSet, loading, error, notice, bust, load, filter, query, selected, reviewing, counts, setMuted, faces, flash, removeMany, menu, menuItems, allShownSelected, toggleAll, layout, lightbox, lbItems, shown } = ds
+const { view, zoom, sideOpen, items, sets, activeSet, controlSets, activeControl, loading, error, notice, bust, load, filter, query, selected, reviewing, counts, setMuted, faces, flash, removeMany, menu, menuItems, allShownSelected, toggleAll, layout, lightbox, lbItems, shown } = ds
 
 // In a narrow window the panel would land under every picture, out of reach: there it's a drawer
 // over the right edge instead, opened by the same button, closed on its own (not remembered)
@@ -87,7 +87,7 @@ const filterItems = computed(() => [
   { value: 'muted', label: `Muted in “${activeSet.value}” · ${counts.value.muted}` },
   { value: 'images', label: `Image issues · ${counts.value.imageIssues}` },
   { value: 'faces', label: `Face issues · ${faces.value?.items ? counts.value.faceIssues : '–'}` },
-  ...(counts.value.pairs ? [{ value: 'pairs', label: `Edit pairs · ${counts.value.pairs}` }] : []),
+  ...(controlSets.value.length ? [{ value: 'pairs', label: `With a “${activeControl.value}” input · ${counts.value.pairs}` }] : []),
 ])
 function onEsc(e: KeyboardEvent) {
   if (e.key === 'Escape' && narrow.value && drawerOpen.value && lightbox.value == null) {
@@ -176,7 +176,7 @@ onUnmounted(() => {
       <div class="seg" role="tablist" aria-label="View">
         <button :class="{ on: layout === 'grid' }" title="Grid" @click="view = 'grid'"><i class="mdi mdi-view-grid-outline" /></button>
         <button :class="{ on: layout === 'list' }" title="Table" @click="view = 'list'"><i class="mdi mdi-view-list-outline" /></button>
-        <button v-if="counts.pairs" :class="{ on: layout === 'pairs' }" title="Edit pairs: inputs → result, with the instruction" @click="view = 'pairs'"><i class="mdi mdi-swap-horizontal" /></button>
+        <button v-if="controlSets.length" :class="{ on: layout === 'pairs' }" :title="`Edit pairs: “${activeControl}” inputs → result, with the instruction`" @click="view = 'pairs'"><i class="mdi mdi-swap-horizontal" /></button>
       </div>
       <label class="zoom" title="Card size" :class="{ off: layout === 'list' }">
         <i class="mdi mdi-image-size-select-small" />

@@ -10,7 +10,7 @@ import type DatasetStats from '@/components/DatasetStats.vue'
 
 export const isVideoPath = (p: string) => /\.(mp4|webm|mov|mkv)$/i.test(p)
 export const aspect = (it: DatasetItem) => (it.width && it.height ? `${it.width} / ${it.height}` : '1')
-export const isSimplePair = (it: DatasetItem) => it.controls?.length === 1 && it.kind !== 'video' && !isVideoPath(it.controls[0]!)
+export const isSimplePair = (it: DatasetItem, inputs: string[]) => inputs.length === 1 && it.kind !== 'video' && !isVideoPath(inputs[0]!)
 export const secs = (d?: number | null) => (d == null ? '' : d < 60 ? `${d.toFixed(1)}s` : `${Math.floor(d / 60)}:${String(Math.round(d % 60)).padStart(2, '0')}`)
 export const pct = (v?: number) => (v == null ? '' : `${Math.round(v * 100)}%`)
 export const kb = (b: number) => (b > 1024 ** 2 ? `${(b / 1024 ** 2).toFixed(1)} MB` : `${Math.round(b / 1024)} KB`)
@@ -58,6 +58,11 @@ export function useDataset(name: () => string) {
   const sets = ref<string[]>(['default'])
   const activeSet = ref('default')
   const cap = (it: DatasetItem) => it.captions?.[activeSet.value] ?? ''
+  // control sets: edit training's input pictures, named layers beside the pictures; the pairs
+  // view, the grid's insets and the lightbox show the selected one's
+  const controlSets = ref<string[]>([])
+  const activeControl = ref('')
+  const inputs = (it: DatasetItem) => (activeControl.value && it.control_sets?.[activeControl.value]) || []
   const k = (it: DatasetItem) => `${activeSet.value}:${it.path}`
   const loading = ref(true)
   const error = ref<string | null>(null)
@@ -76,6 +81,8 @@ export function useDataset(name: () => string) {
         facesSetting.value = facesOn
         if (facesOn && !faces.value) checkFaces() // cached per picture: quick after the first time
       }
+      controlSets.value = r.control_sets ?? []
+      if (!controlSets.value.includes(activeControl.value)) activeControl.value = controlSets.value[0] ?? ''
       sets.value = [...new Set([...r.sets, ...sets.value])].sort((a, b) => (a === 'default' ? -1 : b === 'default' ? 1 : a.localeCompare(b)))
       error.value = null
     } catch (e) {
@@ -111,7 +118,7 @@ export function useDataset(name: () => string) {
     masked: items.value.filter((i) => i.mask).length,
     mismatched: items.value.filter((i) => i.mask_mismatch).length,
     videos: items.value.filter((i) => i.kind === 'video').length,
-    pairs: items.value.filter((i) => i.controls?.length).length,
+    pairs: items.value.filter((i) => inputs(i).length).length,
     faceIssues: items.value.filter((i) => faceIssue(i)).length,
     imageIssues: items.value.filter((i) => imageFlags.value[i.path]?.length).length,
     muted: items.value.filter((i) => isMuted(i)).length,
@@ -201,7 +208,7 @@ export function useDataset(name: () => string) {
           (f === 'uncaptioned' && !cap(it)) ||
           (f === 'masked' && it.mask) ||
           (f === 'unmasked' && !it.mask) ||
-          (f === 'pairs' && it.controls?.length) ||
+          (f === 'pairs' && inputs(it).length) ||
           (f === 'faces' && faceIssue(it)) ||
           (f === 'images' && imageFlags.value[it.path]?.length) ||
           (f === 'muted' && isMuted(it))) &&
@@ -313,7 +320,7 @@ export function useDataset(name: () => string) {
 
   // ---- pictures -------------------------------------------------------------------------------
   // the remembered view, except Pairs on a dataset without any (it shows the grid there)
-  const layout = computed(() => (view.value === 'pairs' && !counts.value.pairs ? 'grid' : view.value))
+  const layout = computed(() => (view.value === 'pairs' && !controlSets.value.length ? 'grid' : view.value))
   // an input file sits beside its result: same folder, so /view takes the result's subfolder
   const ctrlView = (it: DatasetItem, p: string) =>
     `${viewUrl({ filename: p.split('/').at(-1)!, subfolder: it.subfolder, type: 'input' })}&v=${bust.value}`
@@ -338,7 +345,7 @@ export function useDataset(name: () => string) {
 
   return {
     view, zoom, fit, showMasks, sideOpen,
-    items, sets, activeSet, cap, k, loading, error, notice, drafts, saving, bust, load,
+    items, sets, activeSet, cap, k, controlSets, activeControl, inputs, loading, error, notice, drafts, saving, bust, load,
     filter, query, sortKey, sortDir, selected, reviewing, review, counts,
     isMuted, setMuted, imageFlags, statsPanel,
     faces, facesBusy, captionSubject, facesSetting, toggleFaces, faceOf, faceIssue, faceNote,
