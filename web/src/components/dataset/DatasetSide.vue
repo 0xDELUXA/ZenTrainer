@@ -1,0 +1,219 @@
+<script setup lang="ts">
+// The dataset page's side panel: health, faces, auto-caption, bulk edit and display. Pinned
+// beside the pictures, or, in a narrow window, a drawer over the right edge.
+import { ZenButton, ZenInput, ZenSwitch } from '@nynxz/zenkit-ui'
+import { computed, onUnmounted, ref, watch } from 'vue'
+import { engine } from '@/api/engine'
+import { activeCaptions } from '@/captions'
+import CaptionPanel from '@/components/CaptionPanel.vue'
+import DatasetStats from '@/components/DatasetStats.vue'
+import { useDatasetContext } from './context'
+
+const props = defineProps<{ name: string; drawer: boolean }>()
+const { fit, showMasks, items, sets, activeSet, selected, load, review, counts, imageFlags, statsPanel, faces, facesBusy, captionSubject, facesSetting, toggleFaces, flash } =
+  useDatasetContext()
+
+// The side panel stays pinned without a scrollbar of its own: under the sticky toolbar when it fits
+// the window, or, when it's taller, scrolling with the page until its bottom reaches the window's
+// bottom and staying there (a negative sticky top), so it never scrolls out of sight
+const sideEl = ref<HTMLElement | null>(null)
+const sideTop = ref(58)
+const PIN = 66 // the sticky toolbar (10px down, 46px tall) + a 10px gap
+function placeSide() {
+  const h = sideEl.value?.offsetHeight ?? 0
+  sideTop.value = Math.min(PIN, window.innerHeight - h - 12)
+}
+let sideObs: ResizeObserver | null = null
+watch(sideEl, (el) => {
+  sideObs?.disconnect()
+  if (!el) return
+  sideObs = new ResizeObserver(placeSide)
+  sideObs.observe(el)
+})
+window.addEventListener('resize', placeSide)
+onUnmounted(() => {
+  sideObs?.disconnect()
+  window.removeEventListener('resize', placeSide)
+})
+
+// ---- bulk edit ------------------------------------------------------------------------------
+const bulkOpen = ref(false)
+const bulkText = ref('')
+const findText = ref('')
+// the captions as they were before the last bulk edit, so it can be undone
+const bulkUndo = ref<{ set: string; before: Record<string, string> } | null>(null)
+async function bulk(op: 'prefix' | 'suffix' | 'replace') {
+  if (!bulkText.value && op !== 'replace') return
+  const set = activeSet.value
+  const before = Object.fromEntries(items.value.map((it) => [it.path, it.captions[set] ?? '']))
+  const touched = Object.values(before).filter((c) => (op === 'replace' ? c.includes(findText.value) : true)).length
+  const what = op === 'replace' ? `Replace “${findText.value}” with “${bulkText.value}”` : `${op === 'prefix' ? 'Put' : 'Append'} “${bulkText.value}” ${op === 'prefix' ? 'at the start of' : 'to'}`
+  if (!touched || !confirm(`${what} ${op === 'replace' ? 'in' : ''} ${touched} caption${touched === 1 ? '' : 's'} in “${set}”? You can undo it from here.`)) return
+  const { changed } = await engine.bulkCaptions(props.name, op, bulkText.value, findText.value, set)
+  bulkUndo.value = changed ? { set, before } : null
+  flash(`${changed} caption${changed === 1 ? '' : 's'} updated`)
+  await load()
+}
+async function undoBulk() {
+  const u = bulkUndo.value
+  if (!u) return
+  let n = 0
+  for (const it of items.value) {
+    const old = u.before[it.path]
+    if (old != null && (it.captions[u.set] ?? '') !== old) {
+      await engine.setCaption(props.name, it.path, old, u.set)
+      n++
+    }
+  }
+  bulkUndo.value = null
+  flash(`${n} caption${n === 1 ? '' : 's'} put back`)
+  await load()
+}
+
+// ---- auto-caption: CaptionPanel runs it as a job -----------------------------------------
+// open while this dataset has a caption job going, so coming back to the page shows it
+const capRunning = computed(() => activeCaptions.value.some((j) => j.dataset === props.name))
+const capOpen = ref(capRunning.value)
+watch(capRunning, (v) => v && (capOpen.value = true))
+function onCaptioned(set: string) {
+  if (!sets.value.includes(set)) sets.value = [...sets.value, set]
+  load()
+}
+</script>
+
+<template>
+  <aside ref="sideEl" class="ds-side" :class="{ drawer }" :style="drawer ? undefined : { top: `${sideTop}px` }">
+    <section class="side-sec">
+      <header class="side-head"><span>Health</span><span class="muted small">“{{ activeSet }}”</span></header>
+      <DatasetStats
+        v-if="items.length"
+        :key="`${name}:${activeSet}`"
+        ref="statsPanel"
+        :name="name"
+        :set="activeSet"
+        compact
+        @loaded="(s) => (imageFlags = s.current.flags ?? {})"
+      />
+    </section>
+    <section class="side-sec">
+      <header class="side-head">
+        <span>Faces</span>
+        <ZenSwitch :model-value="facesSetting" :disabled="facesBusy" @update:model-value="toggleFaces" />
+      </header>
+      <p class="side-note">
+        <template v-if="faces && !faces.available">{{ faces.hint }}</template>
+        <template v-else-if="facesBusy">Checking faces…</template>
+        <template v-else-if="facesSetting && faces?.items">
+          {{ faces.with_face }}/{{ faces.total }} with a face{{ faces.one_identity === false ? ' · mixed people' : ` · alike ${faces.identity?.toFixed(2) ?? '–'}` }}{{ counts.faceIssues ? ` · ${counts.faceIssues} to look at` : '' }}
+        </template>
+        <template v-else>Off. On: faces checked on open, a Faces score, and likeness for this dataset's runs.</template>
+      </p>
+    </section>
+    <section class="side-sec">
+      <header class="side-head clickable" @click="capOpen = !capOpen">
+        <span>Auto-caption</span><i :class="capOpen ? 'mdi mdi-chevron-up' : 'mdi mdi-chevron-down'" />
+      </header>
+      <CaptionPanel v-if="capOpen" :dataset="name" :items="items" :sets="sets" :selected="[...selected]" :subject="captionSubject" class="side-caption" @changed="onCaptioned" @review="review" />
+    </section>
+    <section class="side-sec">
+      <header class="side-head clickable" @click="bulkOpen = !bulkOpen">
+        <span>Bulk edit</span><i :class="bulkOpen ? 'mdi mdi-chevron-up' : 'mdi mdi-chevron-down'" />
+      </header>
+      <div v-if="bulkOpen" class="side-bulk">
+        <span class="muted small">Every caption in “{{ activeSet }}”:</span>
+        <ZenInput v-model="bulkText" placeholder="trigger word / text" size="sm" />
+        <div class="side-row">
+          <ZenButton size="sm" title="Put the text at the start of every caption" @click="bulk('prefix')">Prefix</ZenButton>
+          <ZenButton size="sm" title="Append the text to every caption" @click="bulk('suffix')">Suffix</ZenButton>
+        </div>
+        <ZenInput v-model="findText" placeholder="find (to replace with the text)" size="sm" />
+        <ZenButton size="sm" :disabled="!findText" title="Replace 'find' with the text everywhere" @click="bulk('replace')">Replace</ZenButton>
+        <ZenButton v-if="bulkUndo" size="sm" icon="mdi mdi-undo" :title="`Put the captions in “${bulkUndo.set}” back as they were before the last bulk edit`" @click="undoBulk">Undo last edit</ZenButton>
+      </div>
+    </section>
+    <section class="side-sec">
+      <header class="side-head"><span>Display</span></header>
+      <div class="side-row">
+        <span class="small">Crop to the card</span><span class="spacer" />
+        <ZenSwitch :model-value="fit === 'cover'" @update:model-value="fit = $event ? 'cover' : 'contain'" />
+      </div>
+      <div class="side-row" :title="counts.masked ? 'Shows what each mask trains: the rest dims' : 'No masks in this dataset'">
+        <span class="small">Show masks</span><span class="spacer" />
+        <ZenSwitch :model-value="showMasks" :disabled="!counts.masked" @update:model-value="showMasks = $event" />
+      </div>
+    </section>
+  </aside>
+</template>
+
+<style scoped>
+@keyframes side-in {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+}
+.ds-side.drawer {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 40;
+  width: min(340px, calc(100vw - 24px));
+  overflow-y: auto;
+  scrollbar-width: thin;
+  overscroll-behavior: contain;
+  filter: drop-shadow(0 18px 40px rgba(0, 0, 0, 0.55));
+}
+.ds-side {
+  /* pinned (top set by placeSide), never a scrollbar of its own */
+  position: sticky;
+  animation: side-in 0.24s cubic-bezier(0.2, 0.7, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.side-sec {
+  padding: 10px 12px;
+  border: 1px solid var(--zen-border);
+  border-radius: var(--r-lg, 12px);
+  background: var(--zen-surface);
+}
+.side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.side-head.clickable {
+  cursor: pointer;
+}
+.side-head.clickable i {
+  color: var(--zen-muted);
+}
+.side-note {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--zen-muted);
+}
+.side-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.side-bulk {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.side-caption {
+  margin-top: 8px;
+  border: none !important;
+  padding: 0 !important;
+  background: none !important;
+}
+</style>

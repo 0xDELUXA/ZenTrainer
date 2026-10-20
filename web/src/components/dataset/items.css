@@ -1,0 +1,60 @@
+/* What the dataset page's grid, pairs and table share: the warning colour, the select box on a
+   picture, and the inline caption editor. Each includes this scoped, before its own rules. */
+.warn {
+  color: var(--zen-warn);
+}
+.check {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-md);
+  background: rgb(0 0 0 / 0.55);
+  color: #fff;
+  font-size: 18px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.check.on {
+  opacity: 1;
+  background: var(--zen-accent);
+  color: var(--zen-accent-text);
+}
+.cap-edit {
+  display: block;
+  width: 100%;
+  resize: none;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  max-height: calc(4 * 1.5em + 14px); /* 4 whole lines; focus opens it up */
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--zen-text) 25%, transparent) transparent;
+  padding: 6px 10px;
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--zen-text);
+}
+/* longer than 4 lines: the end fades out, no scrollbar until it's clicked into (focus opens it up) */
+.cap-edit.clamped:not(:focus) {
+  overflow-y: hidden;
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 2.2em), transparent calc(100% - 4px));
+}
+.cap-edit:hover {
+  border-color: color-mix(in srgb, var(--zen-border) 70%, transparent);
+}
+.cap-edit:focus {
+  max-height: calc(14 * 1.5em + 14px);
+  outline: none;
+  border-color: var(--zen-accent);
+  background: var(--zen-field-bg, var(--zen-input));
+}
+.cap-edit.empty::placeholder {
+  color: var(--zen-warn);
+}
