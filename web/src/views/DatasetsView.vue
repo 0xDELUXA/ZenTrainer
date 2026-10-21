@@ -94,16 +94,6 @@ const link = (d: DatasetInfo) => `/datasets/${encodeURIComponent(d.folder)}`
 const thumb = (d: DatasetInfo, t: DatasetInfo['thumbs'][number], size = 256) =>
   thumbUrl(d.folder, t.path ?? t.subfolder.split('/').slice(1).concat(t.filename).join('/'), size)
 const pics = (d: DatasetInfo) => d.thumbs.slice(0, 4)
-const counts = (d: DatasetInfo) => {
-  const v = d.videos ?? 0
-  const im = d.images - v
-  return [im ? `${im} image${im === 1 ? '' : 's'}` : '', v ? `${v} video${v === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')
-}
-const tagsFor = (d: DatasetInfo) => {
-  const v = d.videos ?? 0
-  const im = d.images - v
-  return [im ? `${im} image${im === 1 ? '' : 's'}` : '', v ? `${v} video${v === 1 ? '' : 's'}` : '', d.masked ? `${d.masked} masked` : ''].filter(Boolean)
-}
 const fmtBytes = (b?: number) => (b == null ? '' : b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(b / 1e6))} MB`)
 const ago = (t?: number) => {
   if (!t) return ''
@@ -149,16 +139,22 @@ const ago = (t?: number) => {
           :key="d.folder"
           :to="link(d)"
           :title="d.folder"
-          :tags="tagsFor(d)"
-          :meta="[d.captioned < d.images ? `${d.images - d.captioned} uncaptioned` : '', ago(d.modified), fmtBytes(d.bytes)].filter(Boolean)"
         >
           <template #thumb>
             <div class="mosaic" :class="`n${pics(d).length}`">
               <img v-for="t in pics(d)" :key="t.filename" :src="thumb(d, t)" loading="lazy" alt="" />
               <span v-if="!pics(d).length" class="none"><i class="mdi mdi-image-off-outline" /></span>
-              <span class="corner" :title="badgeTip(d)"><CaptionRing :done="d.captioned" :total="d.images" :scores="d.health?.scores" :size="34" /></span>
+              <span v-if="d.health || d.captioned < d.images" class="corner" :title="badgeTip(d)"><CaptionRing :done="d.captioned" :total="d.images" :scores="d.health?.scores" :size="34" /></span>
             </div>
           </template>
+          <!-- what's in it, as icons (the counts on hover), and when it changed -->
+          <div class="card-foot small">
+            <span class="kinds mono">
+              <span v-for="k in kinds(d)" :key="k.icon" :title="`${k.n} ${k.tip}`"><i class="mdi" :class="k.icon" />{{ k.n }}</span>
+              <span v-if="d.captioned < d.images" class="warn" :title="`${d.images - d.captioned} without a caption`"><i class="mdi mdi-text-box-remove-outline" />{{ d.images - d.captioned }}</span>
+            </span>
+            <span class="muted">{{ [ago(d.modified), fmtBytes(d.bytes)].filter(Boolean).join(' · ') }}</span>
+          </div>
         </TemplateCard>
       </div>
 
@@ -293,6 +289,24 @@ const ago = (t?: number) => {
   border-radius: 50%;
   background: color-mix(in srgb, var(--zen-surface) 82%, transparent);
   backdrop-filter: blur(4px);
+}
+.card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 2px;
+}
+.card-foot .kinds {
+  display: inline-flex;
+  gap: 10px;
+  color: var(--zen-muted);
+}
+.card-foot .kinds i {
+  margin-right: 3px;
+}
+.card-foot .kinds .warn {
+  color: var(--zen-warn);
 }
 .sorts {
   display: inline-flex;

@@ -176,7 +176,7 @@ onUnmounted(() => {
       <div class="seg" role="tablist" aria-label="View">
         <button :class="{ on: layout === 'grid' }" title="Grid" @click="view = 'grid'"><i class="mdi mdi-view-grid-outline" /></button>
         <button :class="{ on: layout === 'list' }" title="Table" @click="view = 'list'"><i class="mdi mdi-view-list-outline" /></button>
-        <button v-if="controlSets.length" :class="{ on: layout === 'pairs' }" :title="`Edit pairs: “${activeControl}” inputs → result, with the instruction`" @click="view = 'pairs'"><i class="mdi mdi-swap-horizontal" /></button>
+        <button v-if="controlSets.length" :class="{ on: layout === 'pairs' }" :title="`Edit pairs: “${activeControl}” inputs → result, with the instruction`" @click="(activeControl ||= controlSets[0] ?? ''), (view = 'pairs')"><i class="mdi mdi-swap-horizontal" /></button>
       </div>
       <label class="zoom" title="Card size" :class="{ off: layout === 'list' }">
         <i class="mdi mdi-image-size-select-small" />

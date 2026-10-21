@@ -72,7 +72,9 @@ async function load() {
   work.width = W.value
   work.height = H.value
   const c = wctx()
-  c.fillStyle = '#000'
+  // a new mask starts as no mask at all: everything trains (white), and what you paint, box or
+  // erase is what's left out; a SAM selection still replaces it with just the subject
+  c.fillStyle = '#fff'
   c.fillRect(0, 0, W.value, H.value)
   hasMask.value = !!item.value.mask
   if (item.value.mask) {
@@ -122,6 +124,23 @@ function finalMask(): HTMLCanvasElement {
   return out
 }
 
+// what a mask leaves out, shown as Source's purple/black missing-texture checker (it can't be
+// mistaken for a dark part of the picture), fading in as the mask goes from keep to drop; cells
+// scale with the picture so the pattern reads at any size
+function checkerOut(d: ImageData, w: number, alpha: number) {
+  const cell = Math.max(6, Math.round(w / 40))
+  for (let i = 0; i < d.data.length; i += 4) {
+    const keep = d.data[i]! / 255
+    const px = (i / 4) % w
+    const py = Math.floor(i / 4 / w)
+    const magenta = (Math.floor(px / cell) + Math.floor(py / cell)) % 2 === 0
+    d.data[i] = magenta ? 255 : 0
+    d.data[i + 1] = 0
+    d.data[i + 2] = magenta ? 220 : 0
+    d.data[i + 3] = Math.round((1 - keep) * alpha)
+  }
+}
+
 // view geometry: the image fitted in the stage
 const fit = ref({ x: 0, y: 0, s: 1 })
 function render() {
@@ -146,20 +165,15 @@ function render() {
     c.drawImage(mask, x, y, W.value * s, H.value * s)
   } else {
     c.drawImage(img, x, y, W.value * s, H.value * s)
-    // tint what's excluded (black in the mask), so the kept subject reads clean
+    // what's excluded (black in the mask) under the checker, the picture still showing through
+    // enough to draw an edge against
     const tint = document.createElement('canvas')
     tint.width = W.value
     tint.height = H.value
     const t = tint.getContext('2d', { willReadFrequently: true })!
     t.drawImage(mask, 0, 0)
     const d = t.getImageData(0, 0, W.value, H.value)
-    for (let i = 0; i < d.data.length; i += 4) {
-      const keep = d.data[i]! / 255
-      d.data[i] = 20
-      d.data[i + 1] = 14
-      d.data[i + 2] = 40
-      d.data[i + 3] = Math.round((1 - keep) * 175)
-    }
+    checkerOut(d, W.value, 170)
     t.putImageData(d, 0, 0)
     c.drawImage(tint, x, y, W.value * s, H.value * s)
   }
@@ -213,6 +227,14 @@ function down(e: PointerEvent) {
   const p = toImage(e)
   if (p.x < 0 || p.y < 0 || p.x > W.value || p.y > H.value) return
   if (tool.value === 'points') {
+    // a click on a dot takes it away (the dots are 7 px on screen; a little slack round them)
+    const hit = points.value.findIndex((q) => Math.hypot(q.x - p.x, q.y - p.y) * fit.value.s <= 11)
+    if (hit >= 0) {
+      points.value = points.value.filter((_, i) => i !== hit)
+      render()
+      if (text.value.trim() || points.value.some((q) => q.keep)) detect()
+      return
+    }
     points.value = [...points.value, { x: Math.round(p.x), y: Math.round(p.y), keep: e.button !== 2 && !e.altKey }]
     render()
     detect()
@@ -274,6 +296,14 @@ const cursor = ref<{ x: number; y: number } | null>(null)
 
 // ---- SAM3 ----------------------------------------------------------------------------------
 let seq = 0
+// what the SAM3 job is doing, said plainly: the first one loads the model, the slow part
+function segMessage(job: { status: string; message?: string }) {
+  const m = job.message ?? ''
+  if (m.startsWith('loading')) return 'Loading SAM3… the first one after a restart takes a moment'
+  if (m.startsWith('waits')) return 'Waiting for the GPU: a training run has it, SAM3 goes next'
+  if (job.status === 'queued') return 'Waiting for the GPU…'
+  return 'Finding…'
+}
 async function detect() {
   if (!item.value || (!text.value.trim() && !points.value.some((p) => p.keep))) return
   const mine = ++seq
@@ -289,7 +319,7 @@ async function detect() {
       threshold: threshold.value,
     })
     while (job.status === 'queued' || job.status === 'running') {
-      status.value = job.message || 'Finding…'
+      status.value = segMessage(job)
       await new Promise((r) => setTimeout(r, 1000))
       if (mine !== seq) return
       job = await engine.segmentJob(job.job_id)
@@ -305,7 +335,7 @@ async function detect() {
     const c = wctx()
     c.drawImage(m, 0, 0, W.value, H.value)
     dirty.value = true
-    status.value = 'Found. Click to add (left) or exclude (right), or touch up with the brush.'
+    status.value = 'Found. Click to add (left) or exclude (right), or touch up with Mask out / Paint back.'
     render()
   } catch (e) {
     if (mine === seq) error.value = e instanceof EngineError ? e.message : (e as Error).message
@@ -458,13 +488,7 @@ async function previewTile(it: DatasetItem, mask: HTMLCanvasElement): Promise<st
     mc.drawImage(await loadImg(thumb(it.mask, 256)), 0, 0, w, h)
   }
   const d = mc.getImageData(0, 0, w, h)
-  for (let i = 0; i < d.data.length; i += 4) {
-    const keep = d.data[i]! / 255
-    d.data[i] = 20
-    d.data[i + 1] = 14
-    d.data[i + 2] = 40
-    d.data[i + 3] = Math.round((1 - keep) * 190)
-  }
+  checkerOut(d, w, 200)
   mc.globalCompositeOperation = 'source-over'
   mc.putImageData(d, 0, 0)
   const out = document.createElement('canvas')
@@ -621,7 +645,7 @@ watch(path, load)
             <ZenInput v-model="text" size="sm" placeholder="what to keep, e.g. person" @keydown.enter="detect" />
             <ZenButton size="sm" icon="mdi mdi-magnify" :disabled="busy || !text.trim()" @click="detect">Find</ZenButton>
           </div>
-          <p class="muted small">Or pick <b>Points</b> and click the subject: left-click keeps, right-click excludes.</p>
+          <p class="muted small">Or pick <b>Points</b> and click the subject: left-click keeps, right-click excludes, click a dot to take it away.</p>
           <label class="f small">
             <span class="muted">Confidence {{ threshold.toFixed(2) }}</span>
             <ZenSlider v-model="threshold" :min="0.1" :max="0.9" :step="0.05" />
@@ -636,8 +660,8 @@ watch(path, load)
           <div class="eyebrow">Tools</div>
           <div class="seg">
             <button :class="{ on: tool === 'points' }" title="P" @click="tool = 'points'"><i class="mdi mdi-gesture-tap" /> Points</button>
-            <button :class="{ on: tool === 'brush' }" title="B" @click="tool = 'brush'"><i class="mdi mdi-brush" /> Brush</button>
-            <button :class="{ on: tool === 'erase' }" title="E" @click="tool = 'erase'"><i class="mdi mdi-eraser" /> Erase</button>
+            <button :class="{ on: tool === 'erase' }" title="Paint what's left out of training (E)" @click="tool = 'erase'"><i class="mdi mdi-eraser" /> Mask out</button>
+            <button :class="{ on: tool === 'brush' }" title="Paint back what trains (B)" @click="tool = 'brush'"><i class="mdi mdi-brush" /> Paint back</button>
             <button :class="{ on: tool === 'rect' }" title="R: drag a box to take it out (a watermark)" @click="tool = 'rect'"><i class="mdi mdi-selection" /> Box</button>
           </div>
           <p v-if="tool === 'rect'" class="muted small">Drag a box over what shouldn't train (a watermark, a caption). On an empty mask the rest of the picture is kept.</p>
@@ -647,8 +671,8 @@ watch(path, load)
           </label>
           <div class="row">
             <button class="mini" @click="invert"><i class="mdi mdi-invert-colors" /> Invert</button>
-            <button class="mini" @click="fill(true)">Keep all</button>
-            <button class="mini" @click="fill(false)">Clear</button>
+            <button class="mini" title="Everything trains again: no part left out" @click="fill(true)">Keep all</button>
+            <button class="mini" title="Leave everything out, to paint back only what should train" @click="fill(false)">Drop all</button>
           </div>
         </section>
 

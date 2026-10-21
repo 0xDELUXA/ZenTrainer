@@ -23,6 +23,29 @@ function placeSide() {
   const h = sideEl.value?.offsetHeight ?? 0
   sideTop.value = Math.min(PIN, window.innerHeight - h - 12)
 }
+// as a drawer (a narrow window) it opens under the toolbar, where it sits beside the pictures in a
+// wide one, overlaid instead: following the toolbar as the page scrolls (it sticks at the top)
+const drawerTop = ref(66)
+function placeDrawer() {
+  const bar = document.querySelector('.ds-toolbar')
+  drawerTop.value = Math.max(12, Math.round((bar?.getBoundingClientRect().bottom ?? 56) + 10))
+}
+watch(
+  () => props.drawer,
+  (on) => {
+    window.removeEventListener('scroll', placeDrawer, true)
+    window.removeEventListener('resize', placeDrawer)
+    if (!on) return
+    placeDrawer()
+    window.addEventListener('scroll', placeDrawer, { passive: true, capture: true })
+    window.addEventListener('resize', placeDrawer, { passive: true })
+  },
+  { immediate: true },
+)
+onUnmounted(() => {
+  window.removeEventListener('scroll', placeDrawer, true)
+  window.removeEventListener('resize', placeDrawer)
+})
 let sideObs: ResizeObserver | null = null
 watch(sideEl, (el) => {
   sideObs?.disconnect()
@@ -37,7 +60,6 @@ onUnmounted(() => {
 })
 
 // ---- bulk edit ------------------------------------------------------------------------------
-const bulkOpen = ref(false)
 const bulkText = ref('')
 const findText = ref('')
 // the captions as they were before the last bulk edit, so it can be undone
@@ -122,11 +144,53 @@ async function addInputs(files: FileList | null) {
   if (r.saved.length) view.value = 'pairs'
 }
 
+// ---- health: folds away, remembered per browser; folded, it still loads (the grid's picture
+// flags come from it), it's only hidden ---------------------------------------------------------
+// a section's open/folded, remembered per browser (blocked storage: it just isn't remembered)
+function remembered(key: string, open: boolean) {
+  const r = ref((() => {
+    try {
+      const v = localStorage.getItem(key)
+      return v == null ? open : v !== '0'
+    } catch {
+      return open
+    }
+  })())
+  watch(r, (v) => {
+    try {
+      localStorage.setItem(key, v ? '1' : '0')
+    } catch {
+      // storage blocked
+    }
+  })
+  return r
+}
+const healthOpen = remembered('zentrainer.datasetSide.health', true)
+// faces and how pictures show: settings, folded away until wanted
+const settingsOpen = remembered('zentrainer.datasetSide.settings', false)
+
 // ---- auto-caption: CaptionPanel runs it as a job -----------------------------------------
 // open while this dataset has a caption job going, so coming back to the page shows it
 const capRunning = computed(() => activeCaptions.value.some((j) => j.dataset === props.name))
+// captions: auto-caption and bulk edit, one section (open while a caption job runs here)
 const capOpen = ref(capRunning.value)
-watch(capRunning, (v) => v && (capOpen.value = true))
+const capTab = ref<'auto' | 'bulk'>((() => {
+  try {
+    return localStorage.getItem('zentrainer.datasetSide.capTab') === 'bulk' ? 'bulk' : 'auto'
+  } catch {
+    return 'auto'
+  }
+})())
+watch(capTab, (v) => {
+  try {
+    localStorage.setItem('zentrainer.datasetSide.capTab', v)
+  } catch {
+    // storage blocked
+  }
+})
+watch(capRunning, (v) => {
+  if (v) [capOpen.value, capTab.value] = [true, 'auto']
+})
 function onCaptioned(set: string) {
   if (!sets.value.includes(set)) sets.value = [...sets.value, set]
   load()
@@ -134,11 +198,15 @@ function onCaptioned(set: string) {
 </script>
 
 <template>
-  <aside ref="sideEl" class="ds-side" :class="{ drawer }" :style="drawer ? undefined : { top: `${sideTop}px` }">
+  <aside ref="sideEl" class="ds-side" :class="{ drawer }" :style="drawer ? { top: `${drawerTop}px` } : { top: `${sideTop}px` }">
     <section class="side-sec">
-      <header class="side-head"><span>Health</span><span class="muted small">“{{ activeSet }}”</span></header>
+      <header class="side-head clickable" :title="healthOpen ? 'Fold away' : 'Show the dataset\'s health'" @click="healthOpen = !healthOpen">
+        <span>Health <span class="muted small set-name">“{{ activeSet }}”</span></span>
+        <i :class="healthOpen ? 'mdi mdi-chevron-up' : 'mdi mdi-chevron-down'" />
+      </header>
       <DatasetStats
         v-if="items.length"
+        v-show="healthOpen"
         :key="`${name}:${activeSet}`"
         ref="statsPanel"
         :name="name"
@@ -146,32 +214,25 @@ function onCaptioned(set: string) {
         compact
         @loaded="(s) => (imageFlags = s.current.flags ?? {})"
       />
-    </section>
-    <section class="side-sec">
-      <header class="side-head">
-        <span>Faces</span>
-        <ZenSwitch :model-value="facesSetting" :disabled="facesBusy" @update:model-value="toggleFaces" />
-      </header>
-      <p class="side-note">
-        <template v-if="faces && !faces.available">{{ faces.hint }}</template>
-        <template v-else-if="facesBusy">Checking faces…</template>
-        <template v-else-if="facesSetting && faces?.items">
+      <!-- with faces on, how they read: part of the dataset's health -->
+      <p v-if="healthOpen && facesSetting && (facesBusy || faces?.items)" class="side-note faces-line">
+        <i class="mdi mdi-face-recognition" />
+        <template v-if="facesBusy">Checking faces…</template>
+        <template v-else-if="faces?.items">
           {{ faces.with_face }}/{{ faces.total }} with a face{{ faces.one_identity === false ? ' · mixed people' : ` · alike ${faces.identity?.toFixed(2) ?? '–'}` }}{{ counts.faceIssues ? ` · ${counts.faceIssues} to look at` : '' }}
         </template>
-        <template v-else>Off. On: faces checked on open, a Faces score, and likeness for this dataset's runs.</template>
       </p>
     </section>
     <section class="side-sec">
       <header class="side-head clickable" @click="capOpen = !capOpen">
-        <span>Auto-caption</span><i :class="capOpen ? 'mdi mdi-chevron-up' : 'mdi mdi-chevron-down'" />
+        <span>Captions</span><i :class="capOpen ? 'mdi mdi-chevron-up' : 'mdi mdi-chevron-down'" />
       </header>
-      <CaptionPanel v-if="capOpen" :dataset="name" :items="items" :sets="sets" :selected="[...selected]" :subject="captionSubject" class="side-caption" @changed="onCaptioned" @review="review" />
-    </section>
-    <section class="side-sec">
-      <header class="side-head clickable" @click="bulkOpen = !bulkOpen">
-        <span>Bulk edit</span><i :class="bulkOpen ? 'mdi mdi-chevron-up' : 'mdi mdi-chevron-down'" />
-      </header>
-      <div v-if="bulkOpen" class="side-bulk">
+      <div v-if="capOpen" class="cap-tabs">
+        <button :class="{ on: capTab === 'auto' }" @click="capTab = 'auto'"><i class="mdi mdi-creation-outline" /> Auto-caption</button>
+        <button :class="{ on: capTab === 'bulk' }" @click="capTab = 'bulk'"><i class="mdi mdi-format-text-variant-outline" /> Bulk edit</button>
+      </div>
+      <CaptionPanel v-if="capOpen && capTab === 'auto'" :dataset="name" :items="items" :sets="sets" :selected="[...selected]" :subject="captionSubject" class="side-caption" @changed="onCaptioned" @review="review" />
+      <div v-if="capOpen && capTab === 'bulk'" class="side-bulk">
         <span class="muted small">Every caption in “{{ activeSet }}”:</span>
         <ZenInput v-model="bulkText" placeholder="trigger word / text" size="sm" />
         <div class="side-row">
@@ -199,8 +260,8 @@ function onCaptioned(set: string) {
             :class="{ on: c === activeControl }"
             role="radio"
             :aria-checked="c === activeControl"
-            :title="`Show “${c}”'s inputs in the pairs view, the grid and the lightbox`"
-            @click="activeControl = c"
+            :title="c === activeControl ? `Showing “${c}”'s inputs: click again to hide them` : `Show “${c}”'s inputs in the pairs view, the grid and the lightbox`"
+            @click="activeControl = c === activeControl ? '' : c"
           >
             <i :class="c === activeControl ? 'mdi mdi-radiobox-marked' : 'mdi mdi-radiobox-blank'" />
             <span class="ellipsis">{{ c }}</span>
@@ -222,7 +283,15 @@ function onCaptioned(set: string) {
       </template>
     </section>
     <section class="side-sec">
-      <header class="side-head"><span>Display</span></header>
+      <header class="side-head clickable" @click="settingsOpen = !settingsOpen">
+        <span>Settings</span><i :class="settingsOpen ? 'mdi mdi-chevron-up' : 'mdi mdi-chevron-down'" />
+      </header>
+      <template v-if="settingsOpen">
+      <div class="side-row" :title="faces && !faces.available ? faces.hint : 'Faces checked on open, a Faces score in its health, and likeness for this dataset\'s runs'">
+        <span class="small">Check faces</span><span class="spacer" />
+        <ZenSwitch :model-value="facesSetting" :disabled="facesBusy || (!!faces && !faces.available)" @update:model-value="toggleFaces" />
+      </div>
+      <p v-if="faces && !faces.available" class="side-note">{{ faces.hint }}</p>
       <div class="side-row">
         <span class="small">Crop to the card</span><span class="spacer" />
         <ZenSwitch :model-value="fit === 'cover'" @update:model-value="fit = $event ? 'cover' : 'contain'" />
@@ -231,6 +300,7 @@ function onCaptioned(set: string) {
         <span class="small">Show masks</span><span class="spacer" />
         <ZenSwitch :model-value="showMasks" :disabled="!counts.masked" @update:model-value="showMasks = $event" />
       </div>
+      </template>
     </section>
   </aside>
 </template>
@@ -244,7 +314,6 @@ function onCaptioned(set: string) {
 }
 .ds-side.drawer {
   position: fixed;
-  top: 12px;
   right: 12px;
   bottom: 12px;
   z-index: 40;
@@ -275,6 +344,38 @@ function onCaptioned(set: string) {
   gap: 8px;
   font-size: 13px;
   font-weight: 600;
+}
+.cap-tabs {
+  display: flex;
+  gap: 4px;
+}
+.cap-tabs button {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 5px 8px;
+  border: 1px solid color-mix(in srgb, var(--zen-border) 70%, transparent);
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--zen-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.cap-tabs button.on {
+  background: var(--zen-surface-2);
+  color: var(--zen-text);
+}
+.faces-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.set-name {
+  font-weight: 400;
+  margin-left: 4px;
 }
 .side-head.clickable {
   cursor: pointer;

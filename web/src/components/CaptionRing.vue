@@ -1,7 +1,7 @@
 <script setup lang="ts">
-// A dataset at a glance: the ring is how much of it is captioned (full and green when every image
-// has a caption, the share so far in the warning colour while some are missing), the pentagon
-// inside it the health of its caption set (when it's been measured).
+// A dataset at a glance: the pentagon is the health of its caption set (when it's been measured);
+// a ring round it, in the warning colour, says how much is captioned while some images still aren't
+// (a fully captioned one has no ring: nothing to do there).
 import { computed } from 'vue'
 import HealthPentagon from '@/components/HealthPentagon.vue'
 
@@ -18,11 +18,11 @@ const full = computed(() => props.total > 0 && props.done >= props.total)
 
 <template>
   <span class="badge" :style="{ width: `${size}px`, height: `${size}px` }">
-    <svg class="ring" :class="{ full }" :width="size" :height="size" :viewBox="`0 0 ${size} ${size}`" aria-hidden="true">
+    <svg v-if="!full" class="ring" :width="size" :height="size" :viewBox="`0 0 ${size} ${size}`" aria-hidden="true">
       <circle class="track" :cx="size / 2" :cy="size / 2" :r="R" :stroke-width="SW" />
       <circle class="fill" :cx="size / 2" :cy="size / 2" :r="R" :stroke-width="SW" :stroke-dasharray="`${share * C} ${C}`" />
     </svg>
-    <HealthPentagon v-if="scores" class="pent" :scores="scores" :size="size - 2 * SW - 5" />
+    <HealthPentagon v-if="scores" class="pent" :scores="scores" :size="full ? size : size - 2 * SW - 5" />
   </span>
 </template>
 
@@ -47,9 +47,6 @@ circle {
 .fill {
   stroke: var(--zen-warn);
   stroke-linecap: round;
-}
-.full .fill {
-  stroke: var(--zen-ok, var(--zen-accent));
 }
 .pent {
   position: relative;

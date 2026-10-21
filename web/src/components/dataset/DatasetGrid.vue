@@ -18,7 +18,9 @@ const { zoom, inputs, fit, showMasks, activeSet, cap, selected, isMuted, setMute
     >
       <button class="thumb" :title="it.path" :data-peek="full(it)" @click="onItemClick(it, i, $event)">
         <img :src="thumb(it, thumbSize)" loading="lazy" :alt="cap(it)" :class="{ 'mask-dim': showMasks && it.mask }" :style="{ objectFit: fit }" />
-        <!-- the mask view: the picture dims, and only what the mask trains shows at full strength -->
+        <!-- the mask view: what the mask leaves out is a purple/black checker (Source's missing
+             texture: unmistakable on any picture), and only what it trains shows -->
+        <span v-if="showMasks && it.mask" class="mask-checker" />
         <img
           v-if="showMasks && it.mask"
           :src="thumb(it, thumbSize)"
@@ -230,7 +232,13 @@ const { zoom, inputs, fit, showMasks, activeSet, cap, selected, isMuted, setMute
 }
 /* the mask view */
 .thumb img.mask-dim {
-  filter: grayscale(0.85) brightness(0.32);
+  opacity: 0;
+}
+.thumb .mask-checker {
+  position: absolute;
+  inset: 0;
+  background: repeating-conic-gradient(#f0f 0 25%, #000 0 50%) 0 0 / 16px 16px;
+  pointer-events: none;
 }
 .thumb img.mask-lit {
   mask-mode: luminance;

@@ -83,15 +83,18 @@ def run(job: SegmentJob) -> None:
     from comfy_extras.nodes_sam3 import SAM3_Detect
     from PIL import Image
 
-    job.status = "running"
+    job.status, job.message = "running", "starting"
     try:
         names = models()
         if not names:
             raise RuntimeError("no SAM3 model: put sam3.1_multiplex_fp16.safetensors in models/checkpoints (Models page)")
         name = names[0]
         if name not in _model:
+            # the first one loads the model: say so, it's the slow part
+            job.message = f"loading SAM3 ({name})"
             _model.clear()
             _model[name] = nodes.CheckpointLoaderSimple().load_checkpoint(name)[:2]
+        job.message = "finding"
         model, clip = _model[name]
         with Image.open(job.image) as im:
             rgb = im.convert("RGB")
@@ -108,6 +111,6 @@ def run(job: SegmentJob) -> None:
         mask = out.result[0] if hasattr(out, "result") else out[0]
         m = mask.reshape(-1, *mask.shape[-2:])[0].float().clamp(0, 1).cpu().numpy()
         Image.fromarray((m * 255).astype(np.uint8), mode="L").resize(rgb.size, Image.Resampling.BILINEAR).save(_out(job.job_id))
-        job.status = "done"
+        job.status, job.message = "done", ""
     except Exception as e:
         job.status, job.message = "error", str(e) or type(e).__name__

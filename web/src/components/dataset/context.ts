@@ -38,14 +38,20 @@ export function useDataset(name: () => string) {
       return {}
     }
   })()
-  const view = ref<'grid' | 'list' | 'pairs'>(saved.view ?? 'grid')
+  // edit pairs is for working on the inputs, not a way to browse: a dataset always opens in the grid
+  // or the list (the last of those used), and pairs is never the one remembered
+  const base = ref<'grid' | 'list'>(saved.view === 'list' ? 'list' : 'grid')
+  const view = ref<'grid' | 'list' | 'pairs'>(base.value)
+  watch(view, (v) => {
+    if (v !== 'pairs') base.value = v
+  })
   const zoom = ref<number>(saved.zoom ?? 200)
   const fit = ref<'cover' | 'contain'>(saved.fit ?? 'cover')
   const showMasks = ref<boolean>(saved.masks ?? false) // dim what each mask leaves out, on the grid
   const sideOpen = ref<boolean>(saved.side ?? true) // the side panel: health, faces, auto-caption, bulk edit, display
   watch([view, zoom, fit, showMasks, sideOpen], () => {
     try {
-      localStorage.setItem(PREFS, JSON.stringify({ view: view.value, zoom: zoom.value, fit: fit.value, masks: showMasks.value, side: sideOpen.value }))
+      localStorage.setItem(PREFS, JSON.stringify({ view: base.value, zoom: zoom.value, fit: fit.value, masks: showMasks.value, side: sideOpen.value }))
     } catch {
       // storage blocked
     }
@@ -82,7 +88,8 @@ export function useDataset(name: () => string) {
         if (facesOn && !faces.value) checkFaces() // cached per picture: quick after the first time
       }
       controlSets.value = r.control_sets ?? []
-      if (!controlSets.value.includes(activeControl.value)) activeControl.value = controlSets.value[0] ?? ''
+      // none shown until one's picked (opening a dataset shows its pictures, not their inputs)
+      if (activeControl.value && !controlSets.value.includes(activeControl.value)) activeControl.value = ''
       sets.value = [...new Set([...r.sets, ...sets.value])].sort((a, b) => (a === 'default' ? -1 : b === 'default' ? 1 : a.localeCompare(b)))
       error.value = null
     } catch (e) {
@@ -320,7 +327,7 @@ export function useDataset(name: () => string) {
 
   // ---- pictures -------------------------------------------------------------------------------
   // the remembered view, except Pairs on a dataset without any (it shows the grid there)
-  const layout = computed(() => (view.value === 'pairs' && !controlSets.value.length ? 'grid' : view.value))
+  const layout = computed(() => (view.value === 'pairs' && !activeControl.value ? base.value : view.value))
   // an input file sits beside its result: same folder, so /view takes the result's subfolder
   const ctrlView = (it: DatasetItem, p: string) =>
     `${viewUrl({ filename: p.split('/').at(-1)!, subfolder: it.subfolder, type: 'input' })}&v=${bust.value}`

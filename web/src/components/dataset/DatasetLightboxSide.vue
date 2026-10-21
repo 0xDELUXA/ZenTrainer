@@ -80,6 +80,7 @@ const toggleSet = (st: string) => (openSets.has(st) ? openSets.delete(st) : open
   color: var(--zen-warn);
 }
 .other-set {
+  align-self: stretch;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -161,10 +162,21 @@ const toggleSet = (st: string) => (openSets.has(st) ? openSets.delete(st) : open
   flex-direction: column;
   gap: 10px;
   align-items: flex-start;
+  min-width: 0;
+}
+/* nothing wider than the panel: long captions (a JSON one has no spaces to break at) wrap anywhere */
+.side > * {
+  max-width: 100%;
+  min-width: 0;
+}
+.side :is(p, dd, .small) {
+  overflow-wrap: anywhere;
 }
 .side-cap {
   display: block;
+  box-sizing: border-box;
   width: 100%;
+  overflow-wrap: anywhere;
   resize: none;
   font: inherit;
   font-size: 13px;
