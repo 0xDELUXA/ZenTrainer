@@ -21,6 +21,16 @@ def register(server) -> None:
 
         return web.json_response({"families": await asyncio.to_thread(families.list_families)})
 
+    @routes.post("/zentrainer/api/families/relist")
+    async def relist_families(_request):
+        """Re-list the model makers' Hugging Face repos now (new models, without waiting for the cache)."""
+        from ...models import families
+
+        try:
+            return web.json_response(await asyncio.to_thread(families.relist))
+        except Exception as e:
+            return _bad(f"can't list Hugging Face: {e}", 502)
+
     @routes.get("/zentrainer/api/families/{fid}")
     async def get_family(request):
         """One family; ?repo=1 adds every build in its Hugging Face repo (cached a day,

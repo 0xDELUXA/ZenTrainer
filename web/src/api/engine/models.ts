@@ -108,6 +108,8 @@ export interface ModelDownload {
 
 export const modelsApi = {
   families: () => call<{ families: ModelFamily[] }>('/families').then((r) => r.families),
+  /** re-list the model makers' Hugging Face repos now: models added since the cached listing */
+  relistFamilies: () => call<{ families: number; new: string[] }>('/families/relist', { method: 'POST' }),
   family: (id: string, repo = false, refresh = false) =>
     call<ModelFamily>(`/families/${encodeURIComponent(id)}?repo=${repo ? 1 : 0}${refresh ? '&refresh=1' : ''}`),
   downloads: () =>

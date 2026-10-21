@@ -61,6 +61,9 @@ NOT_PICTURE_VAE = re.compile(r"audio", re.I)
 NOT_TE = re.compile(r"upsampl|prompt_?enhanc|rewriter", re.I)
 HF_URL = re.compile(r"^https://huggingface\.co/([\w.-]+/[\w.-]+)/resolve/([\w.-]+)/(.+)$")
 REPO_TTL = 24 * 3600
+# which repos the publishers have: shorter, so a model they add shows up the same day (the
+# catalog's Re-list refetches it at once)
+PUBLISHERS_TTL = 3 * 3600
 
 
 @dataclass
@@ -347,7 +350,7 @@ def publisher_repos(refresh: bool = False, offline: bool = False) -> list[dict]:
     """[{id, created, gated}] for every Comfy-Org repo and each maker's ComfyUI-layout repos;
     cached like repo listings."""
     cache = _cache_dir() / "publishers.json"
-    if cache.is_file() and (offline or (not refresh and time.time() - cache.stat().st_mtime < REPO_TTL)):
+    if cache.is_file() and (offline or (not refresh and time.time() - cache.stat().st_mtime < PUBLISHERS_TTL)):
         return json.loads(cache.read_text(encoding="utf-8"))
     if offline:
         raise LookupError("publishers not listed yet")
@@ -558,6 +561,28 @@ def _prefetch() -> None:
             pass
     with _lock:
         _add_repo_families(_families or {}, offline=True)
+
+
+def relist() -> dict:
+    """Re-list the publishers' repos on Hugging Face now and rebuild the catalog, so a model added
+    since the last listing shows up without waiting for the cache. The repos' file lists are
+    fetched only for repos not listed before (each family's own refresh refetches those).
+    Returns the families that are new."""
+    global _families
+    before = set(_all())
+    repos = publisher_repos(refresh=True)  # raises when Hugging Face can't be reached
+    for m in repos:
+        if NOT_IMAGE.search(m["id"].split("/", 1)[1]):
+            continue
+        try:
+            repo_files(m["id"])  # from the cache when it's there
+        except Exception as e:
+            log.info("[ZenTrainer] can't list %s: %s", m["id"], e)
+    with _lock:
+        _families = None
+    fams = _all()
+    new = sorted(fams[f].name for f in set(fams) - before)
+    return {"families": len(fams), "new": new}
 
 
 def list_families() -> list[dict]:

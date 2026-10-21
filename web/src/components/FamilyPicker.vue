@@ -63,6 +63,24 @@ function detect(list: ModelFamily[]): string {
   return hit?.id ?? CUSTOM
 }
 
+// Hugging Face is listed in the background and cached for a few hours; a model its makers
+// added since then shows up on Re-list
+const relisting = ref(false)
+const relistNote = ref<string | null>(null)
+async function relist() {
+  relisting.value = true
+  relistNote.value = null
+  try {
+    const r = await engine.relistFamilies()
+    await loadFamilies()
+    relistNote.value = r.new.length ? `New: ${r.new.join(', ')}` : 'Up to date: no new models'
+  } catch (e) {
+    relistNote.value = String((e as Error).message ?? e)
+  } finally {
+    relisting.value = false
+  }
+}
+
 async function loadFamilies() {
   try {
     families.value = await engine.families()
@@ -230,6 +248,7 @@ defineExpose({ refresh: () => fam.value && open(fam.value.id, true) })
 
 <template>
   <div class="fp">
+    <div class="pick-row">
     <ZenCombo
       :model-value="famId"
       :items="familyItems"
@@ -258,6 +277,16 @@ defineExpose({ refresh: () => fam.value && open(fam.value.id, true) })
         </div>
       </template>
     </ZenCombo>
+    <button
+      class="relist"
+      :disabled="relisting"
+      title="Re-list the model makers' Hugging Face repos now: models they've added show up without waiting for the cache"
+      @click="relist"
+    >
+      <i class="mdi mdi-refresh" :class="{ spin: relisting }" />
+    </button>
+    </div>
+    <div v-if="relistNote" class="relist-note small muted">{{ relistNote }}</div>
 
     <div v-if="fam" class="parts">
       <div v-for="p in parts" :key="p.folder" class="part">
@@ -318,6 +347,43 @@ defineExpose({ refresh: () => fam.value && open(fam.value.id, true) })
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+.pick-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.pick-row > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+.relist {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border: 1px solid color-mix(in srgb, var(--zen-border) 70%, transparent);
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--zen-muted);
+  font-size: 16px;
+  cursor: pointer;
+}
+.relist:hover:not(:disabled) {
+  color: var(--zen-text);
+  background: var(--zen-surface-2);
+}
+.relist .spin {
+  animation: relist-spin 0.9s linear infinite;
+}
+@keyframes relist-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.relist-note {
+  margin-top: -4px;
 }
 .fam-opt {
   display: flex;
