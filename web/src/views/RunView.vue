@@ -22,6 +22,20 @@ const run = useRun(toRef(props, 'id'))
 provide(RUN, run)
 const { detail, error, busy, lrInput, status, running, total, marks, likeSteps, send, retryable, canResume, resumePoint, resume } = run
 const lrOpen = ref(false)
+// resolution stages for the speed strip: each lower stage trains until its `until`, then the
+// next resolution blends in over `stage_blend` of the run
+const stages = computed(() => {
+  const d = detail.value?.spec.dataset
+  const steps = total.value
+  if (!d?.stages?.length || !steps) return []
+  const blend = d.stage_blend ?? 0.2
+  const ladder = [...d.stages].sort((a, b) => a.until - b.until)
+  return ladder.map((st, i) => ({
+    start: Math.round(st.until * steps),
+    end: Math.round(Math.min(1, st.until + blend) * steps),
+    label: `→ ${ladder[i + 1]?.resolution ?? d.resolution}`,
+  }))
+})
 const modelFile = computed(() => {
   const m = detail.value?.spec.model
   return (m?.kind === 'split' ? m.unet_name : m?.ckpt_name) ?? ''
@@ -74,7 +88,7 @@ const modelFile = computed(() => {
       <div class="layout">
         <div class="main">
           <section class="card">
-            <LossChart :rows="detail.metrics" :total="total" :marks="marks" :val="detail.validation" :like="likeSteps" :height="200" />
+            <LossChart :rows="detail.metrics" :total="total" :marks="marks" :val="detail.validation" :like="likeSteps" :stages="stages" :height="200" />
           </section>
           <RunSamples />
         </div>
