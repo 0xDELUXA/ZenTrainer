@@ -62,6 +62,15 @@ watch(
 )
 // the catalog's LoRAs that fit the selected model
 const catalog = ref<CaptionLora[]>([])
+// a LoRA by a name you can read: the catalog's label for one of its files, else the file's name
+// without its folder or extension (the whole path on hover, the folder under it in the menu)
+const loraLabel = (n: string) => {
+  const file = n.split('/').pop() ?? n
+  return catalog.value.find((e) => e.file.split('/').pop() === file)?.label ?? file.replace(/\.safetensors$/, '')
+}
+const loraItems = computed(() =>
+  teLoras.value.map((n) => ({ value: n, label: loraLabel(n), keywords: n, dir: n.includes('/') ? n.slice(0, n.lastIndexOf('/')) : '' })),
+)
 const suggested = computed(() => catalog.value.filter((e) => new RegExp(e.base, 'i').test(form.clip_name)))
 const sizeOf = (n: number) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(n / 1e6))} MB`)
 const isOn = (e: CaptionLora) => loras.value.some((l) => l.name.split('/').at(-1) === e.file.split('/').at(-1))
@@ -236,6 +245,27 @@ function removeStyle() {
   form.style = 'custom'
 }
 
+// a structured caption shown readably: pretty-printed (compact JSON has no spaces to wrap at); the
+// running job's one line shows its short_description
+function asJson(t: string): Record<string, unknown> | null {
+  const s = t.trim()
+  if (!s.startsWith('{')) return null
+  try {
+    const o = JSON.parse(s)
+    return o && typeof o === 'object' && !Array.isArray(o) ? o : null
+  } catch {
+    return null
+  }
+}
+const pretty = (t: string) => {
+  const o = asJson(t)
+  return o ? JSON.stringify(o, null, 1) : t
+}
+const gist = (t: string) => {
+  const o = asJson(t)
+  return o ? `${String(o.short_description ?? '')} {…}` : t
+}
+
 const validSet = computed(() => form.set === 'default' || /^[a-z0-9][a-z0-9_-]{0,23}$/.test(form.set))
 
 // ---- jobs ------------------------------------------------------------------------------------
@@ -359,7 +389,18 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
         </button>
         <div class="loras">
           <div v-for="(l, i) in loras" :key="i" class="lora">
-            <ZenCombo v-model="l.name" :items="teLoras.map((n) => ({ value: n, label: n }))" :item-height="30" placeholder="A text-encoder LoRA" size="sm" />
+            <ZenCombo v-model="l.name" :items="loraItems" :item-height="36" placeholder="A text-encoder LoRA" size="sm" :title="l.name">
+              <template #selected="{ item }">
+                <span v-if="item" class="lname ellipsis">{{ item.label }}</span>
+                <span v-else class="muted">A text-encoder LoRA</span>
+              </template>
+              <template #option="{ item }">
+                <span class="lopt">
+                  <span class="ellipsis">{{ item.label }}</span>
+                  <span v-if="(item as { dir?: string }).dir" class="muted small ellipsis">{{ (item as { dir?: string }).dir }}</span>
+                </span>
+              </template>
+            </ZenCombo>
             <ZenNumber v-model="l.strength" :min="-2" :max="2" :step="0.05" :precision="2" size="sm" />
             <button class="x" title="Remove" @click="loras.splice(i, 1)"><i class="mdi mdi-close" /></button>
           </div>
@@ -376,7 +417,7 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
             </button>
           </div>
           <div v-if="loraChoices.length" class="choices">
-            <button v-for="c in loraChoices" :key="c.file" class="hear-tip" @click="fetchLora(c.file)">{{ c.file }}</button>
+            <button v-for="c in loraChoices" :key="c.file" class="hear-tip choice" :title="c.file" @click="fetchLora(c.file)">{{ c.file.split('/').pop() }}</button>
           </div>
           <div v-if="loraNote" class="muted small">{{ loraNote }}</div>
         </div>
@@ -457,7 +498,8 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
       <div class="pv-grid">
         <div v-for="r in preview.results ?? []" :key="r.path" class="pv">
           <img :src="thumb(r.path)" alt="" />
-          <p class="small">{{ r.text }}</p>
+          <pre v-if="asJson(r.text)" class="small json">{{ pretty(r.text) }}</pre>
+          <p v-else class="small">{{ r.text }}</p>
         </div>
         <div v-for="n in Math.max(0, (preview.total || 3) - (preview.results?.length ?? 0))" :key="`w${n}`" class="pv waiting">
           <div class="ph"><i class="mdi mdi-creation-outline" /></div>
@@ -470,13 +512,12 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
     <!-- the running job -->
     <div v-if="active" class="job live">
       <div class="line">
-        <b class="small">{{ active.status === 'queued' ? 'Queued' : `Captioning ${active.done}/${active.total || '…'}` }}</b>
-        <span class="muted small">into “{{ active.set_name }}”<template v-if="active.message"> · {{ active.message }}</template></span>
-        <span class="spacer" />
-        <ZenButton size="sm" icon="mdi mdi-stop" title="Stop at the next image; what's written stays (and can be undone)" @click="act(active, 'cancel')">Cancel</ZenButton>
+        <b class="small nowrap">{{ active.status === 'queued' ? 'Queued' : `Captioning ${active.done}/${active.total || '…'}` }}</b>
+        <span class="muted small ellipsis grow" :title="active.message || undefined">into “{{ active.set_name }}”<template v-if="active.message"> · {{ active.message }}</template></span>
+        <ZenButton class="nogrow" size="sm" icon="mdi mdi-stop" title="Stop at the next image; what's written stays (and can be undone)" @click="act(active, 'cancel')">Cancel</ZenButton>
       </div>
       <div class="bar"><div :style="{ width: `${active.total ? (active.done / active.total) * 100 : 0}%` }" /></div>
-      <div v-if="active.text" class="small latest"><span class="mono muted">{{ active.file }}</span> {{ active.text }}</div>
+      <div v-if="active.text" class="small latest" :title="pretty(active.text)"><span class="mono muted">{{ active.file }}</span> {{ gist(active.text) }}</div>
     </div>
 
     <!-- what earlier jobs did -->
@@ -721,7 +762,34 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
   background: var(--zen-accent);
   transition: width var(--zen-dur, 0.3s) ease;
 }
+.line .grow {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.line .nogrow,
+.line .nowrap {
+  flex: none;
+  white-space: nowrap;
+}
+.pv .json {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--zen-mono);
+  font-size: 11px;
+  line-height: 1.35;
+  scrollbar-width: thin;
+}
+.pv p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .latest {
+  overflow-wrap: anywhere;
   color: var(--zen-text);
   line-height: 1.45;
   display: -webkit-box;
@@ -747,6 +815,22 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
   grid-template-columns: minmax(0, 1fr) 84px 22px;
   gap: 4px;
   align-items: center;
+}
+.lname {
+  display: block;
+  min-width: 0;
+}
+.lopt {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+.choice {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .lora-add {
   display: flex;

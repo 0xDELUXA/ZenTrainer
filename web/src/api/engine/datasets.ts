@@ -106,6 +106,10 @@ export type CaptionMode = 'missing' | 'all' | 'selected'
 
 export interface CaptionJob {
   job_id: string
+  /** a prompt rewrite: the prompts (no dataset; the rewrites are its results) */
+  rewrite?: string[]
+  /** how its answers are kept ("fibo_json": structured captions) */
+  format?: CaptionFormat
   dataset: string
   set_name: string
   clip_name: string
