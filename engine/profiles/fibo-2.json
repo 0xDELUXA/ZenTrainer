@@ -1,14 +1,27 @@
 {
   "families": ["fibo-2-0"],
   "status": "recipe",
-  "summary": "Fibo 2.0 Dev as ComfyUI's support recommends: Euler, simple, 30 steps, CFG 5, the empty null caption as the negative.",
+  "summary": "Fibo 2.0 Dev with Bria's own LoRA recipe (rank 64 on every linear layer, 1e-4 over 8 accumulated samples, their noise sampling) and ComfyUI's sample settings (Euler, simple, 30 steps, CFG 5).",
   "sources": [
+    {"label": "Bria's Fibo 2.0 LoRA trainer (fine_tuning/train_lora.py, gated)", "url": "https://huggingface.co/briaai/Fibo-2.0-dev/blob/main/fine_tuning/train_lora.py"},
     {"label": "Fibo 2.0 support in ComfyUI (PR 17240)", "url": "https://github.com/Comfy-Org/ComfyUI/pull/17240"},
     {"label": "Fibo 2.0 in ComfyUI", "url": "https://huggingface.co/Comfy-Org/Fibo-2.0"},
     {"label": "Fibo-2.0-dev model card", "url": "https://huggingface.co/briaai/Fibo-2.0-dev"}
   ],
   "train": {
-    "dataset": {"resolution": 1024}
+    "dataset": {"resolution": 1024, "caption_dropout": 0.1},
+    "network": {"rank": 64, "alpha": 64, "targets": "all"},
+    "optim": {
+      "optimizer": "AdamW",
+      "learning_rate": 0.0001,
+      "weight_decay": 0.01,
+      "scheduler": "constant",
+      "max_grad_norm": 1.0,
+      "batch_size": 1,
+      "grad_accumulation_steps": 8,
+      "steps": 1000
+    },
+    "objective": {"target": "native", "loss": "mse", "timesteps": "logit_normal", "logit_mean": 1.15, "logit_std": 1.0, "uniform_mix": 0.1, "shift": 1.0}
   },
   "samples": {
     "steps": 30,
@@ -19,9 +32,11 @@
   },
   "notes": [
     "Train on Dev. Edit Turbo is the 4-step, CFG 1 edit build: its settings make Dev previews look broken.",
+    "Bria's recipe: AdamW at 1e-4, constant, over 8 accumulated samples a step (batch 1); the same 1e-4 on single samples moves far faster. Their 1000 steps are 8000 samples.",
+    "Their noise levels: sigma = sigmoid(N(m, 1)) for 90% of samples, uniform for the rest, with m = 1.15 at 1024 (0.5 + 0.65 x (tokens - 256) / 3840; about 0.85 at 768). Shift 1 keeps that sigma as drawn, not re-skewed by the sampling shift.",
+    "They adapt every linear layer (415) at rank 64; text dropout 0.1 swaps in the null caption, which is the empty prompt in ComfyUI.",
     "Trained around 1 megapixel (Bria's sizes are multiples of 16 within 10% of 1 MP).",
-    "An empty negative is the null caption Fibo 2.0 was trained with for classifier-free guidance.",
-    "Fibo 2.0 is trained on structured JSON captions; plain text also encodes.",
-    "Captions with text to render: TextEncodeFibo2 shows Qwen3-VL images of that text only below sigma 0.9, while training encodes them at every noise level."
+    "Prefer structured JSON captions, as Bria's model card and trainer do: the model was trained on them, and they're what you prompt with. Plain sentences also work.",
+    "Captions with text to render: Bria's trainer and TextEncodeFibo2 show Qwen3-VL images of that text only below sigma 0.9; ZenTrainer encodes them at every noise level."
   ]
 }
