@@ -338,9 +338,10 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
     # H3 builds references/keyframes its own way; other runs keep their caches
     key = cache_key(items, spec, encoder_id + ("|h3" if h3 and (spec.edit or spec.keyframes) else ""))
     path = cache_dir / key
+    texts = TextCache(cache_dir, encoder_id)
     if (path / "dataset.pt").is_file():
         try:
-            ds = _from_plain(torch.load(path / "dataset.pt", weights_only=False))
+            ds = _from_plain(torch.load(path / "dataset.pt", weights_only=False), texts)
         except Exception as e:  # noqa: BLE001 - cut short or from an older build: rebuild it
             logging.warning("[ZenTrainer] dataset cache %s couldn't be read (%s); rebuilding it", key, e)
             shutil.rmtree(path, ignore_errors=True)
@@ -439,8 +440,11 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
 
     conditionings = []
     for n, c in enumerate(captions):
-        tokens = clip.tokenize(c)
-        conditionings.append(_to_cpu(clip.encode_from_tokens_scheduled(tokens)))
+        cond = texts.get(c)
+        if cond is None:
+            cond = _to_cpu(clip.encode_from_tokens_scheduled(clip.tokenize(c)))
+            texts.put(c, cond)
+        conditionings.append(cond)
         if progress:
             progress(len(items) + n + 1, len(items) + len(captions), "encoding captions")
 
@@ -473,17 +477,54 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
     ds = Dataset(samples, conditionings, captions, cap_index[""], owners=owners)
     path.mkdir(parents=True, exist_ok=True)
     tmp = path / ".dataset.pt.tmp"  # whole or not at all: a cut-short cache would fail every later run
-    torch.save(_to_plain(ds), tmp)
+    torch.save(_to_plain(ds, texts), tmp)
     os.replace(tmp, path / "dataset.pt")
-    (path / CACHE_SOURCE).write_text(json.dumps({"folder": spec.folder}))
+    (path / CACHE_SOURCE).write_text(json.dumps({"folder": spec.folder, "text": texts.dir.name,
+                                                 "captions": [texts.key(c) for c in captions]}))
     prune_caches(cache_dir, spec.folder)
     return _expand_repeats(ds, items)
 
 
 # Each caption or mask edit makes a new cache (the key covers them); the older ones are kept for a
-# few edits back, then dropped. CACHE_SOURCE says which dataset a cache belongs to.
+# few edits back, then dropped. CACHE_SOURCE says which dataset a cache belongs to, and which
+# captions it uses from the text cache.
 CACHE_SOURCE = "source.json"
 CACHES_PER_DATASET = 3
+ORPHAN_DAYS = 7  # a cache from before they recorded their dataset: dropped once this old
+TEXT_GRACE = 86400  # s an encoding no cache names is kept anyway (a build may be writing its cache)
+
+
+class TextCache:
+    """Captions' text encodings, one file each, shared by every dataset cache with the same text
+    encoder: resolution stages, bucket changes and later runs on the same captions reuse them
+    (a caption's encoding doesn't depend on the pictures). They're most of a cache's size: Fibo
+    2.0's encoder hands the model 18 layers, ~100 MB for one structured caption."""
+
+    def __init__(self, cache_dir: Path, encoder_id: str):
+        self.dir = cache_dir / "text" / hashlib.sha256(encoder_id.encode()).hexdigest()[:16]
+
+    @staticmethod
+    def key(caption: str) -> str:
+        return hashlib.sha256(caption.encode()).hexdigest()[:24]
+
+    def get(self, caption: str):
+        f = self.dir / f"{self.key(caption)}.pt"
+        if not f.is_file():
+            return None
+        try:
+            cond = torch.load(f, weights_only=False)
+        except Exception as e:  # noqa: BLE001 - cut short: encode it again
+            logging.warning("[ZenTrainer] text cache %s couldn't be read (%s); encoding it again", f.name, e)
+            return None
+        os.utime(f)
+        return cond
+
+    def put(self, caption: str, cond) -> None:
+        self.dir.mkdir(parents=True, exist_ok=True)
+        f = self.dir / f"{self.key(caption)}.pt"
+        tmp = f.with_suffix(".tmp")
+        torch.save(cond, tmp)
+        os.replace(tmp, f)
 
 
 def cache_folder(path: Path) -> str | None:
@@ -494,10 +535,42 @@ def cache_folder(path: Path) -> str | None:
 
 
 def prune_caches(cache_dir: Path, folder: str, keep: int = CACHES_PER_DATASET) -> None:
-    mine = [p for p in cache_dir.iterdir() if p.is_dir() and (p / "dataset.pt").is_file() and cache_folder(p) == folder]
-    mine.sort(key=lambda p: (p / "dataset.pt").stat().st_mtime, reverse=True)
-    for old in mine[keep:]:
+    import time
+
+    caches = [p for p in cache_dir.iterdir() if p.is_dir() and (p / "dataset.pt").is_file()]
+    mine = sorted((p for p in caches if cache_folder(p) == folder), key=lambda p: (p / "dataset.pt").stat().st_mtime, reverse=True)
+    gone = set(mine[keep:])
+    # caches from before they said whose they are: nothing would ever drop them
+    gone |= {p for p in caches if cache_folder(p) is None and time.time() - (p / "dataset.pt").stat().st_mtime > ORPHAN_DAYS * 86400}
+    for old in gone:
         shutil.rmtree(old, ignore_errors=True)
+    prune_text(cache_dir)
+
+
+def text_files(cache: Path) -> list[Path]:
+    """The text-cache files one dataset cache uses."""
+    try:
+        src = json.loads((cache / CACHE_SOURCE).read_text())
+    except (OSError, ValueError):
+        return []
+    if not src.get("text"):
+        return []
+    return [cache.parent / "text" / src["text"] / f"{k}.pt" for k in src.get("captions") or []]
+
+
+def prune_text(cache_dir: Path, grace: float = TEXT_GRACE) -> int:
+    """Drop the text encodings no dataset cache uses (past `grace` seconds: a build may be writing
+    its cache); returns the bytes freed."""
+    import time
+
+    used = {f for p in cache_dir.iterdir() if p.is_dir() and (p / "dataset.pt").is_file() for f in text_files(p)}
+    freed = 0
+    text_root = cache_dir / "text"
+    for f in text_root.glob("*/*.pt") if text_root.is_dir() else []:
+        if f not in used and time.time() - f.stat().st_mtime > grace:
+            freed += f.stat().st_size
+            f.unlink(missing_ok=True)
+    return freed
 
 
 def _encode(vae, pixels: torch.Tensor, path: Path) -> torch.Tensor:
@@ -529,14 +602,16 @@ def _encode_audio(audio_vae, path: Path, t0: float, t1: float) -> torch.Tensor |
     return audio_vae.encode(wave.movedim(1, -1))[0].float().cpu()  # (C, 2, Ta)
 
 
-def _to_plain(ds: Dataset) -> dict:
+def _to_plain(ds: Dataset, texts: "TextCache | None" = None) -> dict:
     return {
-        "version": 3,
+        # 4: the captions' encodings are in the text cache (named by "text_keys"), not in here
+        "version": 4 if texts else 3,
+        "text_keys": [texts.key(c) for c in ds.captions] if texts else None,
         "latents": [s.latent for s in ds.samples],
         "variants": [s.variants for s in ds.samples],
         "masks": [s.mask for s in ds.samples],
         "caption_idx": [s.caption for s in ds.samples],
-        "conditionings": ds.conditionings,
+        "conditionings": None if texts else ds.conditionings,
         "captions": ds.captions,
         "empty_caption": ds.empty_caption,
         "owners": ds.owners,
@@ -547,7 +622,7 @@ def _to_plain(ds: Dataset) -> dict:
     }
 
 
-def _from_plain(d: dict) -> Dataset:
+def _from_plain(d: dict, texts: "TextCache | None" = None) -> Dataset:
     masks = d.get("masks") or [None] * len(d["latents"])
     variants = d.get("variants") or [[c] for c in d["caption_idx"]]
     audio = d.get("audio") or [None] * len(d["latents"])
@@ -556,7 +631,14 @@ def _from_plain(d: dict) -> Dataset:
     samples = [Sample(lat, c, m, v, a, r, g, e)
                for lat, c, m, v, a, r, g, e in zip(d["latents"], d["caption_idx"], masks, variants, audio, refs, conds, empties)]
     owners = d.get("owners") or list(range(len(samples)))  # before videos: one sample per item
-    return Dataset(samples, d["conditionings"], d["captions"], d["empty_caption"], owners=owners)
+    conditionings = d.get("conditionings")
+    if conditionings is None:  # version 4: each from the text cache (missing one: build it again)
+        if texts is None:
+            raise ValueError("this cache keeps its captions in the text cache")
+        conditionings = [texts.get(c) for c in d["captions"]]
+        if any(c is None for c in conditionings):
+            raise FileNotFoundError("a caption's encoding is gone from the text cache")
+    return Dataset(samples, conditionings, d["captions"], d["empty_caption"], owners=owners)
 
 
 def _expand_repeats(ds: Dataset, items: list[Item]) -> Dataset:

@@ -66,8 +66,18 @@ def _caches(folder: str, include_unknown: bool = False) -> list[Path]:
     root = _roots()["cache"]
     if not root.is_dir():
         return []
-    return [p for p in root.iterdir() if p.is_dir()
+    # a dataset cache has its dataset.pt: the other folders here (the shared text cache, model and
+    # prompt listings, LoRA thumbnails) are no dataset's, and an "unknown" cache isn't one of them
+    return [p for p in root.iterdir() if p.is_dir() and (p / "dataset.pt").is_file()
             and (cache_folder(p) == folder or (include_unknown and cache_folder(p) is None))]
+
+
+def _cache_bytes(caches: list[Path]) -> int:
+    """The caches and the captions' text encodings they use (each counted once: caches share them)."""
+    from ..harness.data import text_files
+
+    texts = {f for c in caches for f in text_files(c)}
+    return sum(size(c) for c in caches) + sum(size(f) for f in texts)
 
 
 def disks() -> list[dict]:
@@ -112,7 +122,7 @@ def report(store) -> dict:
     runs.sort(key=lambda r: -(r["checkpoints"] + r["states"] + r["samples"]))
     sets = []
     for d in datasets.summary():
-        cache = sum(size(p) for p in _caches(d["folder"]))
+        cache = _cache_bytes(_caches(d["folder"]))
         sets.append({"folder": d["folder"], "count": d["images"], "images": size(datasets.root() / d["folder"]), "cache": cache})
     sets.sort(key=lambda d: -(d["images"] + d["cache"]))
     return {"disks": disks(), "runs": runs, "datasets": sets, "apps": size(roots["apps"])}
@@ -164,8 +174,11 @@ def clean_cache(store, folder: str) -> int:
 
     _no_active(store)
     datasets.folder(folder)  # must be a real dataset
+    from ..harness.data import prune_text
+
     freed = 0
     for d in _caches(folder, include_unknown=True):
         freed += size(d)
         shutil.rmtree(d)
-    return freed
+    # and the captions' encodings only those used: another dataset's that share one stay
+    return freed + prune_text(_roots()["cache"], grace=0)
