@@ -28,6 +28,11 @@ export interface RunMeta {
   final_step: number | null
   message?: string
   resume_from?: string | null
+  /** when this go was handed to ComfyUI (a resume starts a new go); unset on runs from before it was recorded */
+  started?: number | null
+  first_started?: number | null
+  /** when it last stopped, finished or failed; cleared when it's queued again */
+  ended?: number | null
 }
 
 export interface MetricRow {
@@ -149,7 +154,7 @@ export const runsApi = {
       body: JSON.stringify({ spec, position, client_id: getClientId() }),
     }).then((r) => r.run),
   queue: () => call<QueueState>('/queue'),
-  editQueue: (body: { action: 'pause' | 'resume' } | { action: 'order'; order: string[] } | { action: 'top' | 'remove'; run_id: string }) =>
+  editQueue: (body: { action: 'pause' | 'resume' } | { action: 'order'; order: string[] } | { action: 'top' | 'remove' | 'swap'; run_id: string }) =>
     call('/queue', { method: 'POST', body: JSON.stringify(body) }),
   presets: <T = unknown>(kind: PresetKind) => call<{ presets: Preset<T>[] }>(`/presets/${kind}`).then((r) => r.presets),
   savePreset: (kind: PresetKind, name: string, data: unknown, description = '') =>

@@ -124,18 +124,11 @@ def register(server) -> None:
             if not resumable:
                 return _bad("that checkpoint has no saved training state", 400)
         ckpt = max(resumable, key=lambda c: c["step"]) if resumable else None
-        step = ckpt["step"] if ckpt else 0
         if ckpt is None and (store.read(run_id, "checkpoints") or store.read(run_id, "metrics")):
             # starting over would drop its history and retrain over its saved LoRAs and samples
             return _bad("this run has no saved training state to continue from (Resume states was off, or "
                         "they were cleaned up). Duplicate it to train again from the start.", 409)
-        _keep_later(store, run_id, step)
-        for stream in ("metrics", "samples", "checkpoints", "validation", "likeness"):
-            store.truncate(run_id, stream, step)
-        store.update(run_id, resume_from=ckpt["path"] if ckpt else None,
-                     resume_state=state_for(ckpt, run_id) if ckpt else None, message=None, final_step=None,
-                     status="queued")
-        jobqueue.get().add(run_id, front=True)
+        common.queue_resume(store, run_id, ckpt, at=0)
         _remember_client(body.get("client_id"))
         return web.json_response({"run": store.meta(run_id)})
 
@@ -242,9 +235,23 @@ def register(server) -> None:
     @routes.post("/zentrainer/api/queue")
     async def edit_queue(request):
         """{"action": "pause"|"resume"} or {"action": "order", "order": [...]} or
-        {"action": "top"|"remove", "run_id": ...}"""
+        {"action": "top"|"remove"|"swap", "run_id": ...}. Swap trains a queued run now: the current
+        run stops (it saves its state, as a stop does) and goes back in the queue right after it,
+        to resume from there."""
         b, q = await request.json(), jobqueue.get()
         action = b.get("action")
+        if action == "swap":
+            rid = str(b.get("run_id"))
+            snap = q.snapshot()
+            if rid not in snap["order"]:
+                return _bad("only a queued run can be swapped to", 409)
+            q.start_next(rid)  # starts even while the queue is paused; the rest stay held
+            cur = snap["current"]
+            ctl = control.get(cur) if cur else None
+            if ctl is not None:
+                state.store().update(cur, swap_resume=True)
+                ctl.send("stop")
+            return web.json_response(q.snapshot())
         if action in ("pause", "resume"):
             q.set_paused(action == "pause")
         elif action == "order":
@@ -278,7 +285,20 @@ def register(server) -> None:
             except (FileNotFoundError, ValueError):
                 return
             await _queue_session(server, run_id, name, common._client_id)
-        _app["zentrainer_queue"] = asyncio.create_task(jobqueue.worker(dispatch))
+        async def swapped(run_id: str):
+            # stopped by "swap to": back in the queue after the run it made room for, to resume from
+            # its stop's state (a stop that saved none leaves it stopped, and says so)
+            store = state.store()
+            store.update(run_id, swap_resume=None)
+            if store.meta(run_id)["status"] != "stopped":
+                return  # it finished or failed on its own before the stop landed
+            ckpt = common.latest_resumable(store, run_id)
+            if ckpt is None:
+                store.update(run_id, message="swapped out, but it saved no training state to resume from")
+                return
+            common.queue_resume(store, run_id, ckpt, at=1)
+
+        _app["zentrainer_queue"] = asyncio.create_task(jobqueue.worker(dispatch, swapped))
         _app["zentrainer_system"] = asyncio.create_task(system.sampler())
 
     server.app.on_startup.append(_start_worker)

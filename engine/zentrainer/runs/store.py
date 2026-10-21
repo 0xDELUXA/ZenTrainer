@@ -23,6 +23,8 @@ from typing import Any
 from .. import safeio
 
 _lock = threading.Lock()
+ACTIVE = ("loading", "training", "paused")   # handed to ComfyUI: started
+ENDED = ("done", "stopped", "error", "interrupted", "rejected")
 
 
 class RunStore:
@@ -68,7 +70,20 @@ class RunStore:
     def update(self, run_id: str, **fields: Any) -> dict[str, Any]:
         with _lock:
             meta = self.meta(run_id)
-            meta.update(fields, updated=time.time())
+            now = time.time()
+            new, old = fields.get("status"), meta.get("status")
+            # when it ran: `started` is this go (a resume starts a new one), `first_started` the
+            # first; `ended` when it last stopped, finished or failed (cleared when it's queued again)
+            if new in ACTIVE and old not in ACTIVE:
+                fields.setdefault("started", now)
+                fields.setdefault("ended", None)
+                if not meta.get("first_started"):
+                    fields.setdefault("first_started", now)
+            elif new in ENDED and old not in ENDED:
+                fields.setdefault("ended", now)
+            elif new == "queued":
+                fields.setdefault("ended", None)
+            meta.update(fields, updated=now)
             self._write_meta(run_id, meta)
         return meta
 

@@ -30,7 +30,8 @@ class Queue:
             data = json.loads(self.path.read_text())
         except (OSError, ValueError):
             data = {}
-        return {"paused": bool(data.get("paused", False)), "order": list(data.get("order", []))}
+        return {"paused": bool(data.get("paused", False)), "order": list(data.get("order", [])),
+                "next": data.get("next")}
 
     def _write(self, data: dict) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -47,6 +48,13 @@ class Queue:
             d = self._read()
             d["order"] = [r for r in d["order"] if r != run_id]
             d["order"].insert(0, run_id) if front else d["order"].append(run_id)
+            self._write(d)
+
+    def insert(self, run_id: str, at: int) -> None:
+        with _lock:
+            d = self._read()
+            d["order"] = [r for r in d["order"] if r != run_id]
+            d["order"].insert(max(0, at), run_id)
             self._write(d)
 
     def remove(self, run_id: str) -> bool:
@@ -74,10 +82,25 @@ class Queue:
             d["paused"] = paused
             self._write(d)
 
+    def start_next(self, run_id: str) -> None:
+        """Start this queued run next even while the queue is paused (a swap); the rest stay held."""
+        with _lock:
+            d = self._read()
+            d["order"] = [run_id] + [r for r in d["order"] if r != run_id]
+            d["next"] = run_id
+            self._write(d)
+
     def pop_next(self) -> str | None:
         with _lock:
             d = self._read()
+            nxt, d["next"] = d.get("next"), None
+            if nxt in d["order"]:
+                d["order"].remove(nxt)
+                self._write(d)
+                return nxt
             if d["paused"] or not d["order"]:
+                if nxt:
+                    self._write(d)
                 return None
             run_id = d["order"].pop(0)
             self._write(d)
@@ -94,9 +117,10 @@ def get() -> Queue:
     return _queue
 
 
-async def worker(dispatch, interval: float = 1.5) -> None:
+async def worker(dispatch, swapped=None, interval: float = 1.5) -> None:
     """Dispatch the next queued run whenever nothing is active. `dispatch(run_id)` is
-    the coroutine that submits the session job to ComfyUI."""
+    the coroutine that submits the session job to ComfyUI; `swapped(run_id)` requeues a run
+    stopped by a swap, once it has stopped."""
     from ..harness import control
 
     q = get()
@@ -105,10 +129,12 @@ async def worker(dispatch, interval: float = 1.5) -> None:
         try:
             if q.current is not None:
                 try:
-                    status = store.meta(q.current)["status"]
+                    meta = store.meta(q.current)
                 except (FileNotFoundError, ValueError):
-                    status = "error"
-                if status in TERMINAL and control.get(q.current) is None:
+                    meta = {"status": "error"}
+                if meta["status"] in TERMINAL and control.get(q.current) is None:
+                    if meta.get("swap_resume") and swapped is not None:
+                        await swapped(q.current)
                     q.current = None
             if q.current is None and not control.active():
                 run_id = q.pop_next()

@@ -77,6 +77,22 @@ const progress = (id: string) => {
   return m?.total ? { step: m.step, total: m.total, pct: (m.step / m.total) * 100 } : null
 }
 const when = (t: number) => new Date(t * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+const clock = (t: number) => new Date(t * 1000).toLocaleTimeString([], { timeStyle: 'short' })
+const span = (s: number) => {
+  const m = Math.round(s / 60)
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`
+}
+const ENDED: Record<string, string> = { done: 'finished', stopped: 'stopped', error: 'failed', interrupted: 'interrupted', rejected: 'rejected' }
+// a run's go: when it started and how long it ran (runs from before start times were kept: created)
+const timing = (r: RunMeta) => {
+  if (!r.started) return { when: when(r.created), sub: '' }
+  const end = r.ended ?? (r.status in ENDED ? r.updated : Date.now() / 1000)
+  const verb = ENDED[r.status]
+  return {
+    when: `started ${when(r.started)}`,
+    sub: verb && r.ended ? `ran ${span(end - r.started)} · ${verb} ${clock(r.ended)}` : `running ${span(end - r.started)}`,
+  }
+}
 const summary = computed(() => {
   const parts = [`${runs.value.length} run${runs.value.length === 1 ? '' : 's'}`, `${captions.value.filter((j) => !j.preview).length} caption jobs`]
   if (current.value) parts.push('1 training')
@@ -136,7 +152,7 @@ const summary = computed(() => {
         <RouterLink :to="`/runs/${current.run_id}`" class="row card now">
           <div class="name">
             {{ current.name }}
-            <div class="muted mono small">{{ current.run_id }}</div>
+            <div class="muted mono small">{{ current.run_id }}<template v-if="current.started"> · {{ timing(current).sub }} since {{ clock(current.started) }}</template></div>
           </div>
           <div class="mini">
             <div class="bar"><div :style="{ width: `${progress(current.run_id)?.pct ?? 0}%` }" /></div>
@@ -157,6 +173,13 @@ const summary = computed(() => {
             </span>
           </RouterLink>
           <div class="acts">
+            <button
+              v-if="current"
+              :title="`Swap to this: train it now. ${current.name} stops (saving its state) and goes back in the queue right after it, to resume from there${queue.paused ? '. The queue stays paused for the rest' : ''}`"
+              @click="act({ action: 'swap', run_id: r.run_id })"
+            >
+              <i class="mdi mdi-swap-horizontal" />
+            </button>
             <RouterLink class="edit" :to="`/runs/new?edit=${r.run_id}`" title="Change its settings or name; it keeps its place"><i class="mdi mdi-pencil-outline" /></RouterLink>
             <button title="Move to top" :disabled="i === 0" @click="act({ action: 'top', run_id: r.run_id })"><i class="mdi mdi-format-vertical-align-top" /></button>
             <button title="Move up" :disabled="i === 0" @click="move(i, -1)"><i class="mdi mdi-chevron-up" /></button>
@@ -182,7 +205,10 @@ const summary = computed(() => {
               <i class="mdi mdi-chart-timeline-variant kind-ic" />{{ h.run.name }}
               <div class="muted mono small">{{ h.run.run_id }}</div>
             </div>
-            <div class="muted small">{{ when(h.run.created) }}</div>
+            <div class="muted small">
+              {{ timing(h.run).when }}
+              <div v-if="timing(h.run).sub" class="mono">{{ timing(h.run).sub }}</div>
+            </div>
             <StatusPill :status="h.run.status" />
           </RouterLink>
           <RouterLink v-else :to="`/jobs/caption/${h.job.job_id}`" class="row card">

@@ -24,6 +24,29 @@ WEB_DIST = Path(__file__).resolve().parents[4] / "web" / "dist"
 RETRYABLE = ("error", "stopped", "interrupted", "rejected")
 
 
+def queue_resume(store, run_id: str, ckpt: dict | None, at: int = 0) -> None:
+    """Put a stopped run back in the queue to continue from `ckpt` (None: from step 0), at
+    position `at`: what Resume does, and what swapping to another run does for the one it stops."""
+    from ...harness.trainer import state_for
+    from .. import jobqueue
+
+    step = ckpt["step"] if ckpt else 0
+    _keep_later(store, run_id, step)
+    for stream in ("metrics", "samples", "checkpoints", "validation", "likeness"):
+        store.truncate(run_id, stream, step)
+    store.update(run_id, resume_from=ckpt["path"] if ckpt else None,
+                 resume_state=state_for(ckpt, run_id) if ckpt else None, message=None, final_step=None,
+                 status="queued")
+    jobqueue.get().insert(run_id, at)
+
+
+def latest_resumable(store, run_id: str) -> dict | None:
+    from ...harness.trainer import state_for
+
+    resumable = [c for c in store.read(run_id, "checkpoints") if state_for(c, run_id)]
+    return max(resumable, key=lambda c: c["step"]) if resumable else None
+
+
 def _keep_later(store, run_id: str, step: int) -> None:
     """Before a resume retrains past `step`, move the LoRAs and sample pictures saved after it into
     a `replaced-<time>` folder beside them: retraining writes the same file names, and those files
