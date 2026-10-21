@@ -30,6 +30,62 @@ const sampleModel = computed({
 const insertTrigger = () => {
   spec.samples.prompts = [...spec.samples.prompts, '[trigger], ']
 }
+
+// ---- Fibo 2.0: sample prompts rewritten as its structured JSON captions -------------------------
+// Fibo is trained on, and prompted with, JSON scene descriptions; a language model expands each
+// plain prompt into one (Bria's VGL prompt, on a local text encoder). [trigger] is kept: the
+// model sees the trigger word in its place and it goes back to [trigger] after.
+const isFibo = computed(() => spec.model.kind === 'split' && spec.model.clip_type === 'fibo2')
+const rw = reactive({ open: false, models: [] as string[], model: '', busy: false, note: '', undo: null as null | typeof spec.samples.prompts })
+const isJson = (t: string) => t.trim().startsWith('{') && t.trim().endsWith('}')
+async function openRewrite() {
+  rw.open = !rw.open
+  if (!rw.open || rw.models.length) return
+  try {
+    rw.models = (await engine.captionInfo()).models
+    rw.model = rw.models.find((n) => /qwen3[-_.]?vl[-_]?(8|30|32)b/i.test(n)) ?? rw.models.find((n) => /gemma[-_]?4/i.test(n)) ?? rw.models.find((n) => /qwen3[-_.]?vl/i.test(n)) ?? rw.models[0] ?? ''
+  } catch (e) {
+    rw.note = String((e as Error).message ?? e)
+  }
+}
+async function rewrite() {
+  const trig = spec.dataset.trigger.trim()
+  const list = spec.samples.prompts
+  const todo = list.map((p, i) => ({ i, text: typeof p === 'string' ? p : p.prompt })).filter((r) => r.text.trim() && !isJson(r.text))
+  if (!todo.length) return void (rw.note = 'Nothing to rewrite: every prompt is already JSON')
+  rw.busy = true
+  rw.note = `Rewriting ${todo.length} prompt${todo.length === 1 ? '' : 's'}…`
+  try {
+    let job = await engine.rewritePrompts({ clip_name: rw.model, prompts: todo.map((r) => (trig ? r.text.replaceAll('[trigger]', trig) : r.text)) })
+    while (['queued', 'running'].includes(job.status)) {
+      await new Promise((ok) => setTimeout(ok, 1500))
+      job = await engine.captionJob(job.job_id)
+      rw.note = job.status === 'queued' ? job.message || 'waiting for the GPU…' : `Rewriting… ${job.done}/${todo.length}`
+    }
+    if (job.status !== 'done') throw new Error(job.message || job.status)
+    const next = [...list]
+    let failed = 0
+    todo.forEach((r, n) => {
+      let out = job.results?.[n]?.text ?? ''
+      if (!out) return void failed++
+      if (trig) out = out.replaceAll(trig, '[trigger]')
+      const old = next[r.i]!
+      next[r.i] = typeof old === 'string' ? out : { ...old, prompt: out }
+    })
+    rw.undo = list
+    spec.samples.prompts = next
+    rw.note = `Rewrote ${todo.length - failed}` + (failed ? `; ${failed} kept as they were (no valid JSON)` : '')
+  } catch (e) {
+    rw.note = String((e as Error).message ?? e)
+  } finally {
+    rw.busy = false
+  }
+}
+function undoRewrite() {
+  if (rw.undo) spec.samples.prompts = rw.undo
+  rw.undo = null
+  rw.note = 'Back to the prompts as they were'
+}
 // edit pairs: a sample's input picture comes from the dataset's pairs
 const controlOptions = computed(() =>
   pairItems.value.flatMap((it) => runInputs(it).map((c) => ({ value: c, thumb: thumbUrl(spec.dataset.folder, c, 128) }))),
@@ -108,7 +164,15 @@ async function savePromptSet(name: string) {
     <ZenButton v-else-if="!currentSet" size="sm" icon="mdi mdi-content-save-outline" :disabled="!spec.samples.prompts.length" @click="startNaming">Save as set</ZenButton>
     <span class="spacer" />
     <ZenButton v-if="spec.dataset.edit && pairItems.length" size="sm" icon="mdi mdi-swap-horizontal" title="Sample two of the dataset's pairs: their instruction on their input picture" @click="samplesFromPairs">From pairs</ZenButton>
+    <ZenButton v-if="isFibo" size="sm" icon="mdi mdi-code-json" :variant="rw.open ? 'primary' : 'default'" title="Rewrite the prompts as Fibo 2.0's structured JSON captions, the form it was trained on" @click="openRewrite">Fibo JSON</ZenButton>
     <ZenButton size="sm" icon="mdi mdi-tag-plus-outline" @click="insertTrigger">Insert [trigger]</ZenButton>
+  </div>
+  <div v-if="isFibo && rw.open" class="rewrite">
+    <span class="small">Rewrite with</span>
+    <ZenCombo v-model="rw.model" :items="rw.models.map((m) => ({ value: m, label: m.replace(/\.safetensors$/, '') }))" size="sm" class="rw-model" />
+    <ZenButton size="sm" variant="primary" icon="mdi mdi-auto-fix" :disabled="rw.busy || !rw.model" @click="rewrite">Rewrite</ZenButton>
+    <ZenButton v-if="rw.undo && !rw.busy" size="sm" icon="mdi mdi-undo-variant" @click="undoRewrite">Undo</ZenButton>
+    <span class="muted small">{{ rw.note || 'Each plain prompt becomes a structured caption (Bria\'s VGL prompt): bigger models write better ones.' }}</span>
   </div>
   <SamplePromptList
     v-model="spec.samples.prompts"
@@ -207,6 +271,17 @@ async function savePromptSet(name: string) {
 
 <style scoped src="./form.css"></style>
 <style scoped>
+.rewrite {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 8px;
+}
+.rewrite .rw-model {
+  min-width: 220px;
+  max-width: 340px;
+}
 .sample-head {
   display: flex;
   gap: 8px;

@@ -69,7 +69,7 @@ export const SETTINGS = {
   // starred model families: first in every model list (see favorites.ts)
   favoriteModels: def<string[]>({ category: 'Models', label: 'Starred models', default: [], options: [] }),
   // your own auto-caption instructions, beside the built-in styles (see CaptionPanel)
-  captionStyles: def<{ id: string; label: string; prompt: string }[]>({ category: 'Datasets', label: 'Caption styles', default: [], options: [] }),
+  captionStyles: def<{ id: string; label: string; prompt: string; format?: 'text' | 'fibo_json' }[]>({ category: 'Datasets', label: 'Caption styles', default: [], options: [] }),
 }
 
 export type SettingId = keyof typeof SETTINGS

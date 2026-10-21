@@ -124,7 +124,9 @@ def register(server) -> None:
         if request.query.get("all") == "1":
             return web.json_response({"jobs": captioner.history()})
         return web.json_response({
-            "styles": [{"id": k, "label": v[0], "prompt": v[1]} for k, v in captioner.STYLES.items()],
+            "styles": [{"id": k, "label": v.label, "prompt": v.prompt, "format": v.format, "max_length": v.max_length}
+                       for k, v in captioner.STYLES.items()],
+            "formats": list(captioner.structured.FORMATS),
             # what goes around a style's prompt, so the panel can show exactly what the model is told
             "notes": {"video": captioner.VIDEO_NOTE, "sound": captioner.SOUND_NOTE, "subject": captioner.SUBJECT_NOTE},
             "models": await asyncio.to_thread(captioner.models),
@@ -150,7 +152,7 @@ def register(server) -> None:
 
     @routes.post("/zentrainer/api/datasets/{name}/caption")
     async def caption_dataset(request):
-        """{"clip_name", "clip_type", "set", "style" | "prompt", "mode": missing|all|selected,
+        """{"clip_name", "clip_type", "set", "style" | "prompt" (+ "format"), "mode": missing|all|selected,
         "paths" (selected), "subject", "preview": n, "max_length", "replace_default"}.
         Rewriting captions that already exist in the "default" set (the one training reads
         unless told otherwise) needs replace_default: true, so it never happens by accident."""
@@ -174,7 +176,11 @@ def register(server) -> None:
         if mode == "selected" and not paths:
             return _bad("select some images first")
         preview = max(0, min(int(b.get("preview") or 0), 8))
-        prompt = str(b.get("prompt") or captioner.STYLES.get(str(b.get("style")), captioner.STYLES["nl"])[1])
+        style = captioner.STYLES.get(str(b.get("style")), captioner.STYLES["nl"])
+        prompt = str(b.get("prompt") or style.prompt)
+        fmt = str(b.get("format") or (style.format if not b.get("prompt") else "text"))
+        if fmt not in captioner.structured.FORMATS:
+            return _bad(f"format is one of {', '.join(captioner.structured.FORMATS)}")
         job = captioner.CaptionJob(job_id="", dataset=name, set_name=set_name, clip_name=str(b["clip_name"]),
                                    clip_type=str(b.get("clip_type") or "auto"), prompt=prompt, mode=mode, paths=paths,
                                    subject=str(b.get("subject") or "").strip(), preview=preview)
@@ -186,17 +192,24 @@ def register(server) -> None:
                             "default set", 409, replaces=existing)
         job = captioner.create(**{f: getattr(job, f) for f in ("dataset", "set_name", "clip_name", "clip_type", "prompt",
                                                                "mode", "paths", "subject", "preview")},
-                               max_length=int(b.get("max_length") or 300),
+                               max_length=int(b.get("max_length") or (style.max_length if not b.get("prompt")
+                                                                      else 2000 if fmt == "fibo_json" else 300)),
+                               format=fmt,
                                loras=[{"name": str(lo.get("name")), "strength": float(lo.get("strength", 1.0))}
                                       for lo in (b.get("loras") or []) if lo.get("name")])
-        prompt_id = str(uuid.uuid4())
+        return await _submit_caption(job, f"caption {name}", b.get("client_id"))
+
+    async def _submit_caption(job, title: str, client_id):
+        """Queue a caption job as a one-node ComfyUI prompt, so it takes its turn on the GPU."""
+        from ...datasets import captioner
         from .. import jobqueue
 
+        prompt_id = str(uuid.uuid4())
         busy = jobqueue.get().current
         captioner.update(job, prompt_id=prompt_id, message="waits for the training run to finish" if busy else "")
         payload = {"prompt": {"cap": {"class_type": "ZenCaptionSession", "inputs": {"job_id": job.job_id},
-                                      "_meta": {"title": f"caption {name}"}}},
-                   "prompt_id": prompt_id, "client_id": b.get("client_id")}
+                                      "_meta": {"title": title}}},
+                   "prompt_id": prompt_id, "client_id": client_id}
         async with aiohttp.ClientSession() as s:
             async with s.post(_loopback(server) + "/prompt", json=payload) as r:
                 result = await r.json()
@@ -204,6 +217,27 @@ def register(server) -> None:
             captioner.update(job, status="error", message=str(result.get("error")))
             return _bad("ComfyUI rejected the caption job", 422, comfy=result)
         return web.json_response({"job": job.public()})
+
+    @routes.post("/zentrainer/api/caption/rewrite")
+    async def rewrite_prompts(request):
+        """{"clip_name", "prompts": [...], "format": "fibo_json"} rewrites each prompt as a structured
+        caption; {"prompt": instruction} (format "text") rewrites each by that instruction instead.
+        A job like a caption try-on: GET /caption/{job_id} has the results, nothing is written."""
+        from ...datasets import captioner
+
+        b = await request.json()
+        prompts = [str(p).strip() for p in b.get("prompts") or [] if str(p).strip()][:32]
+        if not b.get("clip_name"):
+            return _bad("pick a language model to rewrite with")
+        if not prompts:
+            return _bad("no prompts to rewrite")
+        fmt = str(b.get("format") or ("text" if b.get("prompt") else "fibo_json"))
+        if fmt not in captioner.structured.FORMATS or (fmt == "text" and not str(b.get("prompt") or "").strip()):
+            return _bad("rewrite as fibo_json, or give an instruction (prompt) for plain text")
+        job = captioner.create(dataset="", set_name="", clip_name=str(b["clip_name"]), clip_type=str(b.get("clip_type") or "auto"),
+                               prompt=str(b.get("prompt") or ""), preview=len(prompts), rewrite=prompts, format=fmt,
+                               max_length=int(b.get("max_length") or (2000 if fmt == "fibo_json" else 400)))
+        return await _submit_caption(job, "rewrite prompts", b.get("client_id"))
 
     @routes.post("/zentrainer/api/datasets/{name}/segment")
     async def segment_image(request):

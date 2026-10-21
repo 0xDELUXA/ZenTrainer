@@ -2,11 +2,11 @@
 // Auto-captioning for one dataset, as a job: pick the model, the style, which caption set it
 // writes and which images; try it on a few first; watch it run, cancel it, and afterwards
 // review what it wrote or undo it. It never rewrites captions in "default" without asking.
-import { ZenButton, ZenCombo, ZenInput, ZenNumber } from '@nynxz/zenkit-ui'
+import { ZenButton, ZenCombo, ZenInput, ZenNumber, ZenSwitch } from '@nynxz/zenkit-ui'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { onComfyMessage } from '@/api/comfy'
 import { setSetting, settings } from '@/stores/settings'
-import { EVENTS, EngineError, engine, thumbUrl, type CaptionJob, type CaptionLora, type CaptionMode, type CaptionStyle, type DatasetItem, type ModelSenses } from '@/api/engine'
+import { EVENTS, EngineError, engine, thumbUrl, type CaptionFormat, type CaptionJob, type CaptionLora, type CaptionMode, type CaptionStyle, type DatasetItem, type ModelSenses } from '@/api/engine'
 
 const props = defineProps<{ dataset: string; items: DatasetItem[]; sets: string[]; selected: string[]; subject?: string }>()
 const emit = defineEmits<{ changed: [set: string]; review: [job: CaptionJob] }>()
@@ -109,7 +109,7 @@ async function fetchLora(file?: string) {
 const jobs = ref<CaptionJob[]>([])
 const error = ref<string | null>(null)
 const PREFS = 'zentrainer.caption'
-const form = reactive({ clip_name: '', style: 'nl', prompt: '', set: 'nl', mode: 'missing' as CaptionMode })
+const form = reactive({ clip_name: '', style: 'nl', prompt: '', format: 'text' as CaptionFormat, set: 'nl', mode: 'missing' as CaptionMode })
 try {
   const { subject: _s, ...saved } = JSON.parse(localStorage.getItem(PREFS) ?? '{}') // subject: now the dataset's
   Object.assign(form, saved, { mode: 'missing' })
@@ -194,8 +194,13 @@ const own = computed(() => mine.value.find((x) => `u:${x.id}` === form.style) ??
 function pick(id: string) {
   form.style = id
   const m = mine.value.find((x) => `u:${x.id}` === id)
-  if (m) form.prompt = m.prompt
+  if (m) {
+    form.prompt = m.prompt
+    form.format = m.format ?? 'text'
+  } else if (id !== 'custom') form.format = styles.value.find((st) => st.id === id)?.format ?? 'text'
 }
+// how the answer is kept: a built-in style says, yours and custom ones have the switch
+const formatOf = computed<CaptionFormat>(() => (editable.value ? form.format : (styles.value.find((st) => st.id === form.style)?.format ?? 'text')))
 const editable = computed(() => form.style === 'custom' || !!own.value)
 const styleItems = computed(() => [
   ...styles.value.map((st) => ({ value: st.id, label: st.label })),
@@ -213,16 +218,16 @@ function editCopy() {
   form.prompt = stylePrompt.value
   form.style = 'custom'
 }
-const dirty = computed(() => !!own.value && own.value.prompt !== form.prompt)
+const dirty = computed(() => !!own.value && (own.value.prompt !== form.prompt || (own.value.format ?? 'text') !== form.format))
 function saveStyle() {
   if (own.value) {
-    setSetting('captionStyles', mine.value.map((x) => (x.id === own.value!.id ? { ...x, prompt: form.prompt } : x)))
+    setSetting('captionStyles', mine.value.map((x) => (x.id === own.value!.id ? { ...x, prompt: form.prompt, format: form.format } : x)))
     return
   }
   const label = prompt('Name this caption style:')?.trim()
   if (!label) return
   const id = `${label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'style'}-${Date.now().toString(36).slice(-4)}`
-  setSetting('captionStyles', [...mine.value, { id, label, prompt: form.prompt }])
+  setSetting('captionStyles', [...mine.value, { id, label, prompt: form.prompt, format: form.format }])
   form.style = `u:${id}`
 }
 function removeStyle() {
@@ -248,7 +253,7 @@ function body(extra: Record<string, unknown> = {}) {
     paths: form.mode === 'selected' ? props.selected : undefined,
     subject: subject.value.trim() || undefined,
     loras: loras.value.filter((l) => l.name),
-    ...(editable.value ? { prompt: form.prompt } : { style: form.style }),
+    ...(editable.value ? { prompt: form.prompt, format: form.format } : { style: form.style }),
     ...extra,
   }
 }
@@ -385,7 +390,8 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
     </div>
     <div v-if="showPrompt && !editable" class="told">
       <p v-if="clipNote" class="told-wrap"><span class="eyebrow">Clips first get</span>{{ clipNote }}</p>
-      <p class="told-main">{{ stylePrompt }}</p>
+      <p class="told-main" :class="{ long: stylePrompt.length > 600 }">{{ stylePrompt }}</p>
+      <p v-if="formatOf === 'fibo_json'" class="told-wrap"><span class="eyebrow">Kept as</span>Fibo 2.0's structured JSON caption (Bria's VGL prompt and schema): checked and stored compact; an image whose answer isn't valid JSON after 3 tries keeps what it had.</p>
       <p v-if="subjectNote" class="told-wrap"><span class="eyebrow">Then</span>{{ subjectNote }}</p>
       <div class="own-acts">
         <ZenButton size="sm" icon="mdi mdi-pencil-outline" title="Start a custom style from this prompt: the built-in stays as it is" @click="editCopy">Edit a copy</ZenButton>
@@ -394,6 +400,10 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
     <div v-if="editable" class="own">
       <p v-if="showPrompt && clipNote" class="told-wrap"><span class="eyebrow">Clips first get</span>{{ clipNote }}</p>
       <ZenInput v-model="form.prompt" type="textarea" :rows="3" placeholder="What should the model write? It sees the image, e.g. “Describe the outfit and pose in one sentence.”" />
+      <label class="fmt" title="Check the answer is a JSON object with a short_description and keep it compact (Fibo 2.0's caption format); an image whose answer isn't gets 3 tries, then keeps what it had">
+        <ZenSwitch :model-value="form.format === 'fibo_json'" @update:model-value="form.format = $event ? 'fibo_json' : 'text'" />
+        <span class="small">Answer is a structured JSON caption</span>
+      </label>
       <div class="own-acts">
         <ZenButton size="sm" icon="mdi mdi-content-save-outline" :disabled="!form.prompt.trim() || (!!own && !dirty)" :title="own ? 'Save your changes to this style' : 'Keep this instruction as a style of your own'" @click="saveStyle">
           {{ own ? (dirty ? 'Save changes' : 'Saved') : 'Save as style' }}
@@ -505,6 +515,16 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+.told-main.long {
+  max-height: 220px;
+  overflow: auto;
+}
+.fmt {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
 }
 .told-main,
 .told-wrap {

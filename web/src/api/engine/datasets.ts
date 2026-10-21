@@ -122,7 +122,7 @@ export interface CaptionJob {
   written?: string[]
   /** how many existing captions it replaced (undo puts them back) */
   replaced?: number
-  results?: { path: string; text: string }[]
+  results?: { path: string; text: string; prompt?: string }[]
   /** the job's log (job endpoint only) */
   log?: { t: number; level: 'info' | 'warn' | 'error'; msg: string }[]
   /** path -> the caption it wrote (job endpoint only) */
@@ -138,6 +138,8 @@ export interface CaptionRequest {
   set: string
   style?: string
   prompt?: string
+  /** with a prompt: how its answer is kept (a style brings its own) */
+  format?: CaptionFormat
   mode: CaptionMode
   paths?: string[]
   subject?: string
@@ -145,10 +147,15 @@ export interface CaptionRequest {
   replace_default?: boolean
 }
 
+/** "text": the answer as written; "fibo_json": a Fibo 2.0 structured caption, checked and compact */
+export type CaptionFormat = 'text' | 'fibo_json'
+
 export interface CaptionStyle {
   id: string
   label: string
   prompt: string
+  format?: CaptionFormat
+  max_length?: number
 }
 
 /** engine/zentrainer/datasets/segment.py: one SAM3 request from the mask editor */
@@ -211,6 +218,9 @@ export const datasetsApi = {
   captionJobs: () => call<{ jobs: CaptionJob[] }>('/caption?all=1').then((r) => r.jobs),
   captionActive: () => call<{ jobs: CaptionJob[] }>('/caption?active=1').then((r) => r.jobs),
   captionJob: (id: string) => call<{ job: CaptionJob }>(`/caption/${encodeURIComponent(id)}`).then((r) => r.job),
+  /** rewrite prompts with a language model, as Fibo 2.0 structured captions by default: a job; its results are the rewrites */
+  rewritePrompts: (body: { clip_name: string; prompts: string[]; format?: CaptionFormat; prompt?: string }) =>
+    call<{ job: CaptionJob }>('/caption/rewrite', { method: 'POST', body: JSON.stringify({ ...body, client_id: getClientId() }) }).then((r) => r.job),
   captionAction: (id: string, action: 'cancel' | 'undo') =>
     call<{ job: CaptionJob; restored?: number }>(`/caption/${encodeURIComponent(id)}/${action}`, { method: 'POST' }),
   deleteItem: (name: string, path: string) =>

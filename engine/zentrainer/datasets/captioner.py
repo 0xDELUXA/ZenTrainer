@@ -18,19 +18,35 @@ import time
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
+from typing import NamedTuple
+
 from .. import safeio
 from .. import events
+from . import structured
+
+
+class Style(NamedTuple):
+    label: str
+    prompt: str
+    # "text": the answer as written; "fibo_json": a structured caption (structured.py), checked and
+    # kept compact, or not written at all
+    format: str = "text"
+    max_length: int = 300  # tokens the answer may take
+
 
 STYLES = {
-    "nl": ("Natural language",
-           "Describe this image for training an image model: the subject, their appearance, clothing and pose, "
-           "the setting, lighting and photographic or artistic style. One detailed paragraph. "
-           "Start directly with the description; no preamble."),
-    "short": ("Short caption", "Write a single-sentence caption for this image. Start directly; no preamble."),
-    "tags": ("Tags",
-             "List comma-separated tags for this image: subject, features, clothing, pose, setting, lighting, style, "
-             "most important first. Output only the tags."),
+    "nl": Style("Natural language",
+                "Describe this image for training an image model: the subject, their appearance, clothing and pose, "
+                "the setting, lighting and photographic or artistic style. One detailed paragraph. "
+                "Start directly with the description; no preamble."),
+    "short": Style("Short caption", "Write a single-sentence caption for this image. Start directly; no preamble."),
+    "tags": Style("Tags",
+                  "List comma-separated tags for this image: subject, features, clothing, pose, setting, lighting, "
+                  "style, most important first. Output only the tags."),
+    # Fibo 2.0's own caption format, with Bria's VGL prompts (structured.py)
+    "fibo_json": Style("Fibo structured JSON", structured.caption_instruction(), "fibo_json", 2000),
 }
+JSON_TRIES = 3  # answers a structured caption gets (greedy, then sampled) before the image is skipped
 
 CAPTION = "zentrainer.caption"  # {job_id, dataset, set, status, done, total, file, text, message, ...}
 MODES = ("missing", "all", "selected")  # which images: no caption in the set yet / every one / `paths`
@@ -55,6 +71,9 @@ class CaptionJob:
     # LoRAs on the captioning model (abliterated / uncensored / prompt-style extractions):
     # [{"name": file in loras/, "strength": 1.0}]. Captioning only; training never uses them.
     loras: list = field(default_factory=list)
+    format: str = "text"  # Style.format: "fibo_json" checks the answer is a structured caption
+    # prompts to rewrite instead of images to caption (no dataset, nothing written; results only)
+    rewrite: list[str] = field(default_factory=list)
     status: str = "queued"  # queued | running | done | error | stopped | undone
     done: int = 0
     total: int = 0
@@ -260,7 +279,8 @@ def _emit(job: CaptionJob) -> None:
     events.emit(CAPTION, _light(job))
     # mirrored so ZenKit's taskbar (in ComfyUI) shows it too, as it does training runs
     events.emit(events.ZENKIT_JOB, {
-        "id": f"zentrainer:{job.job_id}", "name": f"{'Try captions' if job.preview else 'Caption'} {job.dataset}",
+        "id": f"zentrainer:{job.job_id}",
+        "name": "Rewrite prompts" if job.rewrite else f"{'Try captions' if job.preview else 'Caption'} {job.dataset}",
         "status": {"queued": "start", "running": "progress", "done": "done"}.get(job.status, "error"),
         "current": job.done, "total": job.total or job.preview or 0, "message": job.message or job.status,
         "source": "ZenTrainer",
@@ -321,12 +341,64 @@ def _dataset_root(job: CaptionJob) -> Path:
     return datasets.folder(job.dataset)
 
 
+def _answer(clip, tokens, job: CaptionJob) -> str:
+    """The model's answer for these tokens, in the job's format. A structured caption that isn't
+    valid JSON gets more tries (sampled, so they differ); ValueError when none is."""
+    if job.format != "fibo_json":
+        return clean(clip.decode(clip.generate(tokens, do_sample=False, max_length=job.max_length)))
+    err = None
+    for i in range(JSON_TRIES):
+        ids = clip.generate(tokens, do_sample=i > 0, temperature=0.7, seed=i, max_length=job.max_length)
+        try:
+            return structured.compact(structured.parse(clean(clip.decode(ids))))
+        except ValueError as e:
+            err = e
+            log(job, f"answer {i + 1} wasn't a structured caption ({e}); trying again" if i + 1 < JSON_TRIES else
+                f"answer {i + 1} wasn't a structured caption ({e})", "warn")
+    raise ValueError(f"no structured caption in {JSON_TRIES} answers: {err}")
+
+
+def _load_clip(job: CaptionJob):
+    import nodes
+
+    # the stock chat model, not an image model's conditioning wrapper of the same file
+    # (MOSS's Qwen3.5 drops the picture and leaves a think block open)
+    ctype = GENERIC_TYPE if job.clip_type in ("", "auto") else job.clip_type
+    clip = _with_loras(nodes.CLIPLoader().load_clip(job.clip_name, ctype)[0], job)
+    if not hasattr(clip, "generate"):
+        raise RuntimeError(f"{job.clip_name} can't generate text; pick a language model (Qwen-VL, Gemma)")
+    return clip
+
+
+def _run_rewrite(job: CaptionJob) -> None:
+    """Rewrite the job's prompts (no pictures): each into a structured caption, or by its prompt."""
+    import comfy.model_management as mm
+    import comfy.utils
+
+    update(job, total=len(job.rewrite))
+    clip = _load_clip(job)
+    pbar = comfy.utils.ProgressBar(len(job.rewrite))
+    for p in job.rewrite:
+        if job.status != "running":
+            break
+        ask = structured.generate_instruction(p) if job.format == "fibo_json" else f"{job.prompt}\n\n{p}"
+        try:
+            out = _answer(clip, clip.tokenize(ask, min_length=1), job)
+        except ValueError as e:
+            out = ""
+            log(job, f"{p[:80]}: {e}", "warn")
+        job.results.append({"path": "", "prompt": p, "text": out})
+        log(job, f"{p[:80]} -> {out[:200]}")
+        update(job, done=job.done + 1, text=out, message="")
+        pbar.update_absolute(job.done)
+        mm.throw_exception_if_processing_interrupted()
+
+
 def run(job: CaptionJob) -> None:
-    """Caption the job's images. Runs inside a ComfyUI prompt."""
+    """Caption the job's images (or rewrite its prompts). Runs inside a ComfyUI prompt."""
     import comfy.model_management as mm
     import comfy.utils
     import folder_paths
-    import nodes
     import torch
 
     from ..harness.data import caption_path, scan
@@ -334,7 +406,8 @@ def run(job: CaptionJob) -> None:
 
     if job.status != "queued":  # cancelled while it waited
         return
-    log(job, f"started: {job.clip_name}, into “{job.set_name}”, {job.mode} images" + (f", try-on of {job.preview}" if job.preview else ""))
+    log(job, f"started: {job.clip_name}, rewriting {len(job.rewrite)} prompts" if job.rewrite else
+        f"started: {job.clip_name}, into “{job.set_name}”, {job.mode} images" + (f", try-on of {job.preview}" if job.preview else ""))
     update(job, status="running", message=f"loading {job.clip_name}")
     # ComfyUI's model compiler (CUDA graphs) breaks token-by-token generation: a device-side
     # assert on the second token that takes the whole server down. Off while captioning, as
@@ -342,6 +415,11 @@ def run(job: CaptionJob) -> None:
     _comfy_compiler(False)
     try:
         with torch.inference_mode():
+            if job.rewrite:
+                _run_rewrite(job)
+                if job.status == "running":
+                    update(job, status="done", finished=time.time())
+                return
             root = _dataset_root(job)
             items = todo(job, scan(root, warn=False))
             update(job, total=len(items))
@@ -350,13 +428,7 @@ def run(job: CaptionJob) -> None:
                 log(job, "nothing to caption: every image already has one in this set")
                 update(job, status="done", message="nothing to caption: every image already has one in this set")
                 return
-            # the stock chat model, not an image model's conditioning wrapper of the same file
-            # (MOSS's Qwen3.5 drops the picture and leaves a think block open)
-            ctype = GENERIC_TYPE if job.clip_type in ("", "auto") else job.clip_type
-            clip = nodes.CLIPLoader().load_clip(job.clip_name, ctype)[0]
-            clip = _with_loras(clip, job)
-            if not hasattr(clip, "generate"):
-                raise RuntimeError(f"{job.clip_name} can't generate text; pick a vision-language model (Qwen-VL, Gemma)")
+            clip = _load_clip(job)
             from ..harness.data import video
             # Gemma 4 takes a clip as a timestamped video and can hear it (its own chat template
             # carries the media tokens); the others see VIDEO_FRAMES stills
@@ -374,9 +446,15 @@ def run(job: CaptionJob) -> None:
                 else:
                     image = _picture(it.path)  # (1 or VIDEO_FRAMES, H, W, 3) in [0, 1]
                     tokens = clip.tokenize(instruction(job, is_video), image=image, min_length=1)
-                ids = clip.generate(tokens, do_sample=False, max_length=job.max_length)
-                text = clean(clip.decode(ids))
                 rel = str(it.path.relative_to(root))
+                try:
+                    text = _answer(clip, tokens, job)
+                except ValueError as e:  # no usable structured caption: this image keeps what it had
+                    log(job, f"{rel}: skipped, {e}", "warn")
+                    update(job, done=job.done + 1, file=it.path.name, text="", message="")
+                    pbar.update_absolute(job.done)
+                    mm.throw_exception_if_processing_interrupted()
+                    continue
                 if job.preview:
                     job.results.append({"path": rel, "text": text})
                 else:

@@ -235,11 +235,16 @@ def load_image(path: Path, size: tuple[int, int], mode: str = "RGB") -> torch.Te
 
 def apply_trigger(text: str, trigger: str, prepend: bool) -> str:
     """ai-toolkit semantics: "[trigger]" -> the word; if the caption still doesn't
-    contain it, prepend "trigger, "."""
+    contain it, prepend "trigger, ". A structured (JSON) caption gets it at the start of its
+    short_description instead, so it stays JSON."""
     if not trigger:
         return text.replace("[trigger]", "").strip(" ,")
     text = text.replace("[trigger]", trigger)
     if prepend and trigger.lower() not in text.lower():
+        from ...datasets import structured
+
+        if structured.is_json_caption(text):
+            return structured.with_trigger(text, trigger)
         text = f"{trigger}, {text}" if text else trigger
     return text
 
