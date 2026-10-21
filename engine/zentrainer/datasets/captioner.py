@@ -396,6 +396,9 @@ def _run_rewrite(job: CaptionJob) -> None:
 
 def run(job: CaptionJob) -> None:
     """Caption the job's images (or rewrite its prompts). Runs inside a ComfyUI prompt."""
+    from . import segment
+
+    segment.release()  # the mask editor's SAM3, if it's still held: the captioner wants the memory
     import comfy.model_management as mm
     import comfy.utils
     import folder_paths

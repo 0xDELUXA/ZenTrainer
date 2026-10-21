@@ -37,6 +37,9 @@ class ZenTrainSession(io.ComfyNode):
         store = state.store()
         spec = TrainSpec.from_dict(store.spec(run_id))
         meta = store.meta(run_id)
+        from .datasets import segment
+
+        segment.release()  # the mask editor's SAM3, if it's still held: the run wants the memory
         ctl = control.register(run_id)
         # sampling a saved checkpoint trains nothing: that checkpoint's LoRA, no training state. A run
         # that was once resumed still names what it resumed from, and that state may be cleaned up

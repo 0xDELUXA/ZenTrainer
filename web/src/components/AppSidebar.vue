@@ -274,17 +274,21 @@ onUnmounted(() => {
     <RouterLink v-if="meters.length" to="/system" class="row mem" :class="{ active: isActive('/system') }" title="System memory" @click="emit('navigate')">
       <span class="ic"><i class="mdi mdi-memory" /></span>
       <span class="lbl mem-body">
-        <span v-for="m in meters" :key="m.label" class="mem-row">
-          <span class="mem-head"><span>{{ m.label }}</span><span class="mono">{{ 'text' in m ? m.text : `${gb(m.used)}/${gb(m.total)} GB` }}</span></span>
-          <span class="meter"><span :style="{ width: `${(m.used / m.total) * 100}%` }" :class="{ hot: m.used / m.total > 0.9 }" /></span>
-        </span>
+        <!-- what's loaded, first: each with a ring for how much of it is in VRAM (the rest offloaded) -->
         <span v-if="loadedRows.length" class="loaded">
           <span v-for="m in loadedRows.slice(0, 4)" :key="m.key" class="loaded-row" :title="`${m.full}\n${m.kind} · ${gb(m.vram)} of ${gb(m.bytes)} GB in VRAM`">
-            <i class="mdi" :class="m.icon" />
+            <svg class="lring" viewBox="0 0 16 16" aria-hidden="true">
+              <circle cx="8" cy="8" r="6" class="track" />
+              <circle cx="8" cy="8" r="6" class="fill" :stroke-dasharray="`${Math.min(1, m.vram / (m.bytes || 1)) * 37.7} 37.7`" />
+            </svg>
             <span class="ellipsis">{{ m.label }}</span>
             <span class="mono">{{ gb(m.vram) }}</span>
           </span>
           <span v-if="loadedRows.length > 4" class="loaded-more mono">+{{ loadedRows.length - 4 }} more</span>
+        </span>
+        <span v-for="m in meters" :key="m.label" class="mem-row">
+          <span class="mem-head"><span>{{ m.label }}</span><span class="mono">{{ 'text' in m ? m.text : `${gb(m.used)}/${gb(m.total)} GB` }}</span></span>
+          <span class="meter"><span :style="{ width: `${(m.used / m.total) * 100}%` }" :class="{ hot: m.used / m.total > 0.9 }" /></span>
         </span>
       </span>
     </RouterLink>
@@ -696,10 +700,26 @@ nav {
 .loaded {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  margin-top: 2px;
-  padding-top: 5px;
-  border-top: 1px solid color-mix(in srgb, var(--zen-border) 50%, transparent);
+  gap: 3px;
+  margin-bottom: 2px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--zen-border) 50%, transparent);
+}
+.lring {
+  width: 13px;
+  height: 13px;
+  transform: rotate(-90deg);
+}
+.lring circle {
+  fill: none;
+  stroke-width: 2.5;
+}
+.lring .track {
+  stroke: color-mix(in srgb, var(--zen-text) 15%, transparent);
+}
+.lring .fill {
+  stroke: var(--zen-accent);
+  stroke-linecap: round;
 }
 .loaded-row {
   display: grid;
@@ -708,9 +728,6 @@ nav {
   gap: 5px;
   font-size: 10.5px;
   color: var(--zen-muted);
-}
-.loaded-row i {
-  font-size: 12px;
 }
 .loaded-more {
   font-size: 10px;

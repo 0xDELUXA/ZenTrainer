@@ -20,6 +20,45 @@ ACTIVE = ("queued", "running")
 _jobs: dict[str, "SegmentJob"] = {}
 _lock = threading.Lock()
 _model: dict[str, tuple] = {}  # checkpoint name -> (MODEL, CLIP)
+# SAM3 is let go of when it's no longer wanted: a training run or caption job starting, or IDLE
+# seconds without a mask request (the next one loads it again). Holding it here would keep it in
+# memory for good: ComfyUI only frees a model nothing else holds.
+IDLE = 600
+_using = threading.Lock()  # held while a request runs, so it isn't released under one
+_idle: threading.Timer | None = None
+
+
+def release() -> bool:
+    """Unload SAM3 (if it's loaded and not in use): False when a request has it right now."""
+    global _idle
+    if not _model:
+        return True
+    if not _using.acquire(blocking=False):
+        return False
+    try:
+        if _idle:
+            _idle.cancel()
+            _idle = None
+        _model.clear()
+        import gc
+
+        import comfy.model_management as mm
+
+        gc.collect()
+        mm.cleanup_models()
+        mm.soft_empty_cache()
+        return True
+    finally:
+        _using.release()
+
+
+def _release_later() -> None:
+    global _idle
+    if _idle:
+        _idle.cancel()
+    _idle = threading.Timer(IDLE, release)
+    _idle.daemon = True
+    _idle.start()
 
 
 @dataclass
@@ -84,6 +123,7 @@ def run(job: SegmentJob) -> None:
     from PIL import Image
 
     job.status, job.message = "running", "starting"
+    _using.acquire()
     try:
         names = models()
         if not names:
@@ -114,3 +154,6 @@ def run(job: SegmentJob) -> None:
         job.status, job.message = "done", ""
     except Exception as e:
         job.status, job.message = "error", str(e) or type(e).__name__
+    finally:
+        _using.release()
+        _release_later()
