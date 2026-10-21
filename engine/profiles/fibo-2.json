@@ -1,0 +1,27 @@
+{
+  "families": ["fibo-2-0"],
+  "status": "recipe",
+  "summary": "Fibo 2.0 Dev as ComfyUI's support recommends: Euler, simple, 30 steps, CFG 5, the empty null caption as the negative.",
+  "sources": [
+    {"label": "Fibo 2.0 support in ComfyUI (PR 17240)", "url": "https://github.com/Comfy-Org/ComfyUI/pull/17240"},
+    {"label": "Fibo 2.0 in ComfyUI", "url": "https://huggingface.co/Comfy-Org/Fibo-2.0"},
+    {"label": "Fibo-2.0-dev model card", "url": "https://huggingface.co/briaai/Fibo-2.0-dev"}
+  ],
+  "train": {
+    "dataset": {"resolution": 1024}
+  },
+  "samples": {
+    "steps": 30,
+    "cfg": 5.0,
+    "sampler": "euler",
+    "scheduler": "simple",
+    "negative": ""
+  },
+  "notes": [
+    "Train on Dev. Edit Turbo is the 4-step, CFG 1 edit build: its settings make Dev previews look broken.",
+    "Trained around 1 megapixel (Bria's sizes are multiples of 16 within 10% of 1 MP).",
+    "An empty negative is the null caption Fibo 2.0 was trained with for classifier-free guidance.",
+    "Fibo 2.0 is trained on structured JSON captions; plain text also encodes.",
+    "Captions with text to render: TextEncodeFibo2 shows Qwen3-VL images of that text only below sigma 0.9, while training encodes them at every noise level."
+  ]
+}
