@@ -14,8 +14,9 @@ import { comfyBehind, comfyOld, engineStale, restartEngine, restarting, startSta
 import { activeDownloads, fmtBytes, startDownloadSync } from '@/stores/downloads'
 import { disks, gb, memLatest, startSystemSync } from '@/stores/system'
 import { drawerOpen, toggleDrawer, unseenErrors } from '@/stores/logs'
+import { engine, type LoadedModel } from '@/api/engine'
 
-defineProps<{ collapsed: boolean; mobileOpen: boolean }>()
+const props = defineProps<{ collapsed: boolean; mobileOpen: boolean }>()
 const emit = defineEmits<{ toggle: []; navigate: [] }>()
 
 // the mark: blooms when clicked, breathes while something trains
@@ -132,7 +133,28 @@ function onKey(e: KeyboardEvent) {
   else if (e.key === 'n') router.push(simple.value ? '/simple' : '/runs/new')
 }
 
+// ---- what ComfyUI holds right now, on every page: a training model, the captioner, SAM3 while it
+// loads for a mask... (each by its file and how much of it is in VRAM). Read every few seconds while
+// the sidebar is open and the page is on screen
+const loaded = ref<LoadedModel[]>([])
+let loadedTimer: ReturnType<typeof setTimeout> | undefined
+async function pollLoaded() {
+  if (!props.collapsed || props.mobileOpen) {
+    if (document.visibilityState === 'visible') loaded.value = (await engine.loadedModels().catch(() => loaded.value)).filter((m) => m.bytes > 0)
+  }
+  loadedTimer = setTimeout(pollLoaded, 3000)
+}
+const KIND_ICON: Record<string, string> = { 'diffusion model': 'mdi-cube-outline', 'text encoder': 'mdi-format-text', vae: 'mdi-image-filter-center-focus' }
+const loadedRows = computed(() =>
+  [...loaded.value]
+    .sort((a, b) => b.vram - a.vram)
+    .map((m) => {
+      const file = (m.file ?? m.name).split(' + ')[0]!.split(/[\\/]/).pop()!.replace(/\.(safetensors|sft|ckpt|pt|pth|bin)$/, '')
+      return { key: `${m.name}:${m.file}`, label: file, icon: KIND_ICON[m.kind ?? ''] ?? 'mdi-shape-outline', vram: m.vram, bytes: m.bytes, kind: m.kind ?? 'model', full: m.file ?? m.name }
+    }),
+)
 onMounted(() => {
+  pollLoaded()
   startSystemSync()
   startDownloadSync()
   startCaptionSync()
@@ -140,6 +162,7 @@ onMounted(() => {
   addEventListener('keydown', onKey)
 })
 onUnmounted(() => {
+  clearTimeout(loadedTimer)
   removeEventListener('keydown', onKey)
 })
 </script>
@@ -232,7 +255,7 @@ onUnmounted(() => {
       <span class="ic"><i class="mdi mdi-creation-outline" /></span>
       <span class="lbl mem-body">
         <span class="mem-row">
-          <span class="mem-head"><span class="ellipsis">{{ cap.job.preview ? 'Try' : 'Caption' }} {{ cap.job.dataset }}</span><span class="mono">{{ cap.meta }}{{ cap.more ? ` +${cap.more}` : '' }}</span></span>
+          <span class="mem-head"><span class="ellipsis">{{ cap.job.rewrite?.length ? 'Rewrite prompts' : `${cap.job.preview ? 'Try' : 'Caption'} ${cap.job.dataset}` }}</span><span class="mono">{{ cap.meta }}{{ cap.more ? ` +${cap.more}` : '' }}</span></span>
           <span class="meter"><span :style="{ width: `${cap.pct * 100}%` }" /></span>
         </span>
       </span>
@@ -254,6 +277,14 @@ onUnmounted(() => {
         <span v-for="m in meters" :key="m.label" class="mem-row">
           <span class="mem-head"><span>{{ m.label }}</span><span class="mono">{{ 'text' in m ? m.text : `${gb(m.used)}/${gb(m.total)} GB` }}</span></span>
           <span class="meter"><span :style="{ width: `${(m.used / m.total) * 100}%` }" :class="{ hot: m.used / m.total > 0.9 }" /></span>
+        </span>
+        <span v-if="loadedRows.length" class="loaded">
+          <span v-for="m in loadedRows.slice(0, 4)" :key="m.key" class="loaded-row" :title="`${m.full}\n${m.kind} · ${gb(m.vram)} of ${gb(m.bytes)} GB in VRAM`">
+            <i class="mdi" :class="m.icon" />
+            <span class="ellipsis">{{ m.label }}</span>
+            <span class="mono">{{ gb(m.vram) }}</span>
+          </span>
+          <span v-if="loadedRows.length > 4" class="loaded-more mono">+{{ loadedRows.length - 4 }} more</span>
         </span>
       </span>
     </RouterLink>
@@ -661,6 +692,30 @@ nav {
   gap: 5px;
   padding: 6px 10px 6px 0;
   font-size: 11px;
+}
+.loaded {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+  padding-top: 5px;
+  border-top: 1px solid color-mix(in srgb, var(--zen-border) 50%, transparent);
+}
+.loaded-row {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  color: var(--zen-muted);
+}
+.loaded-row i {
+  font-size: 12px;
+}
+.loaded-more {
+  font-size: 10px;
+  color: var(--zen-muted);
+  padding-left: 19px;
 }
 .mem-row {
   display: flex;

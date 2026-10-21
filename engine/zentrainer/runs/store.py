@@ -72,9 +72,14 @@ class RunStore:
             meta = self.meta(run_id)
             now = time.time()
             new, old = fields.get("status"), meta.get("status")
+            # sampling a saved checkpoint queues the run and puts it back as it was: not a go of its
+            # own, so its times stay as they are
+            sampling = bool(meta.get("sample_job") or fields.get("sample_job"))
             # when it ran: `started` is this go (a resume starts a new one), `first_started` the
             # first; `ended` when it last stopped, finished or failed (cleared when it's queued again)
-            if new in ACTIVE and old not in ACTIVE:
+            if sampling:
+                pass
+            elif new in ACTIVE and old not in ACTIVE:
                 fields.setdefault("started", now)
                 fields.setdefault("ended", None)
                 if not meta.get("first_started"):
@@ -83,6 +88,11 @@ class RunStore:
                 fields.setdefault("ended", now)
             elif new == "queued":
                 fields.setdefault("ended", None)
+            # a finished run resumes from nothing: what a resume started from (and its training
+            # state, which the clean-up may delete) shouldn't follow it into later jobs
+            if new == "done" and not sampling:
+                fields.setdefault("resume_from", None)
+                fields.setdefault("resume_state", None)
             meta.update(fields, updated=now)
             self._write_meta(run_id, meta)
         return meta

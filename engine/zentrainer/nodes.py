@@ -38,10 +38,15 @@ class ZenTrainSession(io.ComfyNode):
         spec = TrainSpec.from_dict(store.spec(run_id))
         meta = store.meta(run_id)
         ctl = control.register(run_id)
+        # sampling a saved checkpoint trains nothing: that checkpoint's LoRA, no training state. A run
+        # that was once resumed still names what it resumed from, and that state may be cleaned up
+        # since (or it would load that LoRA instead of the one asked for)
+        job = meta.get("sample_job")
         try:
             Trainer(spec, run_id, store=store, control=ctl,
-                    resume_from=meta.get("resume_from"), resume_state=meta.get("resume_state"),
-                    sample_job=meta.get("sample_job")).run()
+                    resume_from=None if job else meta.get("resume_from"),
+                    resume_state=None if job else meta.get("resume_state"),
+                    sample_job=job).run()
         finally:
             control.unregister(run_id)
         return io.NodeOutput()

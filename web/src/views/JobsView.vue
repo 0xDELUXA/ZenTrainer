@@ -66,32 +66,50 @@ const history = computed<Row[]>(() => {
   return rows.sort((a, b) => b.t - a.t)
 })
 const liveCaptions = computed(() => (kind.value === 'train' ? [] : activeCaptions.value))
-const capTitle = (j: CaptionJob) => `${j.preview ? 'Try captions' : 'Caption'} ${j.dataset}`
+const capTitle = (j: CaptionJob) => (j.rewrite?.length ? 'Rewrite prompts' : `${j.preview ? 'Try captions' : 'Caption'} ${j.dataset}`)
 const capMeta = (j: CaptionJob) =>
   j.status === 'queued' ? j.message || 'waiting' : j.message?.startsWith('loading') ? 'loading model' : `${j.done}/${j.total || j.preview || '…'}`
 const capPct = (j: CaptionJob) => ((j.total || j.preview) ? (j.done / (j.total || j.preview || 1)) * 100 : 0)
 const capSub = (j: CaptionJob) =>
-  [`into “${j.set_name}”`, j.preview ? 'try-on' : `${j.written?.length ?? j.done} written`, j.clip_name.replace(/\.safetensors$/, '')].join(' · ')
+  [j.rewrite?.length ? `${j.rewrite.length} prompts` : `into “${j.set_name}”`, j.preview ? 'try-on' : `${j.written?.length ?? j.done} written`, j.clip_name.replace(/\.safetensors$/, '')].join(' · ')
 const progress = (id: string) => {
   const m = latest[id]
   return m?.total ? { step: m.step, total: m.total, pct: (m.step / m.total) * 100 } : null
 }
 const when = (t: number) => new Date(t * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
 const clock = (t: number) => new Date(t * 1000).toLocaleTimeString([], { timeStyle: 'short' })
-const span = (s: number) => {
-  const m = Math.round(s / 60)
-  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`
+// "today 17:03", "yesterday 09:40", "21 Oct 17:03"
+const day = (t: number) => {
+  const d = new Date(t * 1000)
+  const days = Math.round((new Date().setHours(0, 0, 0, 0) - new Date(d).setHours(0, 0, 0, 0)) / 86400000)
+  const date = days === 0 ? 'today' : days === 1 ? 'yesterday' : d.toLocaleDateString([], { day: 'numeric', month: 'short' })
+  return `${date} ${clock(t)}`
 }
-const ENDED: Record<string, string> = { done: 'finished', stopped: 'stopped', error: 'failed', interrupted: 'interrupted', rejected: 'rejected' }
-// a run's go: when it started and how long it ran (runs from before start times were kept: created)
-const timing = (r: RunMeta) => {
-  if (!r.started) return { when: when(r.created), sub: '' }
-  const end = r.ended ?? (r.status in ENDED ? r.updated : Date.now() / 1000)
-  const verb = ENDED[r.status]
-  return {
-    when: `started ${when(r.started)}`,
-    sub: verb && r.ended ? `ran ${span(end - r.started)} · ${verb} ${clock(r.ended)}` : `running ${span(end - r.started)}`,
-  }
+// "42s", "12m", "1h 05m"
+const dur = (s: number) => {
+  const m = Math.floor(s / 60)
+  return m < 1 ? `${Math.round(s)}s` : m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`
+}
+const ENDED: Record<string, { verb: string; icon: string; tone: string }> = {
+  done: { verb: 'Finished', icon: 'mdi-flag-checkered', tone: 'ok' },
+  stopped: { verb: 'Stopped', icon: 'mdi-stop-circle-outline', tone: '' },
+  error: { verb: 'Failed', icon: 'mdi-alert-circle-outline', tone: 'bad' },
+  interrupted: { verb: 'Interrupted', icon: 'mdi-power-plug-off-outline', tone: 'bad' },
+  rejected: { verb: 'Rejected', icon: 'mdi-cancel', tone: 'bad' },
+}
+// a run's go as icons: when it started, how long it ran, how and when it ended (the full dates on
+// hover); runs from before start times were kept show when they were made
+type Part = { icon: string; text: string; title: string; tone?: string }
+const timing = (r: RunMeta): Part[] => {
+  if (!r.started) return [{ icon: 'mdi-calendar-outline', text: day(r.created), title: `Made ${when(r.created)}` }]
+  const e = ENDED[r.status]
+  const end = r.ended ?? (e ? r.updated : Date.now() / 1000)
+  const parts: Part[] = [
+    { icon: 'mdi-play-outline', text: day(r.started), title: `Started ${when(r.started)}` },
+    { icon: 'mdi-timer-outline', text: dur(end - r.started), title: e ? `Ran for ${dur(end - r.started)}` : `Running for ${dur(end - r.started)}` },
+  ]
+  if (e && r.ended) parts.push({ icon: e.icon, text: clock(r.ended), title: `${e.verb} ${when(r.ended)}`, tone: e.tone })
+  return parts
 }
 const summary = computed(() => {
   const parts = [`${runs.value.length} run${runs.value.length === 1 ? '' : 's'}`, `${captions.value.filter((j) => !j.preview).length} caption jobs`]
@@ -152,7 +170,7 @@ const summary = computed(() => {
         <RouterLink :to="`/runs/${current.run_id}`" class="row card now">
           <div class="name">
             {{ current.name }}
-            <div class="muted mono small">{{ current.run_id }}<template v-if="current.started"> · {{ timing(current).sub }} since {{ clock(current.started) }}</template></div>
+            <div class="muted mono small">{{ current.run_id }}<template v-if="current.started"> · <i class="mdi mdi-timer-outline" /> {{ dur(Date.now() / 1000 - current.started) }} since {{ clock(current.started) }}</template></div>
           </div>
           <div class="mini">
             <div class="bar"><div :style="{ width: `${progress(current.run_id)?.pct ?? 0}%` }" /></div>
@@ -205,9 +223,8 @@ const summary = computed(() => {
               <i class="mdi mdi-chart-timeline-variant kind-ic" />{{ h.run.name }}
               <div class="muted mono small">{{ h.run.run_id }}</div>
             </div>
-            <div class="muted small">
-              {{ timing(h.run).when }}
-              <div v-if="timing(h.run).sub" class="mono">{{ timing(h.run).sub }}</div>
+            <div class="times small">
+              <span v-for="(t, ti) in timing(h.run)" :key="ti" :class="t.tone" :title="t.title"><i class="mdi" :class="t.icon" />{{ t.text }}</span>
             </div>
             <StatusPill :status="h.run.status" />
           </RouterLink>
@@ -216,7 +233,7 @@ const summary = computed(() => {
               <i class="mdi mdi-creation-outline kind-ic" />{{ capTitle(h.job) }}
               <div class="muted mono small">{{ capSub(h.job) }}</div>
             </div>
-            <div class="muted small">{{ when(h.t) }}</div>
+            <div class="times small"><span :title="when(h.t)"><i class="mdi mdi-calendar-outline" />{{ day(h.t) }}</span></div>
             <StatusPill :status="h.job.status" />
           </RouterLink>
         </template>
@@ -269,9 +286,29 @@ const summary = computed(() => {
 .warn {
   color: var(--zen-warn);
 }
+/* when a run ran: icons and short values in one line, the full dates on hover */
+.times {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 12px;
+  color: var(--zen-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.times i {
+  margin-right: 4px;
+  opacity: 0.8;
+}
+.times .ok {
+  color: var(--zen-ok);
+}
+.times .bad {
+  color: var(--zen-danger);
+}
 .row {
   display: grid;
-  grid-template-columns: 1fr 200px 110px;
+  grid-template-columns: 1fr minmax(0, auto) 110px;
   gap: 16px;
   align-items: center;
   padding: 12px 16px;
