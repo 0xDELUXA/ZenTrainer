@@ -5,7 +5,7 @@ import { ZenButton, ZenEmpty, ZenInput } from '@nynxz/zenkit-ui'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { engine, thumbUrl, type DatasetInfo } from '@/api/engine'
-import HealthPentagon from '@/components/HealthPentagon.vue'
+import CaptionRing from '@/components/CaptionRing.vue'
 import TemplateCard from '@/components/TemplateCard.vue'
 
 const router = useRouter()
@@ -59,6 +59,8 @@ function overall(d: DatasetInfo): number | null {
   return vs.length ? vs.reduce((x, y) => x + y, 0) / vs.length : null
 }
 const pct = (v: number) => Math.round(v * 100)
+const badgeTip = (d: DatasetInfo) =>
+  [`${d.captioned} of ${d.images} captioned`, d.health ? `health ${pct(overall(d) ?? 0)} (the “${d.health.set}” set)` : 'health not measured yet: open the dataset'].join(' · ')
 // what a dataset holds, as icon + count
 const kinds = (d: DatasetInfo) =>
   [
@@ -148,19 +150,15 @@ const ago = (t?: number) => {
           :to="link(d)"
           :title="d.folder"
           :tags="tagsFor(d)"
-          :meta="[ago(d.modified), fmtBytes(d.bytes)].filter(Boolean)"
+          :meta="[d.captioned < d.images ? `${d.images - d.captioned} uncaptioned` : '', ago(d.modified), fmtBytes(d.bytes)].filter(Boolean)"
         >
           <template #thumb>
             <div class="mosaic" :class="`n${pics(d).length}`">
               <img v-for="t in pics(d)" :key="t.filename" :src="thumb(d, t)" loading="lazy" alt="" />
               <span v-if="!pics(d).length" class="none"><i class="mdi mdi-image-off-outline" /></span>
+              <span class="corner" :title="badgeTip(d)"><CaptionRing :done="d.captioned" :total="d.images" :scores="d.health?.scores" :size="34" /></span>
             </div>
           </template>
-          <div class="capline" :title="`${d.captioned} of ${d.images} have a default caption`">
-            <HealthPentagon v-if="d.health" :scores="d.health.scores" :size="30" class="card-pent" :title="`Health of the “${d.health.set}” caption set`" />
-            <div class="meter"><span :class="{ part: d.captioned < d.images }" :style="{ width: `${d.images ? (d.captioned / d.images) * 100 : 0}%` }" /></div>
-            <span class="small" :class="d.captioned < d.images ? 'warn' : 'muted'">{{ d.captioned }}/{{ d.images }} captioned</span>
-          </div>
         </TemplateCard>
       </div>
 
@@ -170,8 +168,11 @@ const ago = (t?: number) => {
           <span />
           <button class="sortable" @click="sortBy('name')">Name <i v-if="sortKey === 'name'" :class="sortDir > 0 ? 'mdi mdi-arrow-up' : 'mdi mdi-arrow-down'" /></button>
           <button class="sortable" @click="sortBy('items')">Items <i v-if="sortKey === 'items'" :class="sortDir > 0 ? 'mdi mdi-arrow-up' : 'mdi mdi-arrow-down'" /></button>
-          <button class="sortable" @click="sortBy('captioned')">Captioned <i v-if="sortKey === 'captioned'" :class="sortDir > 0 ? 'mdi mdi-arrow-up' : 'mdi mdi-arrow-down'" /></button>
-          <button class="sortable hide-s" title="The pentagon's five scores, averaged (from the last stats snapshot)" @click="sortBy('health')">Health <i v-if="sortKey === 'health'" :class="sortDir > 0 ? 'mdi mdi-arrow-up' : 'mdi mdi-arrow-down'" /></button>
+          <span class="sorts">
+            <button class="sortable" title="Ring: how much is captioned" @click="sortBy('captioned')">Captioned <i v-if="sortKey === 'captioned'" :class="sortDir > 0 ? 'mdi mdi-arrow-up' : 'mdi mdi-arrow-down'" /></button>
+            <span class="muted">·</span>
+            <button class="sortable" title="Pentagon: its five scores, averaged (from the last stats snapshot)" @click="sortBy('health')">health <i v-if="sortKey === 'health'" :class="sortDir > 0 ? 'mdi mdi-arrow-up' : 'mdi mdi-arrow-down'" /></button>
+          </span>
           <span class="hide-s">Sets</span>
           <button class="sortable hide-s" @click="sortBy('modified')">Changed <i v-if="sortKey === 'modified'" :class="sortDir > 0 ? 'mdi mdi-arrow-up' : 'mdi mdi-arrow-down'" /></button>
           <span />
@@ -184,16 +185,10 @@ const ago = (t?: number) => {
           <span class="kinds small mono">
             <span v-for="k in kinds(d)" :key="k.icon" :title="`${k.n} ${k.tip}`"><i class="mdi" :class="k.icon" />{{ k.n }}</span>
           </span>
-          <span class="capline">
-            <span class="meter"><span :class="{ part: d.captioned < d.images }" :style="{ width: `${d.images ? (d.captioned / d.images) * 100 : 0}%` }" /></span>
+          <span class="capline" :title="badgeTip(d)">
+            <CaptionRing :done="d.captioned" :total="d.images" :scores="d.health?.scores" :size="26" />
             <span class="small mono" :class="d.captioned < d.images ? 'warn' : 'muted'">{{ d.captioned }}/{{ d.images }}</span>
-          </span>
-          <span class="health hide-s" :title="d.health ? `Health of the “${d.health.set}” caption set` : 'Not measured yet: open the dataset'">
-            <template v-if="d.health">
-              <HealthPentagon :scores="d.health.scores" :size="22" class="card-pent" />
-              <span class="small mono">{{ pct(overall(d) ?? 0) }}</span>
-            </template>
-            <span v-else class="small muted">—</span>
+            <span v-if="d.health" class="small mono muted hide-s">· {{ pct(overall(d) ?? 0) }}</span>
           </span>
           <span class="sets hide-s">
             <span v-for="st in d.sets" :key="st" class="set">{{ st }}</span>
@@ -250,6 +245,7 @@ const ago = (t?: number) => {
 }
 /* a fixed 4:3 mosaic whatever the thumbnails' shapes or count */
 .mosaic {
+  position: relative;
   display: grid;
   height: 100%;
   gap: 2px;
@@ -287,25 +283,26 @@ const ago = (t?: number) => {
   font-size: 13px;
   min-width: 0;
 }
+.mosaic .corner {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  padding: 3px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--zen-surface) 82%, transparent);
+  backdrop-filter: blur(4px);
+}
+.sorts {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
 .capline {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-.meter {
-  flex: 1;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--zen-surface-2);
-  overflow: hidden;
-}
-.meter span {
-  display: block;
-  height: 100%;
-  background: var(--zen-ok, var(--zen-accent));
-}
-.meter span.part {
-  background: var(--zen-warn);
 }
 .warn {
   color: var(--zen-warn);
@@ -316,7 +313,7 @@ const ago = (t?: number) => {
 }
 .tr {
   display: grid;
-  grid-template-columns: 56px minmax(110px, 1.6fr) minmax(90px, 0.8fr) minmax(90px, 0.8fr) 56px minmax(70px, 1fr) 78px 30px;
+  grid-template-columns: 56px minmax(110px, 1.6fr) minmax(90px, 0.8fr) minmax(120px, 0.9fr) minmax(70px, 1fr) 78px 30px;
   align-items: center;
   gap: 10px;
   padding: 5px 10px;
@@ -408,8 +405,5 @@ const ago = (t?: number) => {
   .hide-s {
     display: none;
   }
-}
-.card-pent {
-  flex: none;
 }
 </style>
