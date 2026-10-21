@@ -2,14 +2,16 @@
 // Simple mode: pick a recipe card, add photos, name it, train. Everything else (settings, captions,
 // model files) comes from the recipe; what's missing is downloaded and the photos are captioned
 // before the run starts, each as a visible step.
-import { ZenButton, ZenInput } from '@nynxz/zenkit-ui'
+import { makerLogo } from '@/lib/makers'
+import { ZenButton, ZenInput, ZenLightbox, type LightboxItem } from '@nynxz/zenkit-ui'
 import TemplateCard from '@/components/TemplateCard.vue'
+import CaptionRing from '@/components/CaptionRing.vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { EngineError, defaultSpec, engine, thumbUrl, type DatasetInfo, type DatasetItem } from '@/api/engine'
+import { EngineError, defaultSpec, engine, thumbUrl, type DatasetFaces, type DatasetInfo, type DatasetItem } from '@/api/engine'
 import { captionJobs, startCaptionSync } from '@/stores/captions'
 import { downloadFor, finished, fmtBytes, startDownloadSync } from '@/stores/downloads'
-import { RECIPES, buildSpec, eta, plan, recipe as findRecipe, stepsFor, triggerFrom, type Plan, type Recipe } from '@/lib/recipes'
+import { RECIPES, buildSpec, plan, recipe as findRecipe, stepsFor, triggerFrom, type Plan, type Recipe } from '@/lib/recipes'
 import { settings } from '@/stores/settings'
 
 const props = defineProps<{ id?: string }>()
@@ -23,6 +25,7 @@ const kinds = [
   { id: 'all', label: 'All' },
   { id: 'character', label: 'People & characters' },
   { id: 'style', label: 'Styles' },
+  { id: 'general', label: 'Any subject' },
 ] as const
 const kind = ref<(typeof kinds)[number]['id']>('all')
 const shown = computed(() => RECIPES.filter((x) => kind.value === 'all' || x.kind === kind.value))
@@ -37,6 +40,19 @@ watch(name, (n) => {
 const datasets = ref<DatasetInfo[]>([])
 const source = ref<'new' | 'existing'>('new')
 const existing = ref('')
+// the datasets you have, newest first; searchable once there are many
+const dsQuery = ref('')
+const dsShown = computed(() => {
+  const q = dsQuery.value.trim().toLowerCase()
+  return [...datasets.value].filter((d) => d.images && (!q || d.folder.toLowerCase().includes(q))).sort((a, b) => (b.modified ?? 0) - (a.modified ?? 0))
+})
+const dsThumb = (d: DatasetInfo, t: DatasetInfo['thumbs'][number]) =>
+  thumbUrl(d.folder, t.path ?? t.subfolder.split('/').slice(1).concat(t.filename).join('/'), 160)
+const ago = (t?: number) => {
+  if (!t) return ''
+  const s = Date.now() / 1000 - t
+  return s < 3600 ? `${Math.max(1, Math.round(s / 60))}m ago` : s < 86400 ? `${Math.round(s / 3600)}h ago` : `${Math.round(s / 86400)}d ago`
+}
 const dsName = computed(() => (source.value === 'existing' ? existing.value : name.value ? `simple_${triggerFrom(name.value)}` : ''))
 const items = ref<DatasetItem[]>([])
 const uploading = ref(false)
@@ -49,8 +65,88 @@ async function loadItems() {
   } catch {
     items.value = []
   }
+  checkPhotos()
 }
+
+// ---- each photo checked: the dataset's own picture checks (blurry, small, duplicate...) and, with
+// the faces extra, its faces (none, several, someone else's), shown on the thumbnails ----------
+const flags = ref<Record<string, string[]>>({})
+const faces = ref<DatasetFaces | null>(null)
+const checking = ref(false)
+let checkTimer: ReturnType<typeof setTimeout> | undefined
+function checkPhotos() {
+  clearTimeout(checkTimer)
+  if (!dsName.value || !items.value.length) {
+    flags.value = {}
+    faces.value = null
+    return
+  }
+  checkTimer = setTimeout(async () => {
+    const ds = dsName.value
+    checking.value = true
+    try {
+      const [st, fc] = await Promise.all([
+        engine.datasetStats(ds).catch(() => null),
+        r.value?.kind === 'character' ? engine.datasetFaces(ds).catch(() => null) : Promise.resolve(null),
+      ])
+      if (ds !== dsName.value) return
+      const f: Record<string, string[]> = {}
+      for (const [k, v] of Object.entries(st?.current.flags ?? {})) f[k.replace(/^[\\/]+/, '')] = v
+      flags.value = f
+      faces.value = fc?.available ? fc : null
+    } finally {
+      checking.value = false
+    }
+  }, 700)
+}
+// what's worth fixing, in plain words: the serious ones mark the photo
+const SERIOUS = new Set(['blurry', 'small', 'near-duplicate', 'no face', 'several people', 'someone else?'])
+const WORDS: Record<string, string> = {
+  blurry: 'blurry', small: 'low resolution', 'near-duplicate': 'a near-duplicate', similar: 'very like another',
+  dark: 'dark', 'blown out': 'blown out', flat: 'flat contrast', bars: 'has borders', greyscale: 'black and white',
+  'no face': 'no face found', 'several people': 'more than one person', 'someone else?': 'may be someone else',
+}
+function issuesOf(it: DatasetItem): string[] {
+  const out = [...(flags.value[it.path] ?? [])]
+  const fc = faces.value?.items?.[it.path]
+  if (fc) {
+    if (fc.faces === 0) out.push('no face')
+    else if (fc.faces > 1) out.push('several people')
+    else if (fc.outlier) out.push('someone else?')
+  }
+  return out
+}
+const serious = (it: DatasetItem) => issuesOf(it).some((i) => SERIOUS.has(i))
+const verdict = computed(() => {
+  if (!items.value.length) return ''
+  const bad = items.value.filter(serious).length
+  const mild = items.value.filter((it) => !serious(it) && issuesOf(it).length).length
+  if (!bad && !mild) return `All ${items.value.length} look good`
+  return [`${items.value.length - bad - mild} look good`, bad ? `${bad} worth replacing` : '', mild ? `${mild} could be better` : '']
+    .filter(Boolean)
+    .join(' · ')
+})
 watch(dsName, loadItems)
+// the panel's example prompts, with this LoRA's word in them
+const word = computed(() => trigger.value || (r.value?.kind === 'style' ? 'mystyle' : 'yourname'))
+const examples = computed(() => (r.value?.samples ?? []).map((s) => s.replaceAll('[trigger]', word.value)))
+const editingWord = ref(false)
+// what's still missing before it can train, in order
+const needs = computed(() => {
+  const out: string[] = []
+  if (!name.value.trim()) out.push('Give it a name')
+  if (r.value && !enough.value) out.push(count.value ? `Add ${r.value.photos.min - count.value} more photo${r.value.photos.min - count.value === 1 ? '' : 's'}` : `Add ${r.value.photos.min} or more photos`)
+  return out
+})
+// a photo full size: its caption and anything worth fixing; ←/→ through them all
+const lb = ref<number | null>(null)
+const lbItems = computed<LightboxItem[]>(() =>
+  items.value.map((it) => ({
+    src: thumbUrl(dsName.value, it.path, 1600),
+    label: it.filename,
+    meta: [issuesOf(it).map((i) => WORDS[i] ?? i).join(', '), it.caption].filter(Boolean).join(' · '),
+  })),
+)
 
 async function addFiles(files: File[]) {
   const pics = files.filter((f) => /^image\//.test(f.type))
@@ -102,12 +198,6 @@ watch(
 )
 const downloadBytes = computed(() => (p.value?.downloads ?? []).reduce((n, d) => n + (d.size ?? 0), 0) + (p.value?.adapter?.size ?? 0))
 const steps = computed(() => (r.value ? stepsFor(r.value, Math.max(count.value, r.value.photos.min)) : 0))
-const estimate = computed(() => {
-  if (!r.value) return ''
-  const uncaptioned = items.value.filter((i) => !i.caption).length
-  const s = steps.value * r.value.secPerStep + 120 + uncaptioned * 6 + (steps.value / (r.value.spec.samples?.steps ? 200 : 300)) * 20
-  return eta(s)
-})
 
 // ---- training: downloads, then captions, then the run ---------------------------------------
 type Phase = 'idle' | 'downloading' | 'captioning' | 'starting'
@@ -133,6 +223,55 @@ function waitFor(check: () => boolean | string, every = 1000): Promise<void> {
   })
 }
 
+// the best describer installed: bigger and newer describe better (Qwen3.5 9B, then Qwen3-VL 8B, then 4B)
+function describer(models: string[]): string | undefined {
+  const order = [/qwen3\.?5[-_]?9b(?!.*(flux|prompt|upsampl|pe_))/i, /qwen3.?vl[-_]?8b/i, /qwen3.?vl[-_]?4b/i, /qwen3.?vl/i, /gemma[-_]?4/i]
+  for (const re of order) {
+    const hit = models.find((m) => re.test(m))
+    if (hit) return hit
+  }
+  return models[0]
+}
+const describing = ref(false)
+async function describe() {
+  const x = r.value
+  if (!x) return
+  await loadItems()
+  if (!items.value.some((i) => !i.caption)) return
+  const info = await engine.captionInfo(dsName.value)
+  const model = describer(info.models)
+  if (!model) throw new Error('no vision-language model to describe the photos with: install Qwen3-VL (Models page)')
+  const { job } = await engine.startCaption(dsName.value, {
+    clip_name: model,
+    clip_type: 'auto',
+    set: 'default',
+    mode: 'missing',
+    ...(x.caption.style ? { style: x.caption.style } : { prompt: x.caption.prompt }),
+    subject: x.caption.subject ? trigger.value : undefined,
+  } as Parameters<typeof engine.startCaption>[1])
+  capJob.value = job.job_id
+  await waitFor(() => {
+    const j = captionJobs[job.job_id]
+    if (j?.status === 'error') return `describing failed: ${j.message}`
+    if (j?.status === 'stopped') return 'describing was stopped'
+    return j?.status === 'done'
+  })
+  await loadItems()
+}
+async function describeNow() {
+  error.value = null
+  describing.value = true
+  phase.value = 'captioning'
+  try {
+    await describe()
+  } catch (e) {
+    error.value = e instanceof EngineError ? e.message : (e as Error).message ?? String(e)
+  } finally {
+    describing.value = false
+    phase.value = 'idle'
+  }
+}
+
 async function train() {
   const x = r.value
   if (!x || !p.value) return
@@ -151,29 +290,11 @@ async function train() {
       })
       p.value = await plan(x) // now installed: the names ComfyUI lists them by
     }
-    // 2. captions for photos without one
+    // 2. descriptions for photos without one
     await loadItems()
     if (items.value.some((i) => !i.caption)) {
       phase.value = 'captioning'
-      const info = await engine.captionInfo(dsName.value)
-      const model =
-        info.models.find((m) => /qwen3vl_4b/i.test(m)) ?? info.models.find((m) => /qwen3.?vl/i.test(m)) ?? info.models[0]
-      if (!model) throw new Error('no vision-language model to caption with: install Qwen3-VL 4B (Models page)')
-      const { job } = await engine.startCaption(dsName.value, {
-        clip_name: model,
-        clip_type: 'auto',
-        set: 'default',
-        mode: 'missing',
-        prompt: x.caption.prompt,
-        subject: x.caption.subject ? trigger.value : undefined,
-      } as Parameters<typeof engine.startCaption>[1])
-      capJob.value = job.job_id
-      await waitFor(() => {
-        const j = captionJobs[job.job_id]
-        if (j?.status === 'error') return `captioning failed: ${j.message}`
-        if (j?.status === 'stopped') return 'captioning was stopped'
-        return j?.status === 'done'
-      })
+      await describe()
     }
     // 3. the run
     phase.value = 'starting'
@@ -235,121 +356,189 @@ void leaving
           :after-label="x.thumb?.after_label"
           :icon="x.cover.icon"
           :accent="x.cover.from"
-          :logo="x.logo ? asset(x.logo) : null"
+          :logo="makerLogo(x.family)?.src ?? null"
           :tags="[x.model]"
-          :badge="x.kind === 'character' ? 'Character' : x.kind === 'style' ? 'Style' : 'Video'"
+          :badge="{ character: 'Character', style: 'Style', video: 'Video', general: 'Any subject' }[x.kind]"
           :flag="x.validated ? undefined : 'draft'"
           flag-title="Not trained and checked end to end yet: settings from similar runs"
-          :meta="[x.photos.ideal, eta(stepsFor(x, 25) * x.secPerStep + 180)]"
+          :meta="[x.photos.ideal]"
         />
       </div>
     </template>
 
     <!-- one recipe -->
     <template v-else>
-      <div class="page-head flow-head">
+      <div class="page-head">
         <div class="titles">
           <h1><RouterLink to="/simple" class="crumb">Train</RouterLink> {{ r.title }}</h1>
           <p class="lede">{{ r.blurb }}</p>
         </div>
       </div>
 
-      <div class="flow">
-        <section class="card step">
-          <div class="num">1</div>
-          <div class="sbody">
-            <h2>What's it called?</h2>
-            <ZenInput v-model="name" :placeholder="r.kind === 'style' ? 'e.g. Watercolour postcards' : 'e.g. Grandma Rose'" />
-            <div class="muted small trig">
-              Use the word
-              <input v-model="trigger" class="trig-in mono" spellcheck="false" @input="triggerEdited = true" />
-              in a prompt to bring it in.
-            </div>
-          </div>
-        </section>
-
-        <section class="card step">
-          <div class="num">2</div>
-          <div class="sbody">
-            <h2>{{ r.kind === 'style' ? 'Add images in the style' : 'Add photos' }}</h2>
-            <div class="seg small">
-              <button :class="{ on: source === 'new' }" @click="source = 'new'">New photos</button>
-              <button :class="{ on: source === 'existing' }" :disabled="!datasets.length" @click="source = 'existing'">A dataset I have</button>
-            </div>
-            <select v-if="source === 'existing'" v-model="existing" class="sel">
-              <option value="" disabled>Pick a dataset…</option>
-              <option v-for="d in datasets" :key="d.folder" :value="d.folder">{{ d.folder }} ({{ d.images }})</option>
-            </select>
-            <div
-              v-else
-              class="drop"
-              :class="{ over }"
-              @dragover.prevent="over = true"
-              @dragleave="over = false"
-              @drop.prevent="onDrop"
-              @click="picker?.click()"
-            >
-              <i :class="uploading ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-image-plus-outline'" />
-              <span>{{ uploading ? 'Adding…' : 'Drop photos here, or click to choose' }}</span>
-              <input ref="picker" type="file" accept="image/*" multiple hidden @change="addFiles([...(($event.target as HTMLInputElement).files ?? [])])" />
-            </div>
-            <div class="tips">
-              <span class="muted small"><b>{{ r.photos.ideal }}</b> works best:</span>
-              <span v-for="t in r.photos.tips" :key="t" class="tip small"><i class="mdi mdi-check" />{{ t }}</span>
-            </div>
-            <div v-if="items.length" class="thumbs">
-              <div v-for="it in items" :key="it.path" class="th">
-                <img :src="thumbUrl(dsName, it.path, 192)" loading="lazy" alt="" />
-                <button v-if="source === 'new'" class="x" title="Remove" @click="removeItem(it)"><i class="mdi mdi-close" /></button>
+      <div class="recipe">
+        <div class="flow">
+          <section class="card step">
+            <div class="num">1</div>
+            <div class="sbody">
+              <h2>What's it called?</h2>
+              <ZenInput v-model="name" :placeholder="r.kind === 'style' ? 'e.g. Watercolour postcards' : r.kind === 'general' ? 'e.g. Biscuit the dog' : 'e.g. Grandma Rose'" />
+              <div class="trig small">
+                <span class="muted">You'll bring it in with</span>
+                <input v-if="editingWord" v-model="trigger" class="trig-in mono" spellcheck="false" autofocus @input="triggerEdited = true" @blur="editingWord = false" @keydown.enter="editingWord = false" />
+                <button v-else class="trig-chip mono" :class="{ empty: !trigger }" title="Change the word" @click="editingWord = true">
+                  {{ trigger || 'a word from the name' }} <i class="mdi mdi-pencil-outline" />
+                </button>
+                <span class="muted">in a prompt.</span>
               </div>
             </div>
-            <div class="count small" :class="{ warn: count && !enough }">
-              {{ count }} {{ count === 1 ? 'photo' : 'photos' }}<template v-if="count && !enough"> · add at least {{ r.photos.min - count }} more</template>
-            </div>
-          </div>
-        </section>
+          </section>
 
-        <section class="card step">
-          <div class="num">3</div>
-          <div class="sbody">
-            <h2>Train it</h2>
-            <!-- one strip: what it needs, what it'll do, how long -->
-            <div class="strip-sum">
-              <span v-if="!p"><i class="mdi mdi-loading mdi-spin" /> Checking models</span>
-              <span v-else-if="!p.downloads.length && !p.adapter" class="ok"><i class="mdi mdi-check-circle-outline" /> Models ready</span>
-              <span v-else><i class="mdi mdi-download-outline" /> {{ fmtBytes(downloadBytes) }} to download</span>
-              <span :class="count && !enough ? 'warn' : count ? '' : 'muted'"><i class="mdi mdi-image-multiple-outline" /> {{ count }} {{ r.kind === 'style' ? 'images' : 'photos' }}</span>
-              <span :class="count && !uncaptioned ? 'ok' : ''"><i class="mdi mdi-text-box-outline" /> {{ !count ? 'Describes each one' : uncaptioned ? `${uncaptioned} to describe` : 'All described' }}</span>
-              <span><i class="mdi mdi-stairs" /> {{ steps.toLocaleString() }} steps</span>
-              <span v-if="estimate"><i class="mdi mdi-timer-outline" /> {{ estimate }}</span>
+          <section class="card step" :class="{ locked: !name.trim() }">
+            <div class="num">2</div>
+            <div v-if="!name.trim()" class="sbody">
+              <h2>{{ r.kind === 'style' ? 'Add images in the style' : 'Add photos' }}</h2>
+              <p class="muted small locked-note">Name it first: the photos are kept in a folder called after it.</p>
             </div>
-            <div v-for="q in p?.problems ?? []" :key="q" class="err small"><i class="mdi mdi-alert-circle-outline" /> {{ q }}</div>
-
-            <div v-if="phase !== 'idle'" class="doing">
-              <template v-if="phase === 'downloading'">
-                <div v-for="d in pendingDownloads" :key="d.name" class="prow">
-                  <span class="ellipsis small">Downloading {{ d.name }}</span>
-                  <div class="pbar"><span :style="{ width: `${d.job?.total ? (d.job.done / d.job.total) * 100 : 0}%` }" /></div>
+            <div v-else class="sbody">
+              <div class="h-row">
+                <h2>{{ r.kind === 'style' ? 'Add images in the style' : 'Add photos' }}</h2>
+                <div class="seg small">
+                  <button :class="{ on: source === 'new' }" @click="source = 'new'">New photos</button>
+                  <button :class="{ on: source === 'existing' }" :disabled="!datasets.length" @click="source = 'existing'">A dataset I have</button>
+                </div>
+              </div>
+              <div v-if="source === 'existing'" class="ds-pick">
+                <ZenInput v-if="datasets.length > 8" v-model="dsQuery" size="sm" placeholder="Search your datasets" />
+                <div class="ds-grid">
+                  <button v-for="d in dsShown" :key="d.folder" class="ds" :class="{ on: existing === d.folder }" :title="d.folder" @click="existing = d.folder">
+                    <img v-if="d.thumbs[0]" class="ds-thumb" :src="dsThumb(d, d.thumbs[0])" loading="lazy" alt="" />
+                    <span v-else class="ds-thumb none"><i class="mdi mdi-image-off-outline" /></span>
+                    <span class="ds-text">
+                      <span class="ds-name ellipsis">{{ d.folder }}</span>
+                      <span class="ds-meta small muted">{{ d.images }} {{ d.images === 1 ? 'image' : 'images' }}<template v-if="d.modified"> · {{ ago(d.modified) }}</template></span>
+                    </span>
+                    <CaptionRing :done="d.captioned" :total="d.images" :scores="d.health?.scores" :size="22" />
+                  </button>
+                  <div v-if="!dsShown.length" class="muted small">No dataset matches “{{ dsQuery }}”.</div>
+                </div>
+              </div>
+              <div
+                v-else
+                class="drop"
+                :class="{ over, compact: items.length > 0 }"
+                @dragover.prevent="over = true"
+                @dragleave="over = false"
+                @drop.prevent="onDrop"
+                @click="picker?.click()"
+              >
+                <i :class="uploading ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-image-plus-outline'" />
+                <span>{{ uploading ? 'Adding…' : items.length ? 'Drop more, or click to add' : 'Drop photos here, or click to choose' }}</span>
+                <input ref="picker" type="file" accept="image/*" multiple hidden @change="addFiles([...(($event.target as HTMLInputElement).files ?? [])])" />
+              </div>
+              <div v-if="!items.length" class="tips">
+                <span class="muted small"><b>{{ r.photos.ideal }}</b> works best:</span>
+                <span v-for="t in r.photos.tips" :key="t" class="tip small"><i class="mdi mdi-check" />{{ t }}</span>
+              </div>
+              <template v-else>
+                <div class="verdict small">
+                  <span :class="{ warn: !enough }">
+                    <b>{{ count }}</b> {{ count === 1 ? 'photo' : 'photos' }}<template v-if="!enough"> · add at least {{ r.photos.min - count }} more</template>
+                  </span>
+                  <span v-if="checking" class="muted"><i class="mdi mdi-loading mdi-spin" /> checking…</span>
+                  <span v-else-if="verdict" class="muted">{{ verdict }}</span>
+                </div>
+                <div class="thumbs">
+                  <div v-for="(it, i) in items" :key="it.path" class="th" :class="{ bad: serious(it), meh: !serious(it) && issuesOf(it).length }"
+                       :title="issuesOf(it).length ? issuesOf(it).map((x) => WORDS[x] ?? x).join(', ') : 'Looks good'" @click="lb = i">
+                    <img :src="thumbUrl(dsName, it.path, 192)" loading="lazy" alt="" />
+                    <span v-if="issuesOf(it).length" class="flag"><i :class="serious(it) ? 'mdi mdi-alert' : 'mdi mdi-information-outline'" /></span>
+                    <button v-if="source === 'new'" class="x" title="Remove" @click.stop="removeItem(it)"><i class="mdi mdi-close" /></button>
+                  </div>
+                </div>
+                <ZenLightbox v-if="lb != null" v-model:index="lb" :items="lbItems" :searchable="false" @close="lb = null" />
+                <div class="describe">
+                  <i class="mdi mdi-text-box-outline" />
+                  <div class="describe-text small">
+                    <b>{{ uncaptioned ? `${uncaptioned} to describe` : 'All described' }}</b>
+                    <span class="muted">
+                      Each photo gets a short description, so it learns {{ r.kind === 'style' ? 'the look, not the things in them' : 'what’s in them' }}; your word goes in for you.
+                      {{ r.caption.style === 'fibo_json' ? 'Written in Fibo’s own structured format.' : '' }}
+                      Open a photo to read its description.
+                    </span>
+                  </div>
+                  <ZenButton v-if="uncaptioned" size="sm" icon="mdi mdi-creation-outline" :disabled="phase !== 'idle'" @click="describeNow">
+                    {{ describing ? 'Describing…' : 'Describe now' }}
+                  </ZenButton>
+                  <RouterLink v-else :to="`/datasets/${encodeURIComponent(dsName)}`" class="small">Edit them</RouterLink>
                 </div>
               </template>
-              <div v-else-if="phase === 'captioning'" class="prow">
-                <span class="small">{{ capProgress?.loading ? 'Getting the describer ready…' : `Describing photos ${capProgress?.done ?? 0} of ${capProgress?.total ?? count}` }}</span>
-                <div class="pbar"><span :style="{ width: `${capProgress?.total ? (capProgress.done / capProgress.total) * 100 : 0}%` }" /></div>
-              </div>
-              <div v-else class="prow small"><i class="mdi mdi-loading mdi-spin" /> Starting…</div>
             </div>
+          </section>
+        </div>
 
-            <div v-if="error" class="err small">{{ error }}</div>
-            <ZenButton
-              variant="primary"
-              icon="mdi mdi-play"
-              :disabled="phase !== 'idle' || !name.trim() || !enough || !p || !!p.problems.length"
-              @click="train"
-            >
-              Train {{ name.trim() || 'it' }}
-            </ZenButton>
+        <!-- what you'll get -->
+        <aside class="card get">
+          <div class="cover" :style="{ background: `linear-gradient(135deg, ${r.cover.from}, ${r.cover.to})` }">
+            <img v-if="r.thumb" :src="asset(r.thumb.src)" alt="" />
+            <i v-else :class="r.cover.icon" />
           </div>
-        </section>
+          <div class="get-body">
+            <div class="model">
+              <img v-if="makerLogo(r.family)" class="maker" :class="{ mono: makerLogo(r.family)!.mono }" :src="makerLogo(r.family)!.src" alt="" />
+              <b>{{ r.model }}</b>
+              <span class="muted small">{{ makerLogo(r.family)?.maker }}</span>
+            </div>
+            <dl class="facts">
+              <dt>Steps</dt><dd>{{ steps.toLocaleString() }}</dd>
+              <dt>Photos</dt><dd>{{ r.photos.ideal }}</dd>
+              <dt>Models</dt>
+              <dd>
+                <span v-if="!p"><i class="mdi mdi-loading mdi-spin" /></span>
+                <span v-else-if="!p.downloads.length && !p.adapter" class="ok"><i class="mdi mdi-check-circle" /> ready</span>
+                <span v-else><i class="mdi mdi-download-outline" /> {{ fmtBytes(downloadBytes) }} to download</span>
+              </dd>
+            </dl>
+            <!-- training: always in view, beside the steps -->
+            <div class="go-box">
+              <div v-for="q in p?.problems ?? []" :key="q" class="err small"><i class="mdi mdi-alert-circle-outline" /> {{ q }}</div>
+              <div v-if="phase !== 'idle'" class="doing">
+                <template v-if="phase === 'downloading'">
+                  <div v-for="d in pendingDownloads" :key="d.name" class="prow">
+                    <span class="ellipsis small">Downloading {{ d.name }}</span>
+                    <div class="pbar"><span :style="{ width: `${d.job?.total ? (d.job.done / d.job.total) * 100 : 0}%` }" /></div>
+                  </div>
+                </template>
+                <div v-else-if="phase === 'captioning'" class="prow">
+                  <span class="small">{{ capProgress?.loading ? 'Getting the describer ready…' : `Describing photos ${capProgress?.done ?? 0} of ${capProgress?.total ?? count}` }}</span>
+                  <div class="pbar"><span :style="{ width: `${capProgress?.total ? (capProgress.done / capProgress.total) * 100 : 0}%` }" /></div>
+                </div>
+                <div v-else class="prow small"><i class="mdi mdi-loading mdi-spin" /> Starting…</div>
+              </div>
+              <ul v-else-if="needs.length" class="needs small">
+                <li v-for="n in needs" :key="n"><i class="mdi mdi-circle-small" />{{ n }}</li>
+              </ul>
+              <div v-else class="muted small">
+                {{ uncaptioned ? `Describes ${uncaptioned} photo${uncaptioned === 1 ? '' : 's'} first, then trains.` : 'Every photo is described: training starts right away.' }}
+              </div>
+              <div v-if="error" class="err small">{{ error }}</div>
+              <ZenButton
+                class="go"
+                variant="primary"
+                icon="mdi mdi-play"
+                :disabled="phase !== 'idle' || !!needs.length || !p || !!p.problems.length"
+                @click="train"
+              >
+                Train {{ name.trim() || 'it' }}
+              </ZenButton>
+            </div>
+            <div class="eyebrow">Try it with prompts like</div>
+            <ul class="examples">
+              <li v-for="e in examples" :key="e" class="small">{{ e }}</li>
+            </ul>
+            <p v-if="r.note" class="muted small note">{{ r.note }}</p>
+            <p v-if="!r.validated" class="muted small note"><i class="mdi mdi-flask-outline" /> A new recipe: its settings come from similar runs, not yet one trained end to end.</p>
+          </div>
+        </aside>
       </div>
     </template>
   </div>
@@ -396,18 +585,150 @@ void leaving
   gap: 6px;
   align-items: baseline;
 }
+.recipe {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 16px;
+  align-items: start;
+}
 .flow {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  width: 100%;
-  max-width: 780px;
-  margin-inline: auto;
+  min-width: 0;
 }
-.flow-head {
+.h-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+/* what you'll get: the recipe at a glance, beside the steps */
+.get {
+  position: sticky;
+  top: 16px;
+  padding: 0;
+  overflow: hidden;
+}
+.cover {
+  aspect-ratio: 16 / 7;
+  display: grid;
+  place-items: center;
+  color: rgb(255 255 255 / 0.85);
+  font-size: 44px;
+}
+.cover img {
   width: 100%;
-  max-width: 780px;
-  margin-inline: auto;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.get-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px 16px;
+}
+.model {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.model .maker {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  object-fit: contain;
+}
+:global(html[data-mode='dark'] .model .maker.mono) {
+  filter: invert(1);
+}
+.facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  margin: 0;
+  font-size: 12px;
+}
+.facts dt {
+  color: var(--zen-muted);
+}
+.facts dd {
+  margin: 0;
+}
+.facts .ok {
+  color: var(--zen-ok);
+}
+.examples {
+  margin: -4px 0 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--zen-text);
+}
+.step.locked .num {
+  opacity: 0.45;
+}
+.locked-note {
+  margin: 0;
+}
+.describe {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--zen-surface-2);
+}
+.describe > i {
+  font-size: 18px;
+  color: var(--zen-muted);
+}
+.describe-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.45;
+}
+.go-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--zen-accent) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--zen-accent) 25%, transparent);
+}
+.go-box :deep(.zen-button.go) {
+  justify-content: center;
+}
+.needs {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--zen-muted);
+}
+.needs i {
+  color: var(--zen-warn);
+}
+.th {
+  cursor: zoom-in;
+}
+.note {
+  margin: 0;
+  line-height: 1.45;
+}
+@media (max-width: 920px) {
+  .recipe {
+    grid-template-columns: 1fr;
+  }
+  .get {
+    position: static;
+  }
 }
 .step {
   display: grid;
@@ -441,6 +762,27 @@ void leaving
   gap: 6px;
   flex-wrap: wrap;
 }
+.trig-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--zen-accent) 45%, transparent);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--zen-accent) 12%, transparent);
+  color: var(--zen-text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.trig-chip.empty {
+  border-style: dashed;
+  color: var(--zen-muted);
+  background: none;
+}
+.trig-chip i {
+  font-size: 12px;
+  opacity: 0.6;
+}
 .trig-in {
   border: 1px solid color-mix(in srgb, var(--zen-border) 70%, transparent);
   background: var(--zen-field-bg, var(--zen-input));
@@ -467,6 +809,20 @@ void leaving
 .drop i {
   font-size: 28px;
 }
+.drop.compact {
+  flex-direction: row;
+  justify-content: center;
+  padding: 12px;
+}
+.drop.compact i {
+  font-size: 20px;
+}
+.verdict {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: center;
+}
 .drop:hover,
 .drop.over {
   border-color: var(--zen-accent);
@@ -479,6 +835,64 @@ void leaving
   background: var(--zen-field-bg, var(--zen-input));
   color: var(--zen-text);
   font: inherit;
+}
+.ds-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ds-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 4px;
+  max-height: 232px;
+  overflow: auto;
+  padding: 2px;
+}
+.ds {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 5px 8px 5px 5px;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ds:hover {
+  background: var(--zen-surface-2);
+}
+.ds.on {
+  border-color: var(--zen-accent);
+  background: color-mix(in srgb, var(--zen-accent) 8%, transparent);
+}
+.ds-thumb {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: var(--r-sm);
+  object-fit: cover;
+  background: var(--zen-surface-2);
+  display: grid;
+  place-items: center;
+  color: var(--zen-muted);
+}
+.ds-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.ds-name {
+  font-size: 12px;
+  font-weight: 600;
+}
+.ds-meta {
+  font-size: 11px;
 }
 .tips {
   display: flex;
@@ -524,6 +938,33 @@ void leaving
 }
 .th:hover .x {
   opacity: 1;
+}
+/* a photo worth replacing (blurry, tiny, a duplicate, the wrong or no face), or one that could be better */
+.th.bad {
+  outline: 2px solid var(--zen-danger);
+  outline-offset: -2px;
+}
+.th.meh {
+  outline: 2px solid color-mix(in srgb, var(--zen-warn) 70%, transparent);
+  outline-offset: -2px;
+}
+.th .flag {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 0.6);
+  font-size: 13px;
+}
+.th.bad .flag {
+  color: #ff8a80;
+}
+.th.meh .flag {
+  color: #ffd180;
 }
 .count.warn,
 .warn {
@@ -595,5 +1036,9 @@ void leaving
 }
 .step :deep(.zen-button) {
   align-self: flex-start;
+}
+.step :deep(.zen-button.go) {
+  align-self: stretch;
+  justify-content: center;
 }
 </style>

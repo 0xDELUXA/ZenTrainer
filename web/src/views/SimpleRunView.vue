@@ -2,7 +2,7 @@
 // Simple mode's view of a run: what it's doing in plain words, a big progress bar with the time
 // left, and the samples as they come (before, then each one after). No loss chart, no knobs;
 // the full run page is one click away.
-import { ZenButton, ZenLightbox, type LightboxItem } from '@nynxz/zenkit-ui'
+import { ZenButton, ZenCompare, ZenLightbox, type LightboxItem } from '@nynxz/zenkit-ui'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { onComfyMessage } from '@/api/comfy'
 import { ACTIVE, EVENTS, engine, promptText, type CheckpointRow, type RunDetail, type SampleRow } from '@/api/engine'
@@ -77,7 +77,7 @@ const detailLine = computed(() => {
   if (sampling.value?.s_total) return `${sampling.value.s_step ?? 0} of ${sampling.value.s_total}`
   if (s === 'training' && left.value != null) return `${eta(left.value)} left`
   if (failed.value) return d.value?.run.message ?? ''
-  if (done.value) return 'Use the word below in a prompt to bring it in.'
+  if (done.value) return d.value?.spec.dataset.trigger ? 'Use the word below in a prompt to bring it in.' : 'Before and after below: slide across, then try it.'
   return ''
 })
 
@@ -88,6 +88,13 @@ const runSamples = computed(() => (d.value?.samples ?? []).filter((x) => !x.manu
 const strip = computed(() => runSamples.value.filter((x) => x.index === 0).sort((a, b) => a.step - b.step))
 const pick = ref<number | null>(null)
 const big = computed(() => (pick.value != null ? strip.value[pick.value] : strip.value.at(-1)) ?? null)
+// while a preview draws, the stage shows it live, at the samples' own shape (ComfyUI's live frames
+// are small: scaled up to fill the stage rather than sitting tiny in the middle)
+const live = computed(() => (sampling.value && !sampling.value.manual && sampling.value.preview && pick.value == null ? sampling.value : null))
+const sampleAspect = computed(() => {
+  const sp = d.value?.spec.samples
+  return sp?.width && sp?.height ? `${sp.width} / ${sp.height}` : '1 / 1'
+})
 const finalLora = computed(() => [...(d.value?.checkpoints ?? [])].reverse().find((c) => c.final)?.lora_name ?? null)
 const tryLink = computed(() => (finalLora.value ? tryFor(finalLora.value) : null))
 const tryFor = (lora: string) => `/apps/text-to-image?run=${props.id}&lora=${encodeURIComponent(lora)}`
@@ -107,9 +114,34 @@ const rows = computed(() => {
     return Array.from({ length: cols.value }, (_, i) => samples.find((x) => x.step === s && x.index === i) ?? null)
   }
   const ck = [...r.checkpoints].sort((a, b) => b.step - a.step)
-  const out = ck.map((c, n) => ({ key: `c${c.step}`, label: c.final ? 'Final' : `Step ${c.step}`, step: c.step, ckpt: c as CheckpointRow | null, recommended: n === 0, samples: at(c.step) }))
+  const out = ck.map((c) => ({ key: `c${c.step}`, label: c.final ? 'Final' : `Step ${c.step}`, step: c.step, ckpt: c as CheckpointRow | null, recommended: c.step === best.value?.step, samples: at(c.step) }))
   if (steps[0] === 0) out.push({ key: 'base', label: 'Before training', step: 0, ckpt: null, recommended: false, samples: at(0) })
   return out
+})
+// the checkpoint to recommend: the one whose samples look most like the photos (faces extra), else the newest
+const likenessAt = (step: number) => {
+  const xs = (d.value?.likeness ?? []).filter((x) => x.step === step && !x.manual && x.score != null).map((x) => x.score!)
+  return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null
+}
+const best = computed(() => {
+  const ck = [...(d.value?.checkpoints ?? [])].sort((a, b) => b.step - a.step)
+  if (!ck.length) return null
+  const scored = ck.map((c) => ({ c, like: likenessAt(c.step) })).filter((x) => x.like != null)
+  if (scored.length) {
+    const top = scored.reduce((a, b) => (b.like! > a.like! + 0.005 ? b : a))  // later wins a near tie (it's first)
+    return { step: top.c.step, why: `its samples look most like your photos (likeness ${top.like!.toFixed(2)})` }
+  }
+  return { step: ck[0]!.step, why: 'the newest: compare them below, the one you like best is the one to keep' }
+})
+// done: the first prompt before training against the recommended checkpoint, slid across
+const compare = computed(() => {
+  if (!done.value || !best.value) return null
+  const before = runSamples.value.find((x) => x.step === 0 && x.index === 0)
+  const row = rows.value.find((r) => r.recommended)
+  const after = row?.samples[0]
+  if (!before || !after || isVideo(before) || isVideo(after)) return null
+  // the widget fills its box: the box takes the sample's shape (square when it isn't known)
+  return { before: viewUrl(before), after: viewUrl(after), label: row!.label, ratio: after.width && after.height ? `${after.width} / ${after.height}` : '1 / 1' }
 })
 const download = (c: CheckpointRow) => {
   const m = c.path.replace(/\\/g, '/').match(/\/output\/(.+)\/([^/]+)$/)
@@ -190,10 +222,16 @@ async function tryIt() {
       <div class="meta small muted">
         <span v-if="!done && !failed" class="mono">Step {{ step }} / {{ total }}<span class="muted"> · {{ Math.round(pct) }}%</span></span>
         <span v-if="nextPreview">Next preview at step {{ nextPreview.step }}, {{ nextPreview.in }}</span>
-        <span>Trigger word <b class="mono">{{ d.spec.dataset.trigger || '–' }}</b></span>
+        <span v-if="d.spec.dataset.trigger">Trigger word <b class="mono">{{ d.spec.dataset.trigger }}</b></span>
         <span class="spacer" />
         <RouterLink :to="`/runs/${id}`" class="muted">Details</RouterLink>
       </div>
+      <div v-if="compare" class="hero-compare" :style="{ aspectRatio: compare.ratio }">
+        <ZenCompare :before="compare.before" :after="compare.after" before-label="Before training" :after-label="compare.label" />
+      </div>
+      <p v-if="done && best && rows.length > 2" class="small muted why">
+        <i class="mdi mdi-star-outline" /> Recommended: <b>{{ rows.find((r) => r.recommended)?.label }}</b>, {{ best.why }}.
+      </p>
       <div v-if="done" class="acts">
         <RouterLink v-if="tryLink" :to="tryLink"><ZenButton variant="primary" icon="mdi mdi-creation-outline">Try it</ZenButton></RouterLink>
         <RouterLink to="/simple"><ZenButton icon="mdi mdi-plus">Train another</ZenButton></RouterLink>
@@ -261,12 +299,16 @@ async function tryIt() {
 
     <section v-if="d && (!done || rows.length <= 1)" class="card previews">
       <div class="eyebrow">Previews</div>
-      <div v-if="big" class="stage">
+      <div v-if="live" class="stage live" :style="{ aspectRatio: sampleAspect }">
+        <img :src="live.preview" alt="" />
+        <span class="tag small">Drawing{{ live.s_total ? ` ${live.s_step ?? 0}/${live.s_total}` : '…' }}</span>
+        <div class="live-bar"><span :style="{ width: `${live.s_total ? ((live.s_step ?? 0) / live.s_total) * 100 : 0}%` }" /></div>
+      </div>
+      <div v-else-if="big" class="stage">
         <video v-if="isVideo(big)" :key="big.filename" :src="viewUrl(big)" autoplay loop muted playsinline controls />
         <img v-else :src="viewUrl(big)" alt="" />
         <span class="tag small">{{ big.step === 0 ? 'Before training' : `After ${big.step} steps` }}</span>
       </div>
-      <div v-else-if="sampling?.preview" class="stage"><img :src="sampling.preview" alt="" /><span class="tag small">Drawing…</span></div>
       <div v-else class="muted small">The first preview shows up in a few minutes.</div>
       <div v-if="strip.length > 1" class="strip">
         <button v-for="(x, i) in strip" :key="x.filename" :class="{ on: big === x }" @click="pick = i === strip.length - 1 ? null : i">
@@ -281,7 +323,19 @@ async function tryIt() {
 
 <style scoped>
 .srun {
-  max-width: 900px;
+  max-width: 1120px;
+}
+.hero-compare {
+  width: min(100%, 560px);
+  max-height: 70vh;
+  border-radius: var(--r-lg, 12px);
+  overflow: hidden;
+}
+.why {
+  margin: 0;
+}
+.why i {
+  color: var(--zen-accent);
 }
 .hero {
   display: flex;
@@ -432,6 +486,31 @@ async function tryIt() {
   overflow: hidden;
   max-height: 60vh;
 }
+.stage.live {
+  width: 100%;
+  max-height: 60vh;
+}
+.stage.live img {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  object-fit: contain;
+}
+.live-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  background: rgb(0 0 0 / 0.35);
+}
+.live-bar span {
+  display: block;
+  height: 100%;
+  background: var(--zen-accent);
+  transition: width 0.3s ease;
+}
 .stage img,
 .stage video {
   max-width: 100%;
@@ -499,7 +578,7 @@ async function tryIt() {
 .phead,
 .prow {
   display: grid;
-  grid-template-columns: 170px repeat(var(--cols), minmax(120px, 180px));
+  grid-template-columns: 170px repeat(var(--cols), minmax(140px, 240px));
   gap: 8px;
   align-items: center;
 }

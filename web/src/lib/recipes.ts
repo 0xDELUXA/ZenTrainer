@@ -13,15 +13,13 @@ export interface Recipe {
   /** model family id (engine/zentrainer/models/families.py) */
   family: string
   model: string
-  kind: 'character' | 'style' | 'video'
+  kind: 'character' | 'style' | 'video' | 'general'
   title: string
   blurb: string
   /** what to put in: shown beside the drop zone */
   photos: { min: number; ideal: string; tips: string[] }
   /** the card's accent and icon */
   cover: { from: string; to: string; icon: string }
-  /** the maker's logo: ComfyUI's template packages ship them and serve /templates/logo/<file> */
-  logo?: string
   /** the card's picture, as ComfyUI's template thumbnails: one image, two that crossfade on hover
    *  ("dissolve"), or a before/after the pointer slides across ("slider"); paths in web/public */
   thumb?: { src: string; after?: string; mode?: 'slider' | 'dissolve'; before_label?: string; after_label?: string }
@@ -29,10 +27,9 @@ export interface Recipe {
   files: Partial<Record<Folder, string[]>>
   /** steps from the number of photos: perPhoto × photos, clamped */
   steps: { perPhoto: number; min: number; max: number }
-  /** rough seconds per step on a 32 GB card, for the time estimate before training */
-  secPerStep: number
   /** what auto-caption is asked; `subject` names the trigger as the main subject (characters) */
-  caption: { prompt: string; subject: boolean }
+  /** what auto-caption is asked (`style`: a built-in caption style instead, e.g. Fibo's structured JSON) */
+  caption: { prompt: string; subject: boolean; style?: string }
   spec: DeepPartial<TrainSpec>
   /** sample prompts; [trigger] is the LoRA's word */
   samples: string[]
@@ -51,6 +48,11 @@ const character = (who = 'person') => ({
   ideal: '15–40 photos',
   tips: [`Only one ${who}, clearly visible`, 'Different outfits, places and lighting', 'A few close-ups and a few full-body shots', 'Sharp photos: skip blurry or tiny ones'],
 })
+const general = {
+  min: 10,
+  ideal: '15–50 images',
+  tips: ['One subject or one look across them all', 'Varied backgrounds, angles and light', 'Sharp, well-lit pictures', 'No text or watermarks if you can help it'],
+}
 const style = {
   min: 10,
   ideal: '20–60 images',
@@ -67,7 +69,6 @@ export const RECIPES: Recipe[] = [
     blurb: 'A person or character, photoreal. Previews on Krea 2 Turbo in 8 steps.',
     photos: character(),
     cover: { from: '#f97316', to: '#7c2d12', icon: 'mdi mdi-account-star-outline' },
-    logo: '/templates/logo/krea.jpg',
     // placeholder: the Krea 2 template's thumbnail, until a validated run gives us before/after
     thumb: { src: '/templates/image_krea2_turbo_t2i-1.webp' },
     files: {
@@ -78,9 +79,6 @@ export const RECIPES: Recipe[] = [
     // validated: Automagic v3 at 1e-4 on 37 photos reached likeness 0.53 at 1500 steps and was
     // still climbing, so ~46 a photo (1700 for that set)
     steps: { perPhoto: 46, min: 1000, max: 2000 },
-    // 1.45 s a step at 1024 on the validating run; the first 60% at 768 (~0.56 of the cost) and
-    // the blend bring the average to ~1.05
-    secPerStep: 1.05,
     caption: { prompt: NL, subject: true },
     spec: {
       // 768 for the first 60%, blending into 1024 by 80%: identity is learned early, detail last.
@@ -102,14 +100,12 @@ export const RECIPES: Recipe[] = [
     blurb: 'A look: an art style, a film stock, a mood. Apply it to anything with the trigger word.',
     photos: style,
     cover: { from: '#a855f7', to: '#1e1b4b', icon: 'mdi mdi-palette-outline' },
-    logo: '/templates/logo/krea.jpg',
     files: {
       diffusion_models: ['krea2_raw_int8_convrot.safetensors', 'krea2_raw_bf16.safetensors'],
       text_encoders: ['qwen3vl_4b_int8_convrot.safetensors', 'qwen3vl_4b_fp8_scaled.safetensors'],
       vae: ['qwen_image_vae.safetensors'],
     },
     steps: { perPhoto: 30, min: 1000, max: 2000 },
-    secPerStep: 1.1,
     caption: { prompt: STYLE, subject: false },
     spec: {
       dataset: { resolution: 1024 },
@@ -135,7 +131,6 @@ export const RECIPES: Recipe[] = [
       vae: ['flux2-vae.safetensors'],
     },
     steps: { perPhoto: 40, min: 1000, max: 1500 },
-    secPerStep: 1.4,
     caption: { prompt: NL, subject: true },
     spec: {
       dataset: { resolution: 1024 },
@@ -147,6 +142,36 @@ export const RECIPES: Recipe[] = [
     samples: ['[trigger], a close up portrait photo, soft window light', '[trigger] sitting in a cafe, candid photo'],
   },
   {
+    id: 'fibo2-character',
+    family: 'fibo-2-0',
+    model: 'Fibo 2.0',
+    kind: 'general',
+    title: 'Fibo 2.0 · Any subject',
+    blurb: 'A person, a pet, a product or a look, on Bria’s Fibo 2.0 Dev. It learns fast, at a low rank and a gentle learning rate.',
+    photos: general,
+    cover: { from: '#6366f1', to: '#1e1b4b', icon: 'mdi mdi-account-star-outline' },
+    files: {
+      diffusion_models: ['fibo2_dev_int8_convrot.safetensors'],
+      text_encoders: ['qwen3vl_4b_bf16.safetensors', 'qwen3vl_4b_int8_convrot.safetensors', 'qwen3vl_4b_fp8_scaled.safetensors'],
+      vae: ['flux2-vae.safetensors'],
+    },
+    // from a run that trained well: AdamW 3e-5, rank 16, 3000 steps on ~120 photos (~25 a photo).
+    // Fibo moves fast: 1e-4 on single samples had rebuilt a 12-image test's whole look in 30 steps
+    steps: { perPhoto: 25, min: 1500, max: 3000 },
+    // Fibo is trained on, and prompted with, structured JSON captions (Bria's VGL format)
+    caption: { prompt: NL, subject: true, style: 'fibo_json' },
+    spec: {
+      dataset: { resolution: 1024, stages: [{ resolution: 768, until: 0.6 }], stage_blend: 0.2 },
+      network: { algorithm: 'LoRA', rank: 16, targets: 'attn_mlp' },
+      optim: { optimizer: 'AdamW', learning_rate: 3e-5, scheduler: 'constant', warmup_steps: 50, weight_decay: 0, batch_size: 1, grad_accumulation_steps: 1 },
+      objective: { timesteps: 'uniform', shift: 0 },
+      memory: { int8_forward: true, w8a8_backward: true, compile_blocks: true },
+      samples: { steps: 30, cfg: 5, sampler: 'euler', scheduler: 'simple', negative: '' },
+    },
+    samples: ['[trigger] in soft window light, a close up photo', '[trigger] outdoors on a sunny afternoon, candid photo, shallow depth of field'],
+    note: 'Bria’s own recipe (rank 64, 8 accumulated samples) is the Fibo 2.0 profile in the full form',
+  },
+  {
     id: 'h3-character',
     family: 'minimax-h3',
     model: 'MiniMax H3',
@@ -155,7 +180,6 @@ export const RECIPES: Recipe[] = [
     blurb: 'A person for the H3 video model, trained from photos. Use it in image or video prompts.',
     photos: character(),
     cover: { from: '#0ea5e9', to: '#0c4a6e', icon: 'mdi mdi-movie-star-outline' },
-    logo: '/templates/logo/minimax.png',
     thumb: { src: '/templates/video_minimax_h3_t2v-1.webp' },
     files: {
       diffusion_models: ['minimax_h3_fl2va_pruned_int8_convrot.safetensors'],
@@ -163,7 +187,6 @@ export const RECIPES: Recipe[] = [
       vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_video_vae_int8_convrot.safetensors'],
     },
     steps: { perPhoto: 50, min: 1200, max: 2000 },
-    secPerStep: 1.35,
     caption: { prompt: NL, subject: true },
     spec: {
       dataset: { resolution: 1024 },
