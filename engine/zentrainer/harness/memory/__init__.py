@@ -108,12 +108,20 @@ def attention_override(backend: str):
         return {}
     from comfy.ldm.modules.attention import get_attention_function
 
+    import torch
+
     if backend not in TRAINABLE_ATTENTION:
         logging.warning("[ZenTrainer] attention %r has no backward pass: training with pytorch", backend)
         backend = "pytorch"
     fn = get_attention_function(backend)
 
     def override(_func, *args, **kwargs):
+        # q/k leave the qk-norms in fp32 (the trainer keeps norm weights fp32) while v skips them
+        # and stays bf16; SDPA needs one dtype (on ROCm it raises), so q/k go to v's, the model's
+        q, k, v = args[:3] if len(args) >= 3 else (None, None, None)
+        if isinstance(v, torch.Tensor) and isinstance(q, torch.Tensor) and isinstance(k, torch.Tensor) \
+                and (q.dtype != v.dtype or k.dtype != v.dtype):
+            args = (q.to(v.dtype), k.to(v.dtype), v, *args[3:])
         return fn(*args, **kwargs)
 
     return {"optimized_attention_override": override}
