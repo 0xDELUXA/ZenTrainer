@@ -58,7 +58,38 @@ MAKERS = ("black-forest-labs", "stabilityai", "Qwen", "Tongyi-MAI", "krea", "Ope
           "meituan-longcat", "tencent", "Lightricks")
 # text encoder folder files that aren't the text encoder (Flux 3 Klein ships a prompt upsampler LLM)
 NOT_PICTURE_VAE = re.compile(r"audio", re.I)
-NOT_TE = re.compile(r"upsampl|prompt_?enhanc|rewriter", re.I)
+CATALOG = Path(__file__).resolve().parents[2] / "catalog" / "families.json"  # hand corrections (see its _about)
+
+
+def _catalog() -> dict:
+    try:
+        return json.loads(CATALOG.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        log.warning("[ZenTrainer] can't read %s: %s", CATALOG, e)
+        return {}
+
+
+# text encoder files that aren't the text encoder (Flux 3 Klein's prompt upsampler, Qwen-Image 2.1's
+# prompt enhancer "_pe_"): the catalog's text_encoder_skip
+NOT_TE = re.compile("|".join(_catalog().get("text_encoder_skip") or ["upsampl"]), re.I)
+
+
+def correction(fid: str) -> dict:
+    """The catalog's entry for a family: maker, logo, mono, name, hide (the first match)."""
+    for e in _catalog().get("families") or []:
+        if re.search(e.get("match", "^$"), fid):
+            return e
+    return {}
+
+
+def _correct(fams: dict[str, "Family"]) -> None:
+    """The catalog's renames and hides, applied in place (ids stay, so favourites keep pointing)."""
+    for fid in list(fams):
+        e = correction(fid)
+        if e.get("hide"):
+            del fams[fid]
+        elif e.get("name"):
+            fams[fid].name = e["name"]
 HF_URL = re.compile(r"^https://huggingface\.co/([\w.-]+/[\w.-]+)/resolve/([\w.-]+)/(.+)$")
 REPO_TTL = 24 * 3600
 # which repos the publishers have: shorter, so a model they add shows up the same day (the
@@ -97,6 +128,9 @@ class Family:
         from . import profiles
 
         d = asdict(self)
+        e = correction(self.id)
+        d["maker"], d["logo"], d["mono"] = e.get("maker"), e.get("logo"), bool(e.get("mono"))
+        d["other"] = bool(e.get("other"))  # listed under "Other models", out of the main list
         d["profile"] = profiles.for_family(self.id)
         d["recommended"] = recommend(self)
         d["missing"] = missing(self, d["recommended"]["train"])
@@ -145,6 +179,17 @@ def _family_name(models: list[str], freq: dict[str, int]) -> str:
     return min(models, key=lambda m: (freq.get(m, 0), models.index(m))) if models else ""
 
 
+TASK = re.compile(r"\s*[-:]?\s*(text[ -]to[ -](image|video)|image[ -]to[ -]video|image edit(ing)?|t2i|t2v)\s*$", re.I)
+
+
+def _title_name(recs: list[dict]) -> str:
+    """A family's name from its templates' titles, for when the index gives two models one name
+    ("NetaYume Lumina Text to Image" and "OmniGen2: Text to Image", both filed as OmniGen): the
+    title before any ":" without the task, the shortest of its templates'."""
+    names = [TASK.sub("", r["title"].split(":")[0]).strip() for r in recs]
+    return min((n for n in names if n), key=len, default="")
+
+
 def _from_templates() -> dict[str, Family]:
     root = _templates_dir()
     if root is None or not (root / "index.json").is_file():
@@ -171,16 +216,25 @@ def _from_templates() -> dict[str, Family]:
             else:
                 key = ("split", rec["repo"]) if rec["kind"] == "split" else ("checkpoint", rec["name"])
                 groups.setdefault(key, []).append(rec)
-    fams: dict[str, Family] = {}
-    for recs in groups.values():
+    def index_name(recs: list[dict]) -> str:
         counts: dict[str, int] = {}
         for r in recs:
             counts[r["name"]] = counts.get(r["name"], 0) + 1
-        name = max(counts, key=lambda n: (counts[n], -freq.get(n, 0)))
+        return max(counts, key=lambda n: (counts[n], -freq.get(n, 0)))
+
+    # two groups (two repos) under one model name are two models: each named by its titles
+    named = {key: index_name(recs) for key, recs in groups.items()}
+    shared = {n for n in named.values() if list(named.values()).count(n) > 1}
+    for key, recs in groups.items():
+        if named[key] in shared and (t := _title_name(recs)):
+            named[key] = t
+    fams: dict[str, Family] = {}
+    for key, recs in groups.items():
+        name = named[key]
         first = recs[0]
         fid = _slug(name)
         if any(f.name == name for f in fams.values()) and first["repo"]:
-            name = f"{name} ({first['repo'].split('/')[-1]})"  # two repos, one model name
+            name = f"{name} ({first['repo'].split('/')[-1]})"  # still the same: tell them apart by repo
             fid = _slug(name)
         while fid in fams:
             fid += "-2"
@@ -262,7 +316,8 @@ def _read_template(root: Path, t: dict, freq: dict[str, int]) -> dict | None:
     if ks and len(ks[0].get("widgets_values", [])) >= 6:
         v = ks[0]["widgets_values"]
         sample = {"model": picks[0][1], "steps": v[2], "cfg": v[3], "sampler": v[4], "scheduler": v[5]}
-    return {"template": t["name"], "name": _family_name(t.get("models", []), freq) or t["name"], "kind": kind,
+    return {"template": t["name"], "name": _family_name(t.get("models", []), freq) or t["name"],
+            "title": t.get("title") or t["name"], "kind": kind,
             "clip_type": clip_type, "files": files, "repo": m.group(1) if m else None, "sample": sample,
             "date": t.get("date"), "distilled": files[0][1].distilled}
 
@@ -540,6 +595,7 @@ def _all() -> dict[str, Family]:
         if _families is None:
             _families = _from_templates()
             _add_repo_families(_families, offline=True)  # whatever the cache already knows
+            _correct(_families)
         return _families
 
 
@@ -561,6 +617,7 @@ def _prefetch() -> None:
             pass
     with _lock:
         _add_repo_families(_families or {}, offline=True)
+        _correct(_families or {})
 
 
 def relist() -> dict:

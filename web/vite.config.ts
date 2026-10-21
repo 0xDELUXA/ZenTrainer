@@ -13,6 +13,8 @@ export default defineConfig({
   resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) }, dedupe: ['vue'] },
   build: { target: 'es2022' },
   server: {
+    // engine/catalog/families.json is imported from outside web/
+    fs: { allow: ['..'] },
     proxy: {
       '/zentrainer/api': comfy,
       '/zenkit': comfy,

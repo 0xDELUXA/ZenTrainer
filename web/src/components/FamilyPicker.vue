@@ -9,7 +9,8 @@ import { engine, type ModelFamily, type ModelFile, type ModelFolder, type ModelP
 import { fmtAdded, fmtBytes, finished, hfToken, isNew, startDownloadSync, targets } from '@/stores/downloads'
 import FileState from './FileState.vue'
 import StarButton from './StarButton.vue'
-import { starredFirst } from '@/stores/favorites'
+import { isStarred, starredFirst } from '@/stores/favorites'
+import { isOther, makerLogo } from '@/lib/makers'
 import type { ModelValue } from './ModelPicker.vue'
 
 export interface SampleSuggestion extends SampleDefaults {
@@ -222,22 +223,37 @@ const missingBytes = computed(() =>
   missingParts.value.reduce((n, p) => n + (fileOf(p.folder, model.value[p.key] as string)?.size ?? 0), 0),
 )
 
+// models few people train (the catalog's "other") wait behind the footer's toggle, unless you
+// starred one (then it's with your stars, at the top) or it's the one picked
+const showOther = ref(false)
+// the closed picker's logo: its family's, when the item is a family (not Custom)
+const logoOf = (item: unknown) => {
+  const f = (item as { f?: ModelFamily | null } | null)?.f
+  return f ? makerLogo(f.id) : null
+}
+const hidden = (f: ModelFamily) => isOther(f.id) && !isStarred(f.id) && f.id !== famId.value
+const otherCount = computed(() => families.value.filter(hidden).length)
 const familyItems = computed(() => [
-  ...starredFirst(families.value, (f) => f.id).map((f) => ({
-    value: f.id,
-    label: f.name,
-    keywords: `${f.name} ${f.clip_type ?? ''} ${f.repos.join(' ')}`,
-    f,
-  })),
+  ...starredFirst(families.value, (f) => f.id)
+    .filter((f) => !hidden(f))
+    .map((f) => ({ value: f.id, label: f.name, keywords: `${f.name} ${f.clip_type ?? ''} ${f.repos.join(' ')}`, f })),
+  ...(showOther.value
+    ? families.value
+        .filter(hidden)
+        .map((f) => ({ value: f.id, label: f.name, keywords: `${f.name} ${f.clip_type ?? ''} ${f.repos.join(' ')}`, f }))
+    : []),
   { value: CUSTOM, label: 'Custom: pick the files yourself', keywords: 'custom manual files', f: null },
 ])
 const fileItems = (folder: ModelFolder) =>
   (fam.value?.files[folder] ?? []).map((f) => ({ value: f.name, label: f.name, keywords: f.name, file: f }))
+// installed: the tick alone; else what's left to fetch, by size (the count on hover)
 const statusOf = (f: ModelFamily) => {
-  if (!f.missing.length) return 'ready'
+  if (!f.missing.length) return ''
   const bytes = f.missing.reduce((n, m) => n + (m.size ?? 0), 0)
-  return `${f.missing.length} to download${bytes ? ` · ${fmtBytes(bytes)}` : ''}`
+  return bytes ? fmtBytes(bytes) : `${f.missing.length}`
 }
+const statusTip = (f: ModelFamily) =>
+  f.missing.length ? `${f.missing.length} file${f.missing.length === 1 ? '' : 's'} to download` : 'Installed'
 
 onMounted(() => {
   startDownloadSync()
@@ -248,7 +264,6 @@ defineExpose({ refresh: () => fam.value && open(fam.value.id, true) })
 
 <template>
   <div class="fp">
-    <div class="pick-row">
     <ZenCombo
       :model-value="famId"
       :items="familyItems"
@@ -261,6 +276,15 @@ defineExpose({ refresh: () => fam.value && open(fam.value.id, true) })
       <template #option="{ item }">
         <div class="fam-opt">
           <StarButton v-if="item.f" :id="(item.f as ModelFamily).id" :name="item.label" />
+          <img
+            v-if="item.f && makerLogo((item.f as ModelFamily).id)"
+            class="maker"
+            :class="{ mono: makerLogo((item.f as ModelFamily).id)!.mono }"
+            :src="makerLogo((item.f as ModelFamily).id)!.src"
+            :title="makerLogo((item.f as ModelFamily).id)!.maker"
+            alt=""
+          />
+          <span v-else-if="item.f" class="maker none" />
           <b>{{ item.label }}</b>
           <i
             v-if="item.f && (item.f as ModelFamily).profile"
@@ -269,24 +293,39 @@ defineExpose({ refresh: () => fam.value && open(fam.value.id, true) })
             :title="(item.f as ModelFamily).profile!.status === 'verified' ? 'Tuned: trained and checked with hand-picked settings' : 'Hand-picked settings from the model makers'"
           />
           <span v-if="item.f && isNew((item.f as ModelFamily).added)" class="tag new" :title="`Added ${fmtAdded((item.f as ModelFamily).added)}`">new</span>
-          <span v-if="item.f && (item.f as ModelFamily).source === 'repo'" class="tag" title="ComfyUI has no example workflow for this model yet, so its files come straight from its Hugging Face repo, and there are no suggested sampler settings for previews">from repo</span>
-          <span v-if="item.f" class="fam-status" :class="{ ready: !(item.f as ModelFamily).missing.length }">
+          <span v-if="item.f" class="fam-status" :class="{ ready: !(item.f as ModelFamily).missing.length }" :title="statusTip(item.f as ModelFamily)">
             <i :class="(item.f as ModelFamily).missing.length ? 'mdi mdi-download-outline' : 'mdi mdi-check-circle'" />
             {{ statusOf(item.f as ModelFamily) }}
           </span>
         </div>
       </template>
+      <!-- the closed picker: the model with its maker's logo -->
+      <template #selected="{ item }">
+        <span v-if="item" class="sel">
+          <img v-if="logoOf(item)" class="maker" :class="{ mono: logoOf(item)!.mono }" :src="logoOf(item)!.src" alt="" />
+          <span class="sel-name">{{ item.label }}</span>
+        </span>
+        <span v-else class="muted">Choose a model…</span>
+      </template>
+      <template #footer>
+        <div class="fp-menu-foot">
+          <button v-if="otherCount" class="foot-btn" @click.stop="showOther = !showOther">
+            <i :class="showOther ? 'mdi mdi-chevron-up' : 'mdi mdi-chevron-down'" />
+            {{ showOther ? 'Hide other models' : `Other models · ${otherCount}` }}
+          </button>
+          <span class="spacer" />
+          <span v-if="relistNote" class="relist-note small muted" :title="relistNote">{{ relistNote }}</span>
+          <button
+            class="foot-btn"
+            :disabled="relisting"
+            title="Re-list the model makers' Hugging Face repos now: models they've added show up without waiting for the cache"
+            @click.stop="relist"
+          >
+            <i class="mdi mdi-refresh" :class="{ spin: relisting }" /> {{ relisting ? 'Re-listing…' : 'Re-list' }}
+          </button>
+        </div>
+      </template>
     </ZenCombo>
-    <button
-      class="relist"
-      :disabled="relisting"
-      title="Re-list the model makers' Hugging Face repos now: models they've added show up without waiting for the cache"
-      @click="relist"
-    >
-      <i class="mdi mdi-refresh" :class="{ spin: relisting }" />
-    </button>
-    </div>
-    <div v-if="relistNote" class="relist-note small muted">{{ relistNote }}</div>
 
     <div v-if="fam" class="parts">
       <div v-for="p in parts" :key="p.folder" class="part">
@@ -348,42 +387,87 @@ defineExpose({ refresh: () => fam.value && open(fam.value.id, true) })
   flex-direction: column;
   gap: 10px;
 }
-.pick-row {
-  display: flex;
-  gap: 6px;
-  align-items: center;
+.maker {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border-radius: 5px;
+  object-fit: contain;
 }
-.pick-row > :first-child {
-  flex: 1;
+/* black-on-transparent marks: white on dark themes (the whole selector inside :global, or Vue
+   drops everything after it and the rule lands on <html> itself) */
+:global(html[data-mode='dark'] .fam-opt .maker.mono),
+:global(html[data-mode='dark'] .sel .maker.mono) {
+  filter: invert(1);
+}
+.maker.none {
+  display: inline-block;
+}
+.fp-menu-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
 }
-.relist {
-  display: inline-grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
+.fp-menu-foot .spacer {
+  flex: 1;
+}
+.sel {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.sel .maker {
+  width: 18px;
+  height: 18px;
+}
+.sel-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.foot-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   flex: none;
-  border: 1px solid color-mix(in srgb, var(--zen-border) 70%, transparent);
+  padding: 6px 8px;
+  border: none;
   border-radius: var(--r-md);
   background: none;
   color: var(--zen-muted);
-  font-size: 16px;
+  font: inherit;
+  font-size: 12px;
   cursor: pointer;
 }
-.relist:hover:not(:disabled) {
+/* ZenCombo keeps the last hovered option highlighted when the pointer moves on to the footer:
+   no highlight while the footer's under the pointer. UPSTREAM: ZenCombo clears its active
+   option on leaving the list */
+:global(.zen-combo-menu:has(.zc-footer:hover) .zc-opt.active) {
+  background: none;
+}
+.foot-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.foot-btn:hover:not(:disabled) {
   color: var(--zen-text);
   background: var(--zen-surface-2);
 }
-.relist .spin {
+.relist-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.spin {
   animation: relist-spin 0.9s linear infinite;
 }
 @keyframes relist-spin {
   to {
     transform: rotate(360deg);
   }
-}
-.relist-note {
-  margin-top: -4px;
 }
 .fam-opt {
   display: flex;
@@ -393,7 +477,7 @@ defineExpose({ refresh: () => fam.value && open(fam.value.id, true) })
   min-width: 0;
 }
 .fam-opt b {
-  flex: 1;
+  flex: 0 1 auto; /* its own width: the tick and "new" sit right after the name */
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -401,6 +485,7 @@ defineExpose({ refresh: () => fam.value && open(fam.value.id, true) })
   font-weight: 600;
 }
 .fam-status {
+  margin-left: auto;
   font-size: 11px;
   color: var(--zen-muted);
   white-space: nowrap;
