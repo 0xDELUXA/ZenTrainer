@@ -7,6 +7,7 @@ from pathlib import Path
 
 from aiohttp import web
 
+from ... import paths
 from .common import _bad
 
 
@@ -124,7 +125,7 @@ def register(server) -> None:
     @routes.post("/zentrainer/api/loras/merge")
     async def merge_loras(request):
         """Merge LoRAs: {members: [{name, strength}], out_name, max_rank?, energy?}. Saves to
-        output/zentrainer/loras/merged/ (a loras folder), so it loads at once."""
+        output/zentrainer/loras/merged/ (a loras folder; the ZenTrainer folder's output/loras/merged/ if set), so it loads at once."""
         import re as _re
 
         import folder_paths
@@ -140,7 +141,7 @@ def register(server) -> None:
         if not members:
             return _bad("add at least one LoRA")
         name = _re.sub(r"[^A-Za-z0-9_.-]+", "_", str(b.get("out_name") or "merged")).strip("._") or "merged"
-        out = Path(folder_paths.get_output_directory()) / "zentrainer" / "loras" / "merged" / f"{name}.safetensors"
+        out = paths.lora_dir() / "merged" / f"{name}.safetensors"
         if out.exists() and not b.get("overwrite"):
             return _bad(f"merged/{out.name} already exists", 409)
         try:

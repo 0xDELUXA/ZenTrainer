@@ -14,14 +14,20 @@ def _setup() -> None:
     import folder_paths
     from server import PromptServer
 
+    from .zentrainer import paths
     from .zentrainer.server import routes
 
-    # Trained LoRAs (final and mid-run checkpoints) land under output/zentrainer/loras.
+    # Trained LoRAs (final and mid-run checkpoints) land under output/zentrainer/loras, or the
+    # ZenTrainer folder's output/loras when one is set (read here, once: changing it needs a restart).
     # Registering it as a loras folder makes them loadable by LoraLoader at once,
     # which is what sample generation and the inference apps rely on.
-    lora_dir = os.path.join(folder_paths.get_output_directory(), "zentrainer", "loras")
+    paths.ensure()
+    lora_dir = str(paths.lora_dir())
     os.makedirs(lora_dir, exist_ok=True)
     folder_paths.add_model_folder_path("loras", lora_dir)
+    legacy = str(paths.legacy_output_root() / "loras")
+    if paths.folder() and os.path.isdir(legacy):  # LoRAs trained before the folder was set still load
+        folder_paths.add_model_folder_path("loras", legacy)
 
     routes.register(PromptServer.instance)
     too_old = routes.comfy_too_old()

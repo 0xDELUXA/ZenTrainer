@@ -20,10 +20,11 @@ export async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T
 }
 
-/** ComfyUI's /view URL for an image in its input/output folders. */
+/** A file by its ComfyUI /view address (filename, subfolder, input/output type), served by the engine:
+ *  /view only knows ComfyUI's own folders, and datasets and results can live in the ZenTrainer folder. */
 export function viewUrl(f: { filename: string; subfolder: string; type?: string }): string {
   const q = new URLSearchParams({ filename: f.filename, subfolder: f.subfolder, type: f.type ?? 'output' })
-  return `/view?${q}`
+  return `/zentrainer/api/files/view?${q}`
 }
 
 /** Websocket event names; mirror engine/zentrainer/events.py. */

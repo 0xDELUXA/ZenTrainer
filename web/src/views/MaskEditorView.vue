@@ -10,7 +10,7 @@
 import { ZenButton, ZenInput, ZenModal, ZenSlider } from '@nynxz/zenkit-ui'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { EngineError, engine, thumbUrl, type DatasetItem } from '@/api/engine'
+import { EngineError, engine, thumbUrl, viewUrl, type DatasetItem } from '@/api/engine'
 
 const props = defineProps<{ name: string }>()
 const route = useRoute()
@@ -21,11 +21,11 @@ const path = computed(() => (typeof route.query.path === 'string' ? route.query.
 const index = computed(() => items.value.findIndex((i) => i.path === path.value))
 const item = computed(() => items.value[index.value] ?? null)
 
-// original files through ComfyUI's /view (datasets live in its input folder)
+// original files by their /view address (type input: the subfolder starts with the dataset)
 const fileUrl = (rel: string) => {
   const parts = `${props.name}/${rel}`.split('/')
   const filename = parts.pop()!
-  return `/view?${new URLSearchParams({ filename, subfolder: parts.join('/'), type: 'input' })}&t=${Date.now()}`
+  return `${viewUrl({ filename, subfolder: parts.join('/'), type: 'input' })}&t=${Date.now()}`
 }
 
 // ---- canvases ------------------------------------------------------------------------------

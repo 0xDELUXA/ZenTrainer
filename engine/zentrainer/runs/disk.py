@@ -52,9 +52,12 @@ def size(path: Path) -> int:
 def _roots() -> dict[str, Path]:
     import folder_paths
 
-    out = Path(folder_paths.get_output_directory()) / "zentrainer"
+    from .. import paths
+
+    out = paths.output_root()
     user = Path(folder_paths.get_user_directory()) / "zentrainer"
-    return {"loras": out / "loras", "samples": out / "samples", "apps": out / "apps",
+    # app results come from ComfyUI's own save nodes, which only write inside its output dir
+    return {"loras": out / "loras", "samples": out / "samples", "apps": paths.legacy_output_root() / "apps",
             "states": user / "states", "cache": user / "cache"}
 
 
@@ -84,7 +87,11 @@ def disks() -> list[dict]:
     """Free space on each disk ZenTrainer writes to, once per disk."""
     import folder_paths
 
-    places = [("Outputs", folder_paths.get_output_directory()), ("Datasets", folder_paths.get_input_directory()),
+    from .. import paths
+
+    custom = paths.folder()  # the ZenTrainer folder's disk, if set, rather than ComfyUI's output/input
+    places = [("Outputs", str(paths.output_root()) if custom else folder_paths.get_output_directory()),
+              ("Datasets", str(paths.datasets_root()) if custom else folder_paths.get_input_directory()),
               ("Run state", folder_paths.get_user_directory())]
     try:
         from ..models.downloads import target_dir
@@ -107,6 +114,7 @@ def disks() -> list[dict]:
 
 
 def report(store) -> dict:
+    from .. import paths
     from ..datasets import folders as datasets
 
     roots = _roots()
@@ -118,7 +126,7 @@ def report(store) -> dict:
         states = size(roots["states"] / rid) + sum(size(Path(c["path"]).with_suffix(".state.pt")) for c in ckpts if c.get("path"))
         runs.append({"run_id": rid, "name": meta.get("name", rid), "status": meta.get("status"), "created": meta.get("created"),
                      "checkpoints": ck_bytes, "checkpoint_count": len(ckpts), "states": states,
-                     "samples": size(roots["samples"] / rid)})
+                     "samples": sum(size(r / "samples" / rid) for r in paths.output_roots())})
     runs.sort(key=lambda r: -(r["checkpoints"] + r["states"] + r["samples"]))
     sets = []
     for d in datasets.summary():

@@ -24,7 +24,7 @@ import threading
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from .. import safeio
+from .. import paths, safeio
 from . import families
 
 SUBDIR = "training_adapters"
@@ -159,8 +159,8 @@ def target_dir(kind: str = "training") -> Path:
 
     from . import downloads
 
-    out = Path(folder_paths.get_output_directory()).resolve()
-    roots = [Path(p) for p in folder_paths.get_folder_paths("loras") if out not in Path(p).resolve().parents]
+    outs = {Path(folder_paths.get_output_directory()).resolve(), *(r.resolve() for r in paths.output_roots())}
+    roots = [Path(p) for p in folder_paths.get_folder_paths("loras") if not outs & set(Path(p).resolve().parents)]
     sub = SUBDIRS.get(kind, SUBDIR)
     for r in roots:
         if (r / sub).is_dir():

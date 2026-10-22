@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from .. import events
+from .. import events, paths
 from . import optim
 from .data.streams import first_stream
 
@@ -171,9 +171,7 @@ class Samples(Callback):
         return hashlib.sha1(json.dumps(parts, default=str).encode()).hexdigest()[:20]
 
     def _baseline_dir(self) -> Path:
-        import folder_paths
-
-        return Path(folder_paths.get_output_directory()) / "zentrainer" / "samples" / "_baseline"
+        return paths.output_root() / "samples" / "_baseline"
 
     def _baseline_hit(self, t, i: int, out_dir: str) -> dict | None:
         import shutil
@@ -377,14 +375,12 @@ class Samples(Callback):
             return []
         import comfy.model_management as mm
         import comfy.sample
-        import folder_paths
         from PIL import Image
 
         s = t.spec.samples
         vae = t.models.vae
         comp = vae.spacial_compression_encode()
-        out_dir = os.path.join(folder_paths.get_output_directory(), "zentrainer", "samples", t.run_id)
-        os.makedirs(out_dir, exist_ok=True)
+        out_dir = _out_dir(t)
         rows = []
 
         if manual is None and t.step == 0 and all(any(self._baseline_dir().glob(f"{self._baseline_key(t, i)}.*")) for i in range(len(self._conds))):
@@ -602,7 +598,8 @@ def _control_path(t, control: str) -> Path:
     import folder_paths
 
     inp = Path(folder_paths.get_input_directory())
-    path = next((p for p in (inp / t.spec.dataset.folder / control, inp / control, Path(control)) if p.is_file()), None)
+    ds = paths.datasets_root() / t.spec.dataset.folder
+    path = next((p for p in (ds / control, inp / control, Path(control)) if p.is_file()), None)
     if path is None:
         raise FileNotFoundError(f"sample control picture {control!r} not found (in the dataset folder or ComfyUI's input)")
     return path
@@ -783,9 +780,9 @@ def _sound(t, out):
 
 
 def _out_dir(t) -> str:
-    import folder_paths
-
-    d = os.path.join(folder_paths.get_output_directory(), "zentrainer", "samples", t.run_id)
+    # rows still say subfolder zentrainer/samples/<run>: an address paths.resolve_view finds
+    # wherever the ZenTrainer folder put it
+    d = str(paths.output_root() / "samples" / t.run_id)
     os.makedirs(d, exist_ok=True)
     return d
 

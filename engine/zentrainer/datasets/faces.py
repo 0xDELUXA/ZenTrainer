@@ -257,7 +257,7 @@ class LikenessWorker:
         self.q.put(None)
 
     def _run(self) -> None:
-        import folder_paths
+        from .. import paths
 
         try:
             report = dataset_faces(self.dataset)
@@ -277,7 +277,9 @@ class LikenessWorker:
             if self.centroid is None:
                 continue
             try:
-                path = Path(folder_paths.get_output_directory()) / row["subfolder"] / row["filename"]
+                path = paths.resolve_view(row.get("type", "output"), row["subfolder"], row["filename"])
+                if path is None:
+                    raise FileNotFoundError(row["filename"])
                 score = likeness(path, self.centroid)
                 out = {"run_id": self.run_id, "step": row["step"], "index": row["index"], "score": score}
                 if row.get("manual"):

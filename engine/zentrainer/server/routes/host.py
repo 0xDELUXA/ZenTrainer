@@ -10,7 +10,7 @@ from pathlib import Path
 
 from aiohttp import web
 
-from ... import __version__, state
+from ... import __version__, paths, state
 from .. import system
 from ...harness import control
 from .common import WEB_DIST, _bad, _capabilities, _code_stale, _comfy_version, _exec_self, _web_state, comfy_too_old
@@ -61,7 +61,7 @@ def register(server) -> None:
         """Where a run can save its LoRAs: ComfyUI's loras folders, with free space."""
         import folder_paths
 
-        default = Path(folder_paths.get_output_directory()) / "zentrainer" / "loras"
+        default = paths.lora_dir()
         base = Path(folder_paths.base_path).resolve()
         out = []
         for p in folder_paths.get_folder_paths("loras"):
@@ -97,6 +97,39 @@ def register(server) -> None:
         except FileNotFoundError:
             return _bad("not found", 404)
         return web.json_response({"freed": freed})
+
+    @routes.get("/zentrainer/api/settings")
+    async def get_settings(_request):
+        """ZenTrainer's own settings, and the dataset/output folders this process actually uses."""
+        return web.json_response(await asyncio.to_thread(paths.describe))
+
+    @routes.put("/zentrainer/api/settings")
+    async def put_settings(request):
+        """{"folder": absolute path, or "" for ComfyUI's input/output}: saved now, used from the next
+        ComfyUI start (paths don't change under a run that's training)."""
+        body = await request.json()
+        if not isinstance(body, dict):
+            return _bad("expected an object")
+        try:
+            await asyncio.to_thread(paths.save_settings, body)
+        except paths.SettingsError as e:
+            return _bad(str(e))
+        out = await asyncio.to_thread(paths.describe)
+        return web.json_response({**out, "message": "takes effect after restarting ComfyUI" if out["restart_needed"] else ""})
+
+    @routes.get("/zentrainer/api/files/view")
+    async def view_file(request):
+        """ComfyUI's /view for ZenTrainer's files: the same ?filename=&subfolder=&type= address, but
+        found in the ZenTrainer folder too (/view only knows ComfyUI's dirs). Ranges work, for videos."""
+        q = request.query
+        try:
+            path = await asyncio.to_thread(paths.resolve_view, q.get("type", "output"), q.get("subfolder", ""),
+                                           q.get("filename", ""))
+        except ValueError as e:
+            return _bad(str(e))
+        if path is None:
+            return _bad("not found", 404)
+        return web.FileResponse(path)
 
     @routes.get("/zentrainer/api/comfyui")
     async def comfyui_version(request):

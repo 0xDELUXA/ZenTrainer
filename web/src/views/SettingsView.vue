@@ -2,9 +2,9 @@
 // Appearance, after lora.moe's settings: a mode toggle and a grid of theme-pack cards.
 // Previews are drawn from each pack's own tokens, so every ZenKit pack and user
 // drop-in gets one without shipping banner images.
-import { ZenButton } from '@nynxz/zenkit-ui'
+import { ZenButton, ZenInput } from '@nynxz/zenkit-ui'
 import { computed, onMounted, ref } from 'vue'
-import { engine, type ComfyVersion } from '@/api/engine'
+import { engine, type ComfyVersion, type EngineSettings } from '@/api/engine'
 import { SETTINGS, setSetting, settings, type SettingId } from '@/stores/settings'
 import { currentModes, currentTheme, packCards, setMode, setTheme } from '@/lib/theme'
 
@@ -29,6 +29,31 @@ const sw = (p: (typeof packCards.value)[number]) => (p.modes.includes(mode.value
 const comfy = ref<ComfyVersion | null>(null)
 const checking = ref(false)
 onMounted(async () => (comfy.value = await engine.comfyui().catch(() => null)))
+// Storage: the ZenTrainer folder (datasets and results out of ComfyUI's input/output). The engine
+// reads it at start, so a saved change shows as pending until ComfyUI restarts.
+const storage = ref<EngineSettings | null>(null)
+const folderDraft = ref('')
+const savingFolder = ref(false)
+const folderNote = ref('')
+const folderError = ref('')
+onMounted(async () => {
+  storage.value = await engine.settings().catch(() => null)
+  folderDraft.value = storage.value?.settings.folder ?? ''
+})
+async function saveFolder() {
+  savingFolder.value = true
+  folderError.value = folderNote.value = ''
+  try {
+    storage.value = await engine.putSettings({ folder: folderDraft.value.trim() })
+    folderDraft.value = storage.value.settings.folder
+    folderNote.value = storage.value.message || 'Saved'
+  } catch (e) {
+    folderError.value = String((e as Error).message ?? e)
+  } finally {
+    savingFolder.value = false
+  }
+}
+
 async function checkUpdates() {
   checking.value = true
   try {
@@ -76,6 +101,36 @@ async function checkUpdates() {
       <div class="row-actions">
         <ZenButton size="sm" icon="mdi mdi-cloud-sync-outline" :disabled="checking" @click="checkUpdates">{{ checking ? 'Checking…' : 'Check for updates' }}</ZenButton>
         <span v-if="comfy.upstream?.behind" class="muted small-t">Newer isn't automatically better here: move the pin with <span class="mono">scripts/zt update --ref &lt;tag&gt;</span> and test a short run first.</span>
+      </div>
+    </section>
+
+    <section v-if="storage" class="card section">
+      <div>
+        <h2>Storage</h2>
+        <p class="muted">
+          By default datasets live in ComfyUI's input folder and LoRAs, samples and merges under its output/zentrainer.
+          A ZenTrainer folder keeps them out of there: datasets in <span class="mono">datasets/</span>, results in
+          <span class="mono">output/</span>. Nothing already there moves.
+        </p>
+      </div>
+      <div class="stack">
+        <div class="eyebrow">ZenTrainer folder</div>
+        <div class="row-actions">
+          <ZenInput v-model="folderDraft" class="grow mono" placeholder="Empty: ComfyUI's input and output folders" @keydown.enter="saveFolder" />
+          <ZenButton size="sm" icon="mdi mdi-content-save-outline" :disabled="savingFolder || folderDraft.trim() === storage.settings.folder" @click="saveFolder">Save</ZenButton>
+        </div>
+        <p class="muted hint">An absolute path outside ComfyUI's input and output folders. Takes effect after restarting ComfyUI.</p>
+        <p v-if="folderError" class="warn">{{ folderError }}</p>
+        <p v-else-if="storage.restart_needed" class="warn"><i class="mdi mdi-restart" /> Saved: restart ComfyUI (System → Restart ComfyUI) to use it. Until then the folders below stay in use.</p>
+        <p v-else-if="folderNote" class="ok">{{ folderNote }}</p>
+      </div>
+      <div class="stack">
+        <div class="eyebrow">In use now</div>
+        <dl class="kv">
+          <dt>Datasets</dt><dd class="mono small-t">{{ storage.active.datasets }}</dd>
+          <dt>Outputs</dt><dd class="mono small-t">{{ storage.active.output }}</dd>
+          <dt>LoRAs</dt><dd class="mono small-t">{{ storage.active.loras }}</dd>
+        </dl>
       </div>
     </section>
 
@@ -240,6 +295,10 @@ p {
 .warn {
   color: var(--zen-warn);
   font-size: 12px;
+}
+.row-actions .grow {
+  flex: 1;
+  min-width: 240px;
 }
 .row-actions {
   display: flex;

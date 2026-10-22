@@ -79,6 +79,16 @@ export interface Health {
   web_buildable?: boolean
 }
 
+/** ZenTrainer's own settings (engine paths.py): saved ones, and the folders this process uses */
+export interface EngineSettings {
+  /** folder: the ZenTrainer folder ("" = ComfyUI's input/output) */
+  settings: { folder: string }
+  active: { folder: string; datasets: string; output: string; loras: string }
+  /** saved settings differ from what's running: they apply after a ComfyUI restart */
+  restart_needed: boolean
+  message?: string
+}
+
 export const hostApi = {
   health: () => call<Health>('/health'),
   system: (since = 0) => call<{ interval: number; samples: MemSample[] }>(`/system?since=${since}`),
@@ -89,5 +99,7 @@ export const hostApi = {
   loadedModels: () => call<{ models: LoadedModel[] }>('/system/models').then((r) => r.models),
   comfyui: (check = false) => call<ComfyVersion>(`/comfyui${check ? '?check=1' : ''}`),
   buildWeb: () => call<Pick<Health, 'web_built' | 'web_stale'>>('/web/build', { method: 'POST' }),
+  settings: () => call<EngineSettings>('/settings'),
+  putSettings: (body: Partial<EngineSettings['settings']>) => call<EngineSettings>('/settings', { method: 'PUT', body: JSON.stringify(body) }),
   restart: (force = false) => call<{ ok: true }>('/restart', { method: 'POST', body: JSON.stringify({ force }) }),
 }

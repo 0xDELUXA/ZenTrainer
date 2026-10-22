@@ -14,7 +14,7 @@ from pathlib import Path
 import aiohttp
 from aiohttp import web
 
-from ... import safeio, state
+from ... import paths, safeio, state
 from ...datasets import folders as datasets
 
 
@@ -53,15 +53,12 @@ def _keep_later(store, run_id: str, step: int) -> None:
     are someone's results until they say otherwise."""
     import shutil
 
-    import folder_paths
-
     tag = f"replaced-{time.strftime('%Y%m%d-%H%M%S')}"
-    out = Path(folder_paths.get_output_directory())
     files = [Path(c["path"]) for c in store.read(run_id, "checkpoints") if c.get("step", 0) > step and c.get("path")]
-    files += [out / r.get("subfolder", "") / r["filename"] for r in store.read(run_id, "samples")
+    files += [paths.resolve_view("output", r.get("subfolder", ""), r["filename"]) for r in store.read(run_id, "samples")
               if r.get("step", 0) > step and r.get("filename") and r.get("type", "output") == "output"]
     for f in files:
-        if f.is_file():
+        if f and f.is_file():
             keep = f.parent / tag / f.name
             keep.parent.mkdir(exist_ok=True)
             shutil.move(str(f), str(keep))
@@ -153,8 +150,6 @@ def _migrate_states() -> None:
     """Move training-state files out of the LoRA folders (older versions saved
     <name>.state.pt beside each checkpoint, where ComfyUI lists it as a LoRA)."""
 
-    import folder_paths
-
     from ...harness.trainer import state_dir
 
     store = state.store()
@@ -174,11 +169,11 @@ def _migrate_states() -> None:
             store.rewrite(rid, "checkpoints", rows)
             logging.info("[ZenTrainer] moved training state of %s out of the LoRA folder", rid)
     # strays not tied to a run row
-    root = Path(folder_paths.get_output_directory()) / "zentrainer" / "loras"
-    for stray in root.rglob("*.state.pt") if root.is_dir() else []:
-        dest = safeio.free_name(state_dir("_orphaned") / stray.name)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(stray), str(dest))
+    for root in (r / "loras" for r in paths.output_roots()):
+        for stray in root.rglob("*.state.pt") if root.is_dir() else []:
+            dest = safeio.free_name(state_dir("_orphaned") / stray.name)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(stray), str(dest))
 
 
 def _comfy_version(check: bool) -> dict:

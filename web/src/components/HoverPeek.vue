@@ -43,7 +43,7 @@ function sized(e: Event) {
   if (im.naturalWidth && im.naturalHeight) nat.value = { w: im.naturalWidth, h: im.naturalHeight }
 }
 
-const VIDEO = /\.(mp4|webm|mov|mkv)([?&#]|$)/i  // also /view?filename=x.mp4&subfolder=...
+const VIDEO = /\.(mp4|webm|mov|mkv)([?&#]|$)/i  // also /files/view?filename=x.mp4&subfolder=...
 
 function under(): { url: string; video: boolean; time: number; img?: HTMLImageElement } | null {
   for (const el of document.elementsFromPoint(x, y)) {

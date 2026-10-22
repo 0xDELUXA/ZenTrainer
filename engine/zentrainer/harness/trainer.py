@@ -18,7 +18,7 @@ from typing import Any
 
 import torch
 
-from .. import events
+from .. import events, paths
 from ..spec import TrainSpec, slugify
 from . import control as control_mod
 from . import data, models, optim
@@ -99,7 +99,7 @@ def lora_root(lora_dir: str | None) -> tuple[Path, Path]:
     can't point writes anywhere else."""
     import folder_paths
 
-    default = Path(folder_paths.get_output_directory()) / "zentrainer" / "loras"
+    default = paths.lora_dir()
     if not lora_dir:
         return default, default
     want = Path(lora_dir).resolve()
@@ -366,7 +366,7 @@ class Trainer:
         self.train_dtype = _DTYPES[s.memory.training_dtype]
 
         encoder_id = repr((s.model.kind, s.model.ckpt_name, s.model.clip_name, s.model.clip_type, s.model.vae_name))
-        root = Path(folder_paths.get_input_directory()) / s.dataset.folder
+        root = paths.datasets_root() / s.dataset.folder
         cache = Path(folder_paths.get_user_directory()) / "zentrainer" / "cache"
         self.encoder_id, self.cache_dir = encoder_id, cache
         if s.dataset.video_audio and self.models.audio_vae is None:

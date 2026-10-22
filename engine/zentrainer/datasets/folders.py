@@ -1,4 +1,4 @@
-"""Dataset folders in ComfyUI's input dir: list, inspect, edit captions, upload, delete.
+"""Dataset folders (in ComfyUI's input dir, or the ZenTrainer folder's datasets/): list, inspect, edit captions, upload, delete.
 
 Every path from a request is resolved and checked to stay inside its dataset folder.
 """
@@ -23,9 +23,9 @@ class DatasetError(ValueError):
 
 
 def root() -> Path:
-    import folder_paths
+    from .. import paths
 
-    return Path(folder_paths.get_input_directory()).resolve()
+    return paths.datasets_root().resolve()
 
 
 def folder(name: str, must_exist: bool = True) -> Path:
@@ -178,7 +178,7 @@ def items(name: str, caption_ext: str = ".txt") -> dict:
         w, h = (clip.width, clip.height) if clip is not None else _size(it.path)
         rows.append({
             "path": str(it.path.relative_to(d)),
-            "subfolder": str(it.path.parent.relative_to(r)),  # for /view?type=input
+            "subfolder": str(it.path.parent.relative_to(r)),  # for /files/view?type=input
             "filename": it.path.name,
             "caption": it.caption,
             "repeats": it.repeats,

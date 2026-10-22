@@ -5,7 +5,8 @@
 import { ZenButton, ZenCompare, ZenLightbox, type LightboxItem } from '@nynxz/zenkit-ui'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { onComfyMessage } from '@/api/comfy'
-import { ACTIVE, EVENTS, engine, promptText, type CheckpointRow, type RunDetail, type SampleRow } from '@/api/engine'
+import { ACTIVE, EVENTS, engine, promptText, viewUrl as fileUrl, type CheckpointRow, type RunDetail, type SampleRow } from '@/api/engine'
+import { downloadUrl } from '@/api/engine/runs'
 import { eta } from '@/lib/recipes'
 
 const props = defineProps<{ id: string }>()
@@ -82,7 +83,7 @@ const detailLine = computed(() => {
 })
 
 // the samples: the first prompt's, in order (before first); the newest big
-const viewUrl = (x: SampleRow) => `/view?${new URLSearchParams({ filename: x.filename, subfolder: x.subfolder, type: x.type })}`
+const viewUrl = (x: SampleRow) => fileUrl(x)
 const isVideo = (x: SampleRow) => /\.(mp4|webm)$/i.test(x.filename)
 const runSamples = computed(() => (d.value?.samples ?? []).filter((x) => !x.manual))
 const strip = computed(() => runSamples.value.filter((x) => x.index === 0).sort((a, b) => a.step - b.step))
@@ -143,10 +144,8 @@ const compare = computed(() => {
   // the widget fills its box: the box takes the sample's shape (square when it isn't known)
   return { before: viewUrl(before), after: viewUrl(after), label: row!.label, ratio: after.width && after.height ? `${after.width} / ${after.height}` : '1 / 1' }
 })
-const download = (c: CheckpointRow) => {
-  const m = c.path.replace(/\\/g, '/').match(/\/output\/(.+)\/([^/]+)$/)
-  return m ? `/view?${new URLSearchParams({ filename: m[2]!, subfolder: m[1]!, type: 'output' })}` : null
-}
+// the run's own download route: the file's path says nothing about /view once a ZenTrainer folder is set
+const download = (c: CheckpointRow) => (c.path ? downloadUrl(props.id, c.lora_name) : null)
 const mb = (b?: number | null) => (b ? `${(b / 1e6).toFixed(0)} MB` : '')
 
 // full screen: ←/→ across prompts, ↑/↓ the same prompt at other checkpoints
