@@ -47,19 +47,26 @@ def _header(path: Path) -> tuple[dict, dict | None]:
     return {k: _Shape(v["shape"], dtypes.get(v["dtype"], torch.float32)) for k, v in head.items()}, meta
 
 
-@lru_cache(maxsize=64)
-def _profile(path: str, mtime: float) -> dict:
+def _config(path: str):
+    """The model's config and its weights' stand-ins, as ComfyUI would detect them (or None)."""
     import comfy.model_detection as md
     import comfy.utils
-
-    from ..harness.objective import is_flow
 
     sd, meta = _header(Path(path))
     inner = comfy.utils.state_dict_prefix_replace(sd, {md.unet_prefix_from_state_dict(sd): ""}, filter_keys=True)
     sd = inner or sd  # as ComfyUI's loader: a checkpoint's diffusion model, or the file as is
     cfg = md.model_config_from_unet(sd, "", metadata=meta)
-    if cfg is None:
+    return (cfg, sd) if cfg is not None else None
+
+
+@lru_cache(maxsize=64)
+def _profile(path: str, mtime: float) -> dict:
+    from ..harness.objective import is_flow
+
+    found = _config(path)
+    if found is None:
         return {"known": False}
+    cfg, sd = found
     import torch
 
     # flow models set their type in their model class, not the config: the model, built on the
@@ -68,11 +75,62 @@ def _profile(path: str, mtime: float) -> dict:
         ms = cfg.get_model(sd, "", device="meta").model_sampling
     sigmas = [float(ms.percent_to_sigma(i / (STEPS - 1))) for i in range(STEPS)]
     return {"known": True, "model": type(cfg).__name__, "flow": bool(is_flow(ms)),
-            "shift": cfg.sampling_settings.get("shift"), "sigmas": sigmas}
+            "shift": cfg.sampling_settings.get("shift"), "sigmas": sigmas, "schedules": _schedules(path, STEPS - 1)}
+
+
+@lru_cache(maxsize=64)
+def _sampling(path: str):
+    """The model's sampling schedule with data, for ComfyUI's schedulers (the meta model's has
+    none: the same sampling class built again on the CPU), or None."""
+    import torch
+
+    found = _config(path)
+    if found is None:
+        return None
+    cfg, sd = found
+    try:
+        with torch.device("meta"):
+            ms = cfg.get_model(sd, "", device="meta").model_sampling
+        with torch.device("cpu"):
+            return type(ms)(cfg)
+    except Exception:
+        return None
+
+
+def _schedules(path: str, steps: int, names: list[str] | None = None) -> dict[str, list[float]]:
+    """ComfyUI's schedulers at `steps` steps on this model ({name: σ, full noise first}): the levels
+    Timesteps "a scheduler" trains on, as objective.scheduler_sigmas gives the trainer."""
+    import comfy.samplers
+
+    from ..harness.objective import scheduler_sigmas
+
+    ms = _sampling(path)
+    if ms is None:
+        return {}
+    out = {}
+    for name in names or comfy.samplers.SCHEDULER_NAMES:
+        try:
+            out[name] = [round(float(x), 5) for x in scheduler_sigmas(ms, name, steps)]
+        except Exception:  # a scheduler this model can't run
+            continue
+    return out
+
+
+def schedule(folder: str, name: str, scheduler: str, steps: int) -> list[float]:
+    """One scheduler's exact σ at `steps` steps on this model, as training will use them ([] if unknown)."""
+    import folder_paths
+
+    path = folder_paths.get_full_path(folder, name)
+    if not path or not path.endswith(".safetensors") or not 1 <= steps <= 1000:
+        return []
+    try:
+        return _schedules(path, steps, [scheduler]).get(scheduler, [])
+    except Exception:
+        return []
 
 
 def profile(folder: str, name: str) -> dict:
-    """{known, model, flow, shift, sigmas}: the schedule's σ at evenly spaced points from full
+    """{known, model, flow, shift, sigmas, schedules}: the schedule's σ at evenly spaced points from full
     noise (first) to clean (last), as training draws them with no shift of its own."""
     import folder_paths
 
@@ -80,6 +138,6 @@ def profile(folder: str, name: str) -> dict:
     if not path or not path.endswith(".safetensors"):
         return {"known": False}
     try:
-        return _profile(path, Path(path).stat().st_mtime)
+        return {**_profile(path, Path(path).stat().st_mtime), "folder": folder, "name": name}
     except Exception:
         return {"known": False}

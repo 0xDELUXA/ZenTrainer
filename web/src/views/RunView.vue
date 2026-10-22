@@ -10,6 +10,7 @@ import StatusPill from '@/components/StatusPill.vue'
 import { RUN, useRun } from '@/components/run/context'
 import RunCheckpoints from '@/components/run/RunCheckpoints.vue'
 import RunLoaded from '@/components/run/RunLoaded.vue'
+import RunNoise from '@/components/run/RunNoise.vue'
 import RunProgress from '@/components/run/RunProgress.vue'
 import RunSamples from '@/components/run/RunSamples.vue'
 import RunSetup from '@/components/run/RunSetup.vue'
@@ -91,6 +92,7 @@ const modelFile = computed(() => {
             <LossChart :rows="detail.metrics" :total="total" :marks="marks" :val="detail.validation" :like="likeSteps" :stages="stages" :height="200" />
           </section>
           <RunSamples />
+          <RunNoise />
         </div>
         <aside class="rail">
           <RunStats />

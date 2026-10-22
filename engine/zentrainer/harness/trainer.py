@@ -29,7 +29,7 @@ from .denoiser import Denoiser
 from .memory import attention_override, gradient_checkpointing
 from . import network as network_mod
 from .network import Network
-from .objective import Objective, is_flow, sample_percents, sigmas_for
+from .objective import Objective, is_flow, sample_percents, scheduler_sigmas, sigmas_for
 
 _DTYPES = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}
 
@@ -503,6 +503,10 @@ class Trainer:
         self._shift = s.objective.shift
         if self._shift and not is_flow(self.denoiser.model_sampling):
             raise ValueError(f"objective.shift is for flow-matching models; {type(self.denoiser.model_sampling).__name__} isn't one. Set it to 0.")
+        self._schedule = (scheduler_sigmas(self.denoiser.model_sampling, s.objective.scheduler, s.objective.scheduler_steps)
+                          if s.objective.timesteps == "scheduler" else None)
+        if s.objective.weighting == "flex" and not is_flow(self.denoiser.model_sampling):
+            raise ValueError(f"objective.weighting is for flow-matching models; {type(self.denoiser.model_sampling).__name__} isn't one. Turn it off.")
         self.scaler = torch.amp.GradScaler() if self.train_dtype == torch.float16 else None
 
         self._conds: dict[tuple[int, tuple], dict] = {}  # (caption, shape) -> prepared cond
@@ -536,6 +540,8 @@ class Trainer:
         self.optimizer.load_state_dict(self._saved_optimizer_state(state["optimizer"]))
         self.scheduler.load_state_dict(state["scheduler"])
         self.step = int(state["step"])
+        if self.objective.balance is not None and state.get("balance"):  # its loss averages carry on
+            self.objective.balance.load_state_dict(state["balance"])
         if state.get("live"):  # the checkpoint's LoRA file holds the average; training goes on from these
             with torch.no_grad():
                 for k, v in state["live"].items():
@@ -896,13 +902,16 @@ class Trainer:
             ph[name] += now - mark
             mark = now
 
-        for _ in range(acc):
+        self.objective.drawn = []
+        for a in range(acc):
             idx = next(self.batches)
             x0, weight, shapes = self.batch(idx)
             conds = [self._cond(i, x0, shapes) for i in idx]
 
             noise = torch.randn(x0.shape, generator=self.generator).to(self.device)
-            sigma = sigmas_for(ms, sample_percents(s.objective, len(idx), self.generator), self._shift).to(self.device)
+            drawn = (self.step * acc + a) * s.optim.batch_size  # noise levels before these (spread)
+            percents = sample_percents(s.objective, len(idx), self.generator, drawn, s.seed)
+            sigma = sigmas_for(ms, percents, self._shift, self._schedule).to(self.device)
             x_t = self.objective.noisy(ms, sigma, noise, x0)
             lap("data")
 
@@ -911,7 +920,7 @@ class Trainer:
             with torch.autocast(self.device.type, dtype=self.train_dtype, enabled=self.train_dtype != torch.float32):
                 x0_pred = self.denoiser(x_t.requires_grad_(getattr(self, "_input_grad", True)), sigma, conds,
                                         self._tread(idx))
-            loss = self.objective.loss(x_t.detach(), x0, x0_pred, sigma, weight).mean()
+            loss = self.objective.train_loss(x_t.detach(), x0, x0_pred, sigma, weight, percents).mean()
             lap("forward")
             scaled = loss / acc
             (self.scaler.scale(scaled) if self.scaler else scaled).backward()
@@ -1111,6 +1120,7 @@ class Trainer:
                 "step": self.step, "optimizer": self.optimizer.state_dict(), "scheduler": self.scheduler.state_dict(),
                 "rng": self.generator.get_state(), "batches_epoch": self.batches.epoch,
                 "train_seconds": self.train_seconds,
+                **({"balance": self.objective.balance.state_dict()} if self.objective.balance is not None else {}),
                 **({"live": {k: v.cpu() for k, v in live.items()}, "ema": self.ema.state_dict()} if live is not None else {}),
             }, str(tmp_state))
             os.replace(tmp_state, state)

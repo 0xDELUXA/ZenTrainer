@@ -86,13 +86,25 @@ export interface TrainSpec {
   objective: {
     loss: 'mse' | 'l1' | 'huber' | 'smooth_l1'
     target: 'native' | 'x0'
-    timesteps: 'uniform' | 'logit_normal'
+    timesteps: 'uniform' | 'logit_normal' | 'scheduler'
+    /** timesteps "scheduler": which of ComfyUI's, and at how many steps */
+    scheduler?: string
+    scheduler_steps?: number
     logit_mean: number
     logit_std: number
     /** logit-normal: share of steps drawn uniformly instead */
     uniform_mix?: number
     /** flow models: training timestep shift (0 = the model's own sampling shift) */
     shift: number
+    /** lean the noise levels to one end (AI Toolkit's content / style) */
+    bias?: 'balanced' | 'high_noise' | 'low_noise'
+    /** how hard: the draw's power (3 = AI Toolkit's cubic) */
+    bias_power?: number
+    /** per-noise-level loss weights: "flex" = AI Toolkit's "weighted" (flow models), "balance"
+     * = measured on the model as it trains, evening out every noise level's pull */
+    weighting?: '' | 'flex' | 'balance'
+    /** noise levels from an even sequence instead of random draws */
+    spread?: boolean
   }
   memory: {
     training_dtype: 'bf16' | 'fp16' | 'fp32'

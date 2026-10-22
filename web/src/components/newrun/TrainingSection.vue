@@ -51,6 +51,37 @@ const baseLora = computed({
   get: () => spec.network.base_lora ?? '',
   set: (v: string) => (spec.network.base_lora = v || null),
 })
+// ---- AI Toolkit's timestep types as ours: its linear and sigmoid draw σ unshifted (shift 1), its
+// shift keeps the model's own schedule (shift 0), and weighted is linear with its Flex.1 weights
+type AitkType = '' | 'linear' | 'sigmoid' | 'shift' | 'weighted'
+const aitk = computed<AitkType>({
+  get: () => {
+    const o = spec.objective
+    if (o.timesteps === 'scheduler') return ''
+    if (o.weighting) return o.weighting === 'flex' && o.timesteps === 'uniform' && o.shift === 1 ? 'weighted' : ''
+    if (o.timesteps === 'logit_normal') return o.shift === 1 && o.logit_mean === 0 && o.logit_std === 1 && !o.uniform_mix ? 'sigmoid' : ''
+    return o.shift === 1 ? 'linear' : o.shift === 0 ? 'shift' : ''
+  },
+  set: (v: AitkType) => {
+    if (!v) return
+    const o = spec.objective
+    o.timesteps = v === 'sigmoid' ? 'logit_normal' : 'uniform'
+    o.shift = v === 'shift' ? 0 : 1
+    o.weighting = v === 'weighted' ? 'flex' : ''
+    if (v === 'sigmoid') Object.assign(o, { logit_mean: 0, logit_std: 1, uniform_mix: 0 })
+  },
+})
+// ComfyUI's schedulers, as the picked model's profile lists them
+const schedulerNames = computed(() => Object.keys(noise.value.schedules ?? {}).length
+  ? Object.keys(noise.value.schedules!)
+  : ['simple', 'sgm_uniform', 'karras', 'exponential', 'ddim_uniform', 'beta', 'normal', 'linear_quadratic', 'kl_optimal'])
+const AITK_ITEMS = [
+  { value: 'sigmoid', label: 'Sigmoid' },
+  { value: 'linear', label: 'Linear' },
+  { value: 'shift', label: 'Shift' },
+  { value: 'weighted', label: 'Weighted' },
+  { value: '', label: 'Custom' },
+]
 const targets = computed({
   get: () => (typeof spec.network.targets === 'string' ? spec.network.targets : 'attn_mlp'),
   set: (v: string) => (spec.network.targets = v as typeof spec.network.targets),
@@ -190,8 +221,29 @@ const targets = computed({
         <ZenField label="Target" stack tip="Native: ε for SD, velocity for flow models">
           <ZenCombo v-model="spec.objective.target" :items="items(['native', 'x0'], { native: 'Model native', x0: 'Denoised (x0)' })" :searchable="false" :sorted="false" />
         </ZenField>
-        <ZenField label="Timesteps" stack tip="Logit-normal favours mid noise (flow models)">
-          <ZenCombo v-model="spec.objective.timesteps" :items="items(['uniform', 'logit_normal'], { logit_normal: 'Logit-normal' })" :searchable="false" :sorted="false" />
+        <ZenField v-if="noise.flow" label="Timestep type" stack tip="AI Toolkit's names for the settings below. Sigmoid and Linear draw the noise level as is (shift 1), Shift follows the model's own schedule, Weighted is Linear with AI Toolkit's loss weights. Changing anything below makes it Custom">
+          <ZenCombo v-model="aitk" :items="AITK_ITEMS" :searchable="false" :sorted="false" />
+        </ZenField>
+        <ZenField label="Timesteps" stack tip="Logit-normal (AI Toolkit's sigmoid) favours mid noise; uniform (linear) spends the same on every level">
+          <ZenCombo v-model="spec.objective.timesteps" :items="items(['uniform', 'logit_normal', 'scheduler'], { uniform: 'Uniform (linear)', logit_normal: 'Logit-normal (sigmoid)', scheduler: 'A ComfyUI scheduler' })" :searchable="false" :sorted="false" @update:model-value="$event === 'scheduler' && (spec.objective.shift = 0)" />
+        </ZenField>
+        <ZenField v-if="spec.objective.timesteps === 'scheduler'" label="Scheduler / steps" stack tip="Trains on exactly the noise levels this scheduler samples at in this many steps, each as often: the LoRA learns where it'll be used. Few steps (4–8) for a LoRA meant for fast sampling. Uses the model's own shift">
+          <div class="inline">
+            <ZenCombo :model-value="spec.objective.scheduler ?? 'simple'" :items="items(schedulerNames)" :searchable="false" :sorted="false" @update:model-value="spec.objective.scheduler = String($event)" />
+            <ZenNumber :model-value="spec.objective.scheduler_steps ?? 20" :min="1" :max="200" :step="1" :precision="0" @update:model-value="spec.objective.scheduler_steps = $event" />
+          </div>
+        </ZenField>
+        <ZenField label="Timestep bias" stack tip="Lean the steps to one end, whatever the timesteps above. High noise teaches composition, layout and pose (AI Toolkit's content); low noise detail and texture (its style). Balanced = as drawn">
+          <ZenCombo :model-value="spec.objective.bias ?? 'balanced'" :items="items(['balanced', 'high_noise', 'low_noise'], { balanced: 'Balanced', high_noise: 'High noise', low_noise: 'Low noise' })" :searchable="false" :sorted="false" @update:model-value="spec.objective.bias = $event as 'balanced' | 'high_noise' | 'low_noise'" />
+        </ZenField>
+        <ZenField v-if="(spec.objective.bias ?? 'balanced') !== 'balanced'" label="Bias strength" stack tip="How hard it leans: the draw's power. 3 is AI Toolkit's (half the steps in the eighth of the schedule at that end); 2 is gentler">
+          <ZenNumber :model-value="spec.objective.bias_power ?? 3" :min="1" :max="10" :step="0.5" :precision="1" @update:model-value="spec.objective.bias_power = $event" />
+        </ZenField>
+        <ZenField label="Loss weighting" stack tip="Weights each step's loss by its noise level. Balanced: measured on this model as it trains, so every noise level pulls on the LoRA about equally (EDM2's idea); the timesteps still decide how often each is trained. AI Toolkit (flow models, its &quot;weighted&quot; type): a fixed curve measured on Flex.1, up to 1.5x at heavy noise, under half near clean">
+          <ZenCombo :model-value="spec.objective.weighting ?? ''" :items="items(noise.flow ? ['', 'balance', 'flex'] : ['', 'balance'], { '': 'None', balance: 'Balanced (measured)', flex: 'AI Toolkit (Flex.1)' })" :searchable="false" :sorted="false" @update:model-value="spec.objective.weighting = $event as '' | 'flex' | 'balance'" />
+        </ZenField>
+        <ZenField label="Spread evenly" stack tip="Noise levels from an even sequence instead of random draws: at batch 1, a few steps already cover the whole schedule, and the loss curve is steadier. Same distribution">
+          <div class="sw-row"><ZenSwitch :model-value="!!spec.objective.spread" @update:model-value="spec.objective.spread = $event" /><span class="sw-state">{{ spec.objective.spread ? 'On' : 'Off' }}</span></div>
         </ZenField>
         <ZenField v-if="spec.objective.timesteps === 'logit_normal'" label="Centre / spread" stack tip="Logit-normal's mean and standard deviation. Mean 0 centres on mid noise; positive leans to heavy noise (composition), negative to light noise (detail). MOSS pretrained at 1.09 / 0.95">
           <div class="inline">
@@ -202,10 +254,10 @@ const targets = computed({
         <ZenField v-if="spec.objective.timesteps === 'logit_normal'" label="Uniform mix (%)" stack tip="Share of steps drawn uniformly instead: a little training at the extremes logit-normal rarely visits. 1% is plenty">
           <ZenNumber :model-value="Math.round((spec.objective.uniform_mix ?? 0) * 100)" :min="0" :max="50" :step="1" :precision="0" @update:model-value="spec.objective.uniform_mix = $event / 100" />
         </ZenField>
-        <ZenField v-if="noise.known && noise.flow" label="Focus" stack class="full-row" tip="What the LoRA spends its steps on. Heavy noise teaches composition (layout, pose, colour), light noise teaches detail (faces, texture). Toward Detail usually helps likeness; the marker is the model's own schedule">
+        <ZenField v-if="noise.known && noise.flow" label="Where the steps go" stack class="full-row" tip="Each step trains at one noise level. Left is full noise, where the LoRA learns composition (layout, pose, colour); right is nearly clean, where it learns detail (faces, texture). The higher the curve, the more steps there. The dashed line is the model's own schedule; the timesteps, bias and Lean above all move the curve. Leaning toward detail usually helps likeness">
           <FocusField :objective="spec.objective" :profile="noise" />
         </ZenField>
-        <ZenField v-else label="Timestep shift" stack tip="Flow models. 0 = the model's own (MOSS 5: composition, colour). 1–3 trains more on fine detail like faces">
+        <ZenField v-else-if="spec.objective.timesteps !== 'scheduler'" label="Timestep shift" stack tip="Flow models. 0 = the model's own (MOSS 5: composition, colour). 1–3 trains more on fine detail like faces">
           <ZenNumber v-model="spec.objective.shift" :min="0" :max="10" :step="0.5" :precision="1" />
         </ZenField>
         <ZenField label="Loss" stack><ZenCombo v-model="spec.objective.loss" :items="items(['mse', 'l1', 'huber', 'smooth_l1'])" :searchable="false" :sorted="false" /></ZenField>

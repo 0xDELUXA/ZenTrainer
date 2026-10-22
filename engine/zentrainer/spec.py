@@ -160,7 +160,12 @@ class ObjectiveSpec:
     # "native": each model's own prediction space (eps for SD-style, velocity for
     # flow models). "x0": loss on the denoised image, ComfyUI's native trainer default.
     target: str = "native"
-    timesteps: str = "uniform"  # uniform | logit_normal
+    # uniform | logit_normal (AI Toolkit's "linear" | "sigmoid") | scheduler: the noise levels a
+    # ComfyUI scheduler samples at in `scheduler_steps` steps, each step as often (trains where
+    # the LoRA will be used; few steps for a fast LoRA, as AI Toolkit's two/four/eight_step)
+    timesteps: str = "uniform"
+    scheduler: str = "simple"
+    scheduler_steps: int = 20
     logit_mean: float = 0.0
     logit_std: float = 1.0
     # share of steps drawn uniformly instead (logit-normal only): keeps a little training at
@@ -170,6 +175,19 @@ class ObjectiveSpec:
     # The sampling shift favours heavy noise (MOSS's 5 puts ~70% of steps above σ≈0.7):
     # composition and colour. A lower one (1-3) spends more steps on detail, e.g. faces.
     shift: float = 0.0
+    # Lean the noise levels toward one end, whatever the distribution (AI Toolkit's "content" and
+    # "style"): "high_noise" for composition, layout and pose, "low_noise" for detail and texture.
+    # The draw is cubed (bias_power 3, as AI Toolkit): high_noise puts half the steps in the
+    # noisiest eighth of the distribution. "balanced" = as drawn.
+    bias: str = "balanced"
+    bias_power: float = 3.0
+    # Per-noise-level loss weights. "flex" (flow models) is AI Toolkit's "weighted", measured on
+    # Flex.1: up to 1.5x around σ 0.85, down to 0.45x near clean. "balance" measures this model
+    # as it trains and evens the pull of every noise level (EDM2's idea, objective.Balance). "" = none.
+    weighting: str = ""
+    # Noise levels from an even, low-discrepancy sequence instead of random draws: batch 1 covers
+    # the schedule in a few steps instead of by luck, a steadier loss for the same distribution.
+    spread: bool = False
 
 
 @dataclass
@@ -358,7 +376,16 @@ class TrainSpec:
         _choice("optim.scheduler", self.optim.scheduler, ("constant", "linear", "cosine"))
         _choice("objective.loss", self.objective.loss, ("mse", "l1", "huber", "smooth_l1"))
         _choice("objective.target", self.objective.target, ("native", "x0"))
-        _choice("objective.timesteps", self.objective.timesteps, ("uniform", "logit_normal"))
+        _choice("objective.timesteps", self.objective.timesteps, ("uniform", "logit_normal", "scheduler"))
+        if self.objective.timesteps == "scheduler":
+            if not 1 <= self.objective.scheduler_steps <= 1000:
+                raise SpecError("objective.scheduler_steps is a step count, 1 to 1000")
+            if self.objective.shift:
+                raise SpecError("objective.shift is the model's own with a scheduler (its shift is in the schedule): set it to 0")
+        _choice("objective.bias", self.objective.bias, ("balanced", "high_noise", "low_noise"))
+        _choice("objective.weighting", self.objective.weighting, ("", "flex", "balance"))
+        if not 1.0 <= self.objective.bias_power <= 10.0:
+            raise SpecError("objective.bias_power is how hard the bias leans, 1 (not at all) to 10 (3 = AI Toolkit's)")
         _choice("memory.training_dtype", self.memory.training_dtype, ("bf16", "fp16", "fp32"))
         _choice("samples.slg_mode", self.samples.slg_mode, ("off", "uncond", "standard"))
         _choice("output.keep_states", self.output.keep_states, ("latest", "all", "none"))

@@ -53,6 +53,10 @@ export interface NoiseProfile {
   flow?: boolean
   shift?: number | null
   sigmas?: number[]
+  /** each ComfyUI scheduler's σ at 200 steps, full noise first */
+  schedules?: Record<string, number[]>
+  folder?: 'diffusion_models' | 'checkpoints'
+  name?: string
 }
 
 /** training: on while training only; base: on always (training, samples, use) */
@@ -123,6 +127,9 @@ export const modelsApi = {
   /** a model's own noise schedule from its file's header (engine/zentrainer/models/noise.py) */
   noise: (folder: 'diffusion_models' | 'checkpoints', name: string) =>
     call<NoiseProfile>(`/noise?${new URLSearchParams({ folder, name })}`),
+  /** one ComfyUI scheduler's exact σ on a model, as training uses them */
+  noiseSchedule: (folder: 'diffusion_models' | 'checkpoints', name: string, scheduler: string, steps: number) =>
+    call<{ sigmas: number[] }>(`/noise/schedule?${new URLSearchParams({ folder, name, scheduler, steps: String(steps) })}`),
   adapters: (family?: string | null, kind: AdapterKind = 'training') =>
     call<{ adapters: TrainingAdapter[] }>(
       `/adapters?kind=${kind}${family ? `&family=${encodeURIComponent(family)}` : ''}`,

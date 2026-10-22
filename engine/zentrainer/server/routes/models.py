@@ -77,6 +77,22 @@ def register(server) -> None:
             return _bad("folder is diffusion_models or checkpoints")
         return web.json_response(await asyncio.to_thread(noise.profile, folder, request.query.get("name", "")))
 
+    @routes.get("/zentrainer/api/noise/schedule")
+    async def noise_schedule(request):
+        """One ComfyUI scheduler's exact σ on a model: ?folder=&name=&scheduler=&steps=."""
+        from ...models import noise
+
+        folder = request.query.get("folder", "diffusion_models")
+        if folder not in ("diffusion_models", "checkpoints"):
+            return _bad("folder is diffusion_models or checkpoints")
+        try:
+            steps = int(request.query.get("steps", "20"))
+        except ValueError:
+            return _bad("steps is a number")
+        sigmas = await asyncio.to_thread(noise.schedule, folder, request.query.get("name", ""),
+                                         request.query.get("scheduler", "simple"), steps)
+        return web.json_response({"sigmas": sigmas})
+
     @routes.get("/zentrainer/api/adapters")
     async def list_adapters(request):
         """Training adapters (or ?kind=base: base LoRAs) for the picker: the family's known ones

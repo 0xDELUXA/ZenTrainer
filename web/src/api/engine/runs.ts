@@ -51,6 +51,8 @@ export interface MetricRow {
   vram_peak?: number
   /** seconds the step spent in each phase */
   phases?: { data: number; forward: number; backward: number; optimizer: number }
+  /** each sample's [percent of the schedule, σ, plain loss] */
+  drawn?: [number, number, number][]
 }
 
 export interface CheckpointRow {

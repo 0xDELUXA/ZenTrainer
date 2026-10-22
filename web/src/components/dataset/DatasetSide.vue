@@ -4,6 +4,7 @@
 import { ZenButton, ZenInput, ZenSwitch } from '@nynxz/zenkit-ui'
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { engine } from '@/api/engine'
+import { remembered } from '@/lib/remembered'
 import { activeCaptions } from '@/stores/captions'
 import CaptionPanel from '@/components/CaptionPanel.vue'
 import DatasetStats from '@/components/DatasetStats.vue'
@@ -146,25 +147,6 @@ async function addInputs(files: FileList | null) {
 
 // ---- health: folds away, remembered per browser; folded, it still loads (the grid's picture
 // flags come from it), it's only hidden ---------------------------------------------------------
-// a section's open/folded, remembered per browser (blocked storage: it just isn't remembered)
-function remembered(key: string, open: boolean) {
-  const r = ref((() => {
-    try {
-      const v = localStorage.getItem(key)
-      return v == null ? open : v !== '0'
-    } catch {
-      return open
-    }
-  })())
-  watch(r, (v) => {
-    try {
-      localStorage.setItem(key, v ? '1' : '0')
-    } catch {
-      // storage blocked
-    }
-  })
-  return r
-}
 const healthOpen = remembered('zentrainer.datasetSide.health', true)
 // faces and how pictures show: settings, folded away until wanted
 const settingsOpen = remembered('zentrainer.datasetSide.settings', false)
