@@ -293,7 +293,7 @@ const tileOf = (x: SampleRow | null | undefined) => {
   opacity: 1;
 }
 .macts button.on {
-  color: var(--zen-accent);
+  color: var(--zen-selected, var(--zen-accent));
 }
 .macts button {
   width: 24px;

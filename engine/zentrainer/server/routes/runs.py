@@ -132,6 +132,60 @@ def register(server) -> None:
         _remember_client(body.get("client_id"))
         return web.json_response({"run": store.meta(run_id)})
 
+    @routes.get("/zentrainer/api/runs/{run_id}/download")
+    async def download_checkpoint(request):
+        """One of the run's saved LoRAs as a file to save (?lora=<its lora_name>; the final if left
+        out). Only files the run's checkpoint rows name are served."""
+        store, run_id = state.store(), request.match_info["run_id"]
+        try:
+            rows = store.read(run_id, "checkpoints")
+        except (FileNotFoundError, ValueError):
+            return _bad("run not found", 404)
+        want = request.query.get("lora")
+        row = next((c for c in rows if c.get("lora_name") == want), None) if want else \
+            next((c for c in reversed(rows) if c.get("final")), None)
+        path = Path(row["path"]) if row and row.get("path") else None
+        if not path or not path.is_file():
+            return _bad("no such checkpoint on disk", 404)
+        return web.FileResponse(path, headers={"Content-Disposition": f'attachment; filename="{path.name}"'})
+
+    @routes.post("/zentrainer/api/runs/{run_id}/extend")
+    async def extend_run(request):
+        """Train a finished run on, to {"steps": the new total}, from the state its final save kept:
+        optimizer, step, RNG and average carry on. Its final LoRA becomes a checkpoint first
+        (<name>_step<N>), so the new final doesn't overwrite it."""
+        store, run_id = state.store(), request.match_info["run_id"]
+        try:
+            meta = store.meta(run_id)
+        except (FileNotFoundError, ValueError):
+            return _bad("run not found", 404)
+        if control.get(run_id) is not None or meta["status"] != "done":
+            return _bad("only a finished run trains on (a stopped one resumes)", 409)
+        body = await request.json() if request.can_read_body else {}
+        ckpt = common.latest_resumable(store, run_id)
+        if ckpt is None or not ckpt.get("final") or not Path(ckpt["path"]).is_file():
+            return _bad("this run kept no training state at its end (Resume states was off, or it was cleaned "
+                        "up): start a new run with Continue from set to its LoRA", 409)
+        try:
+            steps = int(body.get("steps"))
+        except (TypeError, ValueError):
+            return _bad("steps is the new total")
+        if steps <= ckpt["step"]:
+            return _bad(f"steps is the new total: more than the {ckpt['step']} it has trained")
+        spec = TrainSpec.from_dict(store.spec(run_id))
+        spec.optim.steps = steps
+        try:
+            spec.validate()
+        except SpecError as e:
+            return _bad(str(e))
+        from ...runs.extend import keep_final
+
+        ckpt = keep_final(store, run_id, ckpt, spec.output.lora_dir)
+        store.set_spec(run_id, spec.to_dict())
+        common.queue_resume(store, run_id, ckpt, at=0)
+        _remember_client(body.get("client_id"))
+        return web.json_response({"run": store.meta(run_id)})
+
     @routes.post("/zentrainer/api/runs/{run_id}/sample")
     async def sample_run(request):
         """Sample a finished run's checkpoint: {"checkpoint"?: path (default the latest), "run_prompts"?:

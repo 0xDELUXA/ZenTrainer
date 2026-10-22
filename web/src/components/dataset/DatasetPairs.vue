@@ -71,7 +71,7 @@ const { zoom, inputs, cap, k, drafts, saving, save, selected, shown, toggleSelec
   padding: 8px;
 }
 .pair.sel {
-  border-color: var(--zen-accent);
+  border-color: var(--zen-selected, var(--zen-accent));
 }
 .pair .check {
   top: 16px;

@@ -2,6 +2,7 @@
 No ComfyUI needed."""
 
 import math
+from pathlib import Path
 
 import pytest
 import torch
@@ -603,3 +604,34 @@ def test_conds_that_cannot_stack_get_their_own_call():
     parts = [151, 129, 151, 129, 77]
     assert batches(parts, lambda a, b: a == b) == [[0, 2], [1, 3], [4]]
     assert batches(parts, lambda a, b: True) == [[0, 1, 2, 3, 4]]
+
+
+def test_training_on_keeps_the_old_final_as_a_checkpoint(tmp_path, monkeypatch):
+    import sys
+    import types
+
+    fp = types.ModuleType("folder_paths")
+    fp.get_output_directory = lambda: str(tmp_path / "output")
+    fp.get_user_directory = lambda: str(tmp_path / "user")
+    fp.get_folder_paths = lambda _kind: []
+    monkeypatch.setitem(sys.modules, "folder_paths", fp)
+    from zentrainer.runs.extend import keep_final
+
+    store = RunStore(tmp_path / "runs")
+    rid = store.new_id()
+    store.create(rid, {"name": "x"})
+    loras = tmp_path / "output" / "zentrainer" / "loras"
+    final = loras / "x" / f"x_{rid}.safetensors"
+    state = tmp_path / "user" / "zentrainer" / "states" / rid / f"x_{rid}.pt"
+    for f in (final, state):
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(b"w")
+    store.append(rid, "checkpoints", {"step": 250, "path": str(loras / "checkpoints" / rid / "a.safetensors"), "final": False})
+    store.append(rid, "checkpoints", {"step": 500, "path": str(final), "lora_name": f"x/x_{rid}.safetensors",
+                                      "final": True, "state": str(state)})
+    row = keep_final(store, rid, store.read(rid, "checkpoints")[1], None)
+    assert not final.exists() and not state.exists()  # the new final can take the name
+    assert Path(row["path"]) == loras / "checkpoints" / rid / f"x_{rid}_step000500.safetensors"
+    assert Path(row["path"]).is_file() and Path(row["state"]).is_file()
+    assert row["lora_name"] == f"checkpoints/{rid}/x_{rid}_step000500.safetensors" and not row["final"]
+    assert store.read(rid, "checkpoints")[1] == row and store.read(rid, "checkpoints")[0]["step"] == 250

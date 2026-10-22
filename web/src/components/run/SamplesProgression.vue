@@ -78,7 +78,7 @@ onMounted(toEnd)
 
 <style scoped>
 .rowplay.on {
-  color: var(--zen-accent);
+  color: var(--zen-selected, var(--zen-accent));
 }
 .rowplay {
   flex: none;

@@ -7,6 +7,7 @@ import { computed, provide, ref, toRef } from 'vue'
 import { useRouter } from 'vue-router'
 import LossChart from '@/components/LossChart.vue'
 import StatusPill from '@/components/StatusPill.vue'
+import { downloadUrl } from '@/api/engine/runs'
 import { RUN, useRun } from '@/components/run/context'
 import RunCheckpoints from '@/components/run/RunCheckpoints.vue'
 import RunLoaded from '@/components/run/RunLoaded.vue'
@@ -21,8 +22,24 @@ const router = useRouter()
 
 const run = useRun(toRef(props, 'id'))
 provide(RUN, run)
-const { detail, error, busy, lrInput, status, running, total, marks, likeSteps, send, retryable, canResume, resumePoint, resume } = run
+const { detail, error, busy, lrInput, status, running, total, marks, likeSteps, send, retryable, canResume, resumePoint, resume, extendable, extend } = run
 const lrOpen = ref(false)
+// Train more: how many steps on, and what changes with the run's length
+const moreOpen = ref(false)
+const more = ref(1000)
+const moreNotes = computed(() => {
+  const s = detail.value?.spec
+  if (!s) return []
+  const out: string[] = []
+  if (s.optim.scheduler !== 'constant' && !['Automagic3', 'AdamWScheduleFree'].includes(s.optim.optimizer))
+    out.push(`Its ${s.optim.scheduler} schedule spreads over the new length, so the learning rate rises again partway.`)
+  if (s.dataset.stages?.length) out.push('Resolution stages are shares of the run: they switch at new steps.')
+  return out
+})
+async function trainMore() {
+  moreOpen.value = false
+  await extend(more.value)
+}
 // resolution stages for the speed strip: each lower stage trains until its `until`, then the
 // next resolution blends in over `stage_blend` of the run
 const stages = computed(() => {
@@ -37,6 +54,8 @@ const stages = computed(() => {
     label: `→ ${ladder[i + 1]?.resolution ?? d.resolution}`,
   }))
 })
+// the final LoRA, once there is one on disk
+const finalCk = computed(() => detail.value?.checkpoints.find((c) => c.final && c.size !== null))
 const modelFile = computed(() => {
   const m = detail.value?.spec.model
   return (m?.kind === 'split' ? m.unet_name : m?.ckpt_name) ?? ''
@@ -78,6 +97,17 @@ const modelFile = computed(() => {
           <ZenButton v-if="canResume" variant="primary" icon="mdi mdi-play-circle-outline" :disabled="!!busy" @click="resume()">
             {{ resumePoint ? `Resume from ${resumePoint}` : 'Restart' }}
           </ZenButton>
+          <div v-if="extendable" class="lr-wrap">
+            <ZenButton variant="primary" icon="mdi mdi-play-circle-outline" :disabled="!!busy" title="Carry on training from where it finished: optimizer, average and all" @click="moreOpen = !moreOpen">Train more</ZenButton>
+            <div v-if="moreOpen" class="lr-pop card more-pop">
+              <span class="eyebrow">More steps</span>
+              <ZenNumber v-model="more" :min="50" :step="250" :precision="0" size="sm" />
+              <span class="small muted">{{ total }} → {{ total + more }}. The final LoRA so far stays, as the step {{ total }} checkpoint.</span>
+              <span v-for="n in moreNotes" :key="n" class="small warn">{{ n }}</span>
+              <ZenButton size="sm" variant="primary" :disabled="!(more > 0)" @click="trainMore">Queue</ZenButton>
+            </div>
+          </div>
+          <a v-if="finalCk" :href="downloadUrl(id, finalCk.lora_name)" download><ZenButton icon="mdi mdi-download-outline" :title="`Download the final LoRA: ${finalCk.lora_name.split('/').pop()}`">Download</ZenButton></a>
           <ZenButton icon="mdi mdi-content-copy" title="New run with these settings" @click="router.push(`/runs/new?from=${id}`)">Duplicate</ZenButton>
         </div>
       </div>
@@ -168,6 +198,12 @@ const modelFile = computed(() => {
   padding: 12px;
   box-shadow: 0 10px 30px rgb(0 0 0 / 0.3);
   background: var(--zen-surface);
+}
+.more-pop {
+  width: 260px;
+}
+.more-pop .warn {
+  color: var(--zen-warn);
 }
 .err {
   border-color: var(--zen-danger);

@@ -562,8 +562,9 @@ onUnmounted(() => removeEventListener('keydown', onKey))
   cursor: pointer;
 }
 .seg button.on {
-  background: var(--zen-surface-2);
-  color: var(--zen-text);
+  background: var(--zen-selected-bg, var(--zen-surface-2));
+  color: var(--zen-selected-text, var(--zen-text));
+  box-shadow: inset 0 0 0 1px var(--zen-selected, var(--zen-accent));
 }
 .seg button:disabled {
   opacity: 0.4;
@@ -589,9 +590,9 @@ onUnmounted(() => removeEventListener('keydown', onKey))
   cursor: pointer;
 }
 .prompt.on {
-  color: var(--zen-text);
-  border-color: var(--zen-accent);
-  background: var(--zen-surface-2);
+  color: var(--zen-selected-text, var(--zen-text));
+  border-color: var(--zen-selected, var(--zen-accent));
+  background: var(--zen-selected-bg, var(--zen-surface-2));
 }
 .stepper {
   display: grid;

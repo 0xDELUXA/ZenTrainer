@@ -431,9 +431,9 @@ const when = (t: number) => new Date(t * 1000).toLocaleTimeString([], { hour: '2
   white-space: nowrap;
 }
 .chip.on {
-  color: var(--zen-text);
-  border-color: var(--zen-accent);
-  background: color-mix(in srgb, var(--zen-accent) 14%, transparent);
+  color: var(--zen-selected-text, var(--zen-text));
+  border-color: var(--zen-selected, var(--zen-accent));
+  background: var(--zen-selected-bg, color-mix(in srgb, var(--zen-selected, var(--zen-accent)) 14%, transparent));
 }
 .grid-wrap {
   overflow-x: auto;
@@ -577,7 +577,7 @@ const when = (t: number) => new Date(t * 1000).toLocaleTimeString([], { hour: '2
   cursor: pointer;
 }
 .h-item.on {
-  border-color: var(--zen-accent);
+  border-color: var(--zen-selected, var(--zen-accent));
 }
 .h-item img {
   width: 100%;

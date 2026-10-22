@@ -1,9 +1,10 @@
 <script setup lang="ts">
 // The rail's Checkpoints card: one line per saved step, newest first, with its likeness and
-// validation loss; the best one marked; hover a line to test it, train more from it, or copy
-// its name.
+// validation loss; the best one marked; hover a line to test it, train more from it, download it
+// or copy its name.
 import { ZenTip } from '@nynxz/zenkit-ui'
 import { computed, ref } from 'vue'
+import { downloadUrl } from '@/api/engine/runs'
 import { fmtBytes } from '@/stores/downloads'
 import { ckKind, useRunContext } from './context'
 
@@ -47,7 +48,7 @@ async function copy(text: string) {
 <template>
   <section class="card">
     <header class="sec-head">
-      <span class="sec-title"><ZenTip text="The LoRA saved along the way. Best: the highest likeness when faces are scored (a character), else the lowest validation loss. Hover a row to test it, train more from it, or copy its name">Checkpoints</ZenTip></span>
+      <span class="sec-title"><ZenTip text="The LoRA saved along the way. Best: the highest likeness when faces are scored (a character), else the lowest validation loss. Hover a row to test it, train more from it, download it or copy its name">Checkpoints</ZenTip></span>
       <span class="sec-sub">{{ saveLine }}</span>
     </header>
     <div v-if="!ckRows.length" class="muted small">
@@ -75,6 +76,7 @@ async function copy(text: string) {
           <RouterLink class="ib" :to="`/apps/test-lora?run=${id}&lora=${encodeURIComponent(c.lora_name)}`" title="Test: try it in Test LoRA, on this run's model"><i class="mdi mdi-flask-outline" /></RouterLink>
           <button v-if="resumable && !c.final && c.state" class="ib" title="Resume this run from here, optimizer state and all" @click="resumeFrom(c)"><i class="mdi mdi-play-outline" /></button>
           <RouterLink v-else class="ib" :to="`/runs/new?from=${id}&init=${encodeURIComponent(c.lora_name)}`" title="Train more: a new run with these settings that starts from this LoRA"><i class="mdi mdi-fast-forward-outline" /></RouterLink>
+          <a v-if="c.size !== null" class="ib" :href="downloadUrl(id, c.lora_name)" download :title="`Download ${c.lora_name.split('/').pop()}`"><i class="mdi mdi-download-outline" /></a>
           <button class="ib" :title="copied === c.lora_name ? 'Copied' : `Copy LoRA name: ${c.lora_name}`" @click="copy(c.lora_name)">
             <i :class="copied === c.lora_name ? 'mdi mdi-check' : 'mdi mdi-content-copy'" />
           </button>

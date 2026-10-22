@@ -235,6 +235,20 @@ export function useRun(id: Ref<string>) {
       busy.value = null
     }
   }
+  // a finished run whose final save kept its training state can train on from it
+  const extendable = computed(() => status.value === 'done' && !!detail.value?.checkpoints.some((c) => c.final && c.state))
+  async function extend(more: number) {
+    busy.value = 'extend'
+    error.value = null
+    try {
+      await engine.extend(id.value, total.value + more)
+      await load()
+    } catch (e) {
+      error.value = String((e as Error).message ?? e)
+    } finally {
+      busy.value = null
+    }
+  }
 
   return {
     id, detail, error, busy, lrInput, sampling, now, load,
@@ -242,7 +256,7 @@ export function useRun(id: Ref<string>) {
     wall, marks, nextSave, nextSample,
     likeSteps, likeLast, likeFirst, ckptVal, likeAt,
     queuedTries, queueTry, queueFinishedTries,
-    send, resumable, retryable, resumePoint, canResume, resumeFrom, resume,
+    send, resumable, retryable, resumePoint, canResume, resumeFrom, resume, extendable, extend,
   }
 }
 

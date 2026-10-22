@@ -528,11 +528,11 @@ watch([values, randomSeed, count], remember, { deep: true })
 }
 .aspect:hover,
 .aspect.on {
-  color: var(--zen-text);
+  color: var(--zen-selected-text, var(--zen-text));
 }
 .aspect.on {
-  border-color: var(--zen-accent);
-  background: color-mix(in srgb, var(--zen-accent) 10%, transparent);
+  border-color: var(--zen-selected, var(--zen-accent));
+  background: var(--zen-selected-bg, color-mix(in srgb, var(--zen-selected, var(--zen-accent)) 10%, transparent));
 }
 .wh {
   display: flex;
@@ -623,8 +623,9 @@ watch([values, randomSeed, count], remember, { deep: true })
   cursor: pointer;
 }
 .seg button.on {
-  background: var(--zen-surface-2);
-  color: var(--zen-text);
+  background: var(--zen-selected-bg, var(--zen-surface-2));
+  color: var(--zen-selected-text, var(--zen-text));
+  box-shadow: inset 0 0 0 1px var(--zen-selected, var(--zen-accent));
 }
 .icon-btn {
   width: 30px;
@@ -639,8 +640,8 @@ watch([values, randomSeed, count], remember, { deep: true })
   cursor: pointer;
 }
 .icon-btn.on {
-  color: var(--zen-accent);
-  border-color: color-mix(in srgb, var(--zen-accent) 50%, transparent);
+  color: var(--zen-selected, var(--zen-accent));
+  border-color: color-mix(in srgb, var(--zen-selected, var(--zen-accent)) 50%, transparent);
 }
 .err {
   color: var(--zen-danger);
@@ -809,7 +810,7 @@ watch([values, randomSeed, count], remember, { deep: true })
   cursor: pointer;
 }
 .mini.on {
-  border-color: var(--zen-accent);
+  border-color: var(--zen-selected, var(--zen-accent));
 }
 .mini img {
   width: 100%;

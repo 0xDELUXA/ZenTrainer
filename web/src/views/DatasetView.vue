@@ -284,8 +284,9 @@ onUnmounted(() => {
 }
 .seg button.on,
 .chip-btn.on {
-  background: var(--zen-surface-2);
-  color: var(--zen-text);
+  background: var(--zen-selected-bg, var(--zen-surface-2));
+  color: var(--zen-selected-text, var(--zen-text));
+  border-color: var(--zen-selected, var(--zen-accent));
 }
 .chip-btn {
   border: 1px solid color-mix(in srgb, var(--zen-border) 70%, transparent);
@@ -423,7 +424,7 @@ onUnmounted(() => {
   background: var(--zen-surface-2);
 }
 .icon-btn.on {
-  color: var(--zen-accent);
+  color: var(--zen-selected, var(--zen-accent));
 }
 .ds-body {
   display: grid;

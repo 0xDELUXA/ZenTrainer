@@ -124,6 +124,10 @@ export type Command = 'pause' | 'resume' | 'stop' | 'save' | 'sample' | 'set_lr'
 
 export const runPath = (id: string) => `/runs/${encodeURIComponent(id)}`
 
+/** a link that saves one of the run's LoRAs (by its lora_name; the final if left out) */
+export const downloadUrl = (id: string, lora?: string) =>
+  `/zentrainer/api${runPath(id)}/download${lora ? `?lora=${encodeURIComponent(lora)}` : ''}`
+
 export interface SampleProgress {
   run_id: string
   phase: 'requested' | 'sampling' | 'done'
@@ -171,6 +175,12 @@ export const runsApi = {
     call<{ run: RunMeta }>(`${runPath(id)}/resume`, {
       method: 'POST',
       body: JSON.stringify({ checkpoint, client_id: getClientId() }),
+    }).then((r) => r.run),
+  /** train a finished run on to `steps` in all, from its final state (the old final stays as a checkpoint) */
+  extend: (id: string, steps: number) =>
+    call<{ run: RunMeta }>(`${runPath(id)}/extend`, {
+      method: 'POST',
+      body: JSON.stringify({ steps, client_id: getClientId() }),
     }).then((r) => r.run),
 
 }

@@ -864,8 +864,9 @@ watch(path, load)
   cursor: pointer;
 }
 .seg button.on {
-  background: var(--zen-surface-2);
-  color: var(--zen-text);
+  background: var(--zen-selected-bg, var(--zen-surface-2));
+  color: var(--zen-selected-text, var(--zen-text));
+  box-shadow: inset 0 0 0 1px var(--zen-selected, var(--zen-accent));
 }
 .mini {
   border: 1px solid color-mix(in srgb, var(--zen-border) 70%, transparent);
@@ -964,9 +965,9 @@ watch(path, load)
   cursor: pointer;
 }
 .chip.on {
-  background: var(--zen-surface-2);
-  color: var(--zen-text);
-  border-color: var(--zen-accent);
+  background: var(--zen-selected-bg, var(--zen-surface-2));
+  color: var(--zen-selected-text, var(--zen-text));
+  border-color: var(--zen-selected, var(--zen-accent));
 }
 .list-tools {
   display: flex;
@@ -1004,13 +1005,13 @@ watch(path, load)
   opacity: 0.4;
 }
 .tile.current {
-  border-color: var(--zen-accent);
+  border-color: var(--zen-selected, var(--zen-accent));
 }
 .tile.sel {
-  border-color: color-mix(in srgb, var(--zen-accent) 55%, transparent);
+  border-color: color-mix(in srgb, var(--zen-selected, var(--zen-accent)) 55%, transparent);
 }
 .tile.current.sel {
-  border-color: var(--zen-accent);
+  border-color: var(--zen-selected, var(--zen-accent));
 }
 .tile-mask {
   position: absolute;

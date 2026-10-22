@@ -91,8 +91,8 @@ const { zoom, inputs, fit, showMasks, activeSet, cap, selected, isMuted, setMute
   border-color: color-mix(in srgb, var(--zen-accent) 60%, transparent);
 }
 .card-item.sel {
-  border-color: var(--zen-accent);
-  box-shadow: 0 0 0 1px var(--zen-accent);
+  border-color: var(--zen-selected, var(--zen-accent));
+  box-shadow: 0 0 0 1px var(--zen-selected, var(--zen-accent));
 }
 /* every card the same size: a square thumbnail (image positioned inside, so its own
    aspect can't stretch the card) over a fixed-height caption block */

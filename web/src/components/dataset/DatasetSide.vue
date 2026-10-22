@@ -347,8 +347,9 @@ function onCaptioned(set: string) {
   cursor: pointer;
 }
 .cap-tabs button.on {
-  background: var(--zen-surface-2);
-  color: var(--zen-text);
+  background: var(--zen-selected-bg, var(--zen-surface-2));
+  color: var(--zen-selected-text, var(--zen-text));
+  box-shadow: inset 0 0 0 1px var(--zen-selected, var(--zen-accent));
 }
 .faces-line {
   display: flex;
@@ -409,10 +410,10 @@ function onCaptioned(set: string) {
   background: var(--zen-surface-2);
 }
 .input-set.on {
-  color: var(--zen-text);
+  color: var(--zen-selected-text, var(--zen-text));
 }
 .input-set.on i {
-  color: var(--zen-accent);
+  color: var(--zen-selected, var(--zen-accent));
 }
 .icon-btn {
   width: 28px;

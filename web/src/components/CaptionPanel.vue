@@ -550,7 +550,7 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
   white-space: nowrap;
 }
 .mini.on {
-  color: var(--zen-accent);
+  color: var(--zen-selected, var(--zen-accent));
 }
 .told {
   display: flex;
@@ -641,8 +641,9 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
   white-space: nowrap;
 }
 .seg button.on {
-  background: var(--zen-surface-2);
-  color: var(--zen-text);
+  background: var(--zen-selected-bg, var(--zen-surface-2));
+  color: var(--zen-selected-text, var(--zen-text));
+  box-shadow: inset 0 0 0 1px var(--zen-selected, var(--zen-accent));
 }
 .seg button:disabled {
   opacity: 0.4;
@@ -859,10 +860,10 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
 }
 .chip-s:hover,
 .chip-s.on {
-  border-color: var(--zen-accent);
+  border-color: var(--zen-selected, var(--zen-accent));
 }
 .chip-s.on i {
-  color: var(--zen-accent);
+  color: var(--zen-selected, var(--zen-accent));
 }
 .choices {
   display: flex;

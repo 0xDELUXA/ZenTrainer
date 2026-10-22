@@ -152,8 +152,9 @@ const gridSize = computed(() => thumbPick.value ?? fitSize.value)
   border: 1px solid color-mix(in srgb, var(--zen-border) 70%, transparent);
 }
 .seg button.on {
-  background: var(--zen-surface-2);
-  color: var(--zen-text);
+  background: var(--zen-selected-bg, var(--zen-surface-2));
+  color: var(--zen-selected-text, var(--zen-text));
+  box-shadow: inset 0 0 0 1px var(--zen-selected, var(--zen-accent));
 }
 .seg button:hover:not(:disabled),
 .chip-btn:hover:not(:disabled) {

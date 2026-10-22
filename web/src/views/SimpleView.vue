@@ -563,8 +563,9 @@ void leaving
 }
 .kinds button.on,
 .seg button.on {
-  background: var(--zen-surface-2);
-  color: var(--zen-text);
+  background: var(--zen-selected-bg, var(--zen-surface-2));
+  color: var(--zen-selected-text, var(--zen-text));
+  box-shadow: inset 0 0 0 1px var(--zen-selected, var(--zen-accent));
 }
 .seg button:disabled {
   opacity: 0.4;
@@ -867,8 +868,8 @@ void leaving
   background: var(--zen-surface-2);
 }
 .ds.on {
-  border-color: var(--zen-accent);
-  background: color-mix(in srgb, var(--zen-accent) 8%, transparent);
+  border-color: var(--zen-selected, var(--zen-accent));
+  background: var(--zen-selected-bg, color-mix(in srgb, var(--zen-selected, var(--zen-accent)) 8%, transparent));
 }
 .ds-thumb {
   width: 36px;

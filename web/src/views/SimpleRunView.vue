@@ -547,8 +547,8 @@ async function tryIt() {
   cursor: pointer;
 }
 .strip button.on {
-  border-color: var(--zen-accent);
-  color: var(--zen-text);
+  border-color: var(--zen-selected, var(--zen-accent));
+  color: var(--zen-selected-text, var(--zen-text));
 }
 .strip img,
 .strip video {

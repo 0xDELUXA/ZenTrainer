@@ -106,9 +106,9 @@ const SORTS = [
   color: var(--zen-text);
 }
 .sort.on {
-  color: var(--zen-text);
+  color: var(--zen-selected-text, var(--zen-text));
   border-color: color-mix(in srgb, var(--zen-border) 80%, transparent);
-  background: var(--zen-surface-2);
+  background: var(--zen-selected-bg, var(--zen-surface-2));
 }
 .row {
   display: grid;
@@ -118,8 +118,8 @@ const SORTS = [
   padding: 8px 10px;
 }
 .row.sel {
-  border-color: color-mix(in srgb, var(--zen-accent) 60%, transparent);
-  background: color-mix(in srgb, var(--zen-accent) 8%, transparent);
+  border-color: color-mix(in srgb, var(--zen-selected, var(--zen-accent)) 60%, transparent);
+  background: var(--zen-selected-bg, color-mix(in srgb, var(--zen-selected, var(--zen-accent)) 8%, transparent));
 }
 .row.dirty .cap-edit {
   border-color: color-mix(in srgb, var(--zen-accent) 60%, transparent);
@@ -134,7 +134,7 @@ const SORTS = [
   cursor: pointer;
 }
 .row.sel .c-check {
-  color: var(--zen-accent);
+  color: var(--zen-selected, var(--zen-accent));
 }
 .c-thumb {
   width: 64px;

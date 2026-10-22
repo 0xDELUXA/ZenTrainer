@@ -83,10 +83,10 @@ const { runPresets, applied, applyPreset, savePreset, editing, retrying, resumin
 }
 .preset:hover,
 .preset.on {
-  border-color: var(--zen-accent);
+  border-color: var(--zen-selected, var(--zen-accent));
 }
 .preset.on {
-  background: color-mix(in srgb, var(--zen-accent) 16%, transparent);
+  background: var(--zen-selected-bg, color-mix(in srgb, var(--zen-selected, var(--zen-accent)) 16%, transparent));
 }
 .preset.ghost {
   color: var(--zen-muted);

@@ -198,8 +198,9 @@ onMounted(() => {
 }
 .seg button.on,
 .chip-btn.on {
-  background: var(--zen-surface-2);
-  color: var(--zen-text);
+  background: var(--zen-selected-bg, var(--zen-surface-2));
+  color: var(--zen-selected-text, var(--zen-text));
+  border-color: var(--zen-selected, var(--zen-accent));
 }
 .seg button:hover {
   color: var(--zen-text);

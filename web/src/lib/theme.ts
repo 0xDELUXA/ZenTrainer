@@ -163,6 +163,7 @@ export function setTheme(id: string, preferred: ThemeMode, save = true): void {
     if (v) tokens[k] = v
   }
   for (const [k, v] of Object.entries(zenAliases(tokens))) root.style.setProperty(k, v)
+  for (const [k, v] of Object.entries(selectionTokens())) root.style.setProperty(k, v)
   root.style.colorScheme = applied
   root.dataset.mode = applied
 
@@ -183,6 +184,44 @@ export function setTheme(id: string, preferred: ThemeMode, save = true): void {
   }
   updateFavicon()
   if (save) fetch(`/settings/${SERVER_KEY}`, { method: 'POST', body: JSON.stringify(currentTheme.value) }).catch(() => {})
+}
+
+// What's selected has to read at a glance in every pack, but a pack's accent can sit almost on
+// its card (Strawberry Milk's pale pink on white) and its second surface nearly match the card
+// (Cute Hearts). So selection gets its own tokens: the accent moved toward the text colour until
+// it stands 3:1 off the card (WCAG's contrast for UI parts), and a tint of that behind.
+// UPSTREAM: belongs in zenAliases.
+function rgbOf(color: string): [number, number, number] | null {
+  const probe = document.createElement('span')
+  probe.style.color = color
+  document.body.append(probe)
+  const resolved = getComputedStyle(probe).color // rgb(), or oklch() as written: the canvas reads either
+  probe.remove()
+  const ctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true })
+  if (!ctx) return null
+  ctx.fillStyle = '#000'
+  ctx.fillStyle = resolved
+  ctx.fillRect(0, 0, 1, 1)
+  const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data
+  return [r!, g!, b!]
+}
+const luminance = (c: number[]) =>
+  c.map((v) => (v / 255 <= 0.03928 ? v / 255 / 12.92 : ((v / 255 + 0.055) / 1.055) ** 2.4)).reduce((s, v, i) => s + v * [0.2126, 0.7152, 0.0722][i]!, 0)
+const contrast = (a: number[], b: number[]) => {
+  const [x, y] = [luminance(a), luminance(b)].sort((p, q) => q - p)
+  return (x! + 0.05) / (y! + 0.05)
+}
+const hex = (c: number[]) => `#${c.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('')}`
+
+function selectionTokens(): Record<string, string> {
+  const accent = rgbOf('var(--zen-accent)')
+  const surface = rgbOf('var(--zen-surface)')
+  const text = rgbOf('var(--zen-text)')
+  if (!accent || !surface || !text) return {}
+  let strong: number[] = accent
+  for (let t = 0.05; contrast(strong, surface) < 3 && t <= 1; t += 0.05) strong = accent.map((v, i) => v + (text[i]! - v) * t)
+  const bg = strong.map((v, i) => surface[i]! + (v - surface[i]!) * 0.24)
+  return { '--zen-selected': hex(strong), '--zen-selected-bg': hex(bg), '--zen-selected-text': hex(text) }
 }
 
 /** Flip light/dark. Returns false when the active pack only has one mode. */

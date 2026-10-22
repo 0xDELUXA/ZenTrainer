@@ -221,9 +221,9 @@ const short = (n: string) => n.split('/').at(-1)!.replace(/\.safetensors$/, '')
   gap: 4px;
 }
 .chip.on {
-  color: var(--zen-text);
-  border-color: var(--zen-accent);
-  background: color-mix(in srgb, var(--zen-accent) 14%, transparent);
+  color: var(--zen-selected-text, var(--zen-text));
+  border-color: var(--zen-selected, var(--zen-accent));
+  background: var(--zen-selected-bg, color-mix(in srgb, var(--zen-selected, var(--zen-accent)) 14%, transparent));
 }
 .loras,
 .lora-pick {

@@ -277,8 +277,9 @@ p {
   font-size: 12px;
 }
 .segmented button.on {
-  background: var(--zen-surface-2);
-  color: var(--zen-text);
+  background: var(--zen-selected-bg, var(--zen-surface-2));
+  color: var(--zen-selected-text, var(--zen-text));
+  box-shadow: inset 0 0 0 1px var(--zen-selected, var(--zen-accent));
 }
 .pack-head {
   display: flex;
@@ -315,8 +316,8 @@ p {
   border-color: var(--zen-muted);
 }
 .pack.active {
-  border-color: var(--zen-accent);
-  box-shadow: 0 0 0 1px var(--zen-accent);
+  border-color: var(--zen-selected, var(--zen-accent));
+  box-shadow: 0 0 0 1px var(--zen-selected, var(--zen-accent));
 }
 /* the pack in miniature: its background, a card, a line of text, its primary button */
 .sw {
