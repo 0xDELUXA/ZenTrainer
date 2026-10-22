@@ -16,6 +16,7 @@ picks the sets it trains from (DatasetSpec.control_sets).
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import logging
@@ -81,16 +82,194 @@ class Dataset:
     owners: list[int] = field(default_factory=list)  # sample -> the scanned item it came from (a video gives several)
 
 
-def caption_sets(img: Path, caption_ext: str = ".txt") -> dict[str, str]:
-    """All caption sets for an image: <stem>.txt is "default", <stem>.<set>.txt the rest."""
+DISK_FIELDS = ("latent", "mask", "refs", "cond", "cond_empty")
+
+
+@functools.lru_cache(maxsize=8)  # a step reads a sample's file several times; a few stay
+def _disk_load(file: str) -> dict:
+    return torch.load(file, weights_only=False)
+
+
+class DiskSample:
+    """A Sample whose tensors stay in a file of its own until a step reads them (dataset.disk_cache):
+    the same fields, read through a small LRU, so a dataset needn't fit in RAM."""
+
+    def __init__(self, file: Path, shape, caption: int, variants: list[int], has_refs: bool, has_cond: bool,
+                 has_mask: bool = False):
+        self.file, self.shape, self.caption, self.variants = str(file), tuple(shape), caption, variants
+        self.has_refs, self.has_cond, self.has_mask = has_refs, has_cond, has_mask
+        self.audio = None
+
+    def __getattr__(self, name):
+        if name in DISK_FIELDS:
+            return _disk_load(self.file).get(name)
+        raise AttributeError(name)
+
+
+def _bf16(x):
+    if isinstance(x, torch.Tensor):
+        return x.to(torch.bfloat16) if x.is_floating_point() else x
+    if isinstance(x, dict):
+        return {k: _bf16(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return type(x)(_bf16(v) for v in x)
+    return x
+
+
+def _write_sample(file: Path, fields: dict) -> None:
+    tmp = file.with_suffix(".tmp")
+    torch.save(_bf16(fields), tmp)
+    os.replace(tmp, file)
+
+
+DISK_BATCH = 32  # pictures of one size per VAE call: ComfyUI stages the VAE for every call (and splits a batch by free memory)
+
+
+def _inputs_of(spec, it) -> list:
+    """The pictures a pair trains from: its inputs, or for channel inputs each set's first (None where
+    a set has none)."""
+    if not (spec.edit and it.controls):
+        return []
+    if spec.edit_method == "concat":
+        return [next(iter(it.control_sets.get(c, [])), None) for c in spec.control_sets]
+    return it.controls
+
+
+def _disk_samples(spec, items, variants, cap_index, sizes, vae, folder: Path, progress, total: int):
+    """disk_cache's pictures, each to folder/NNNNNN.pt. A file already there (a build cut short:
+    they're written whole) is kept; the rest are encoded a batch of one size at a time, the next
+    batch decoding while the VAE works. Returns (samples, owners, grounded still to encode)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from PIL import Image
+
+    grounding = spec.edit and spec.edit_grounded and spec.edit_method != "concat"
+    samples: list = [None] * len(items)
+    grounded = []
+    todo: dict[tuple, list[int]] = {}
+    for f in folder.glob("*.tmp"):
+        f.unlink(missing_ok=True)
+    for n, it in enumerate(items):
+        idx = [cap_index[t] for t in variants[n]]
+        file = folder / f"{n:06d}.pt"
+        if file.is_file():
+            try:
+                kept = torch.load(file, weights_only=False, mmap=True)
+            except Exception:  # noqa: BLE001 - unreadable: encode it again
+                kept = None
+            if kept is not None:
+                has = kept.get("cond") is not None
+                samples[n] = DiskSample(file, kept["latent"].shape, idx[0], idx, kept.get("refs") is not None,
+                                        has or bool(grounding and it.controls), kept.get("mask") is not None)
+                if grounding and not has and it.controls:
+                    grounded.append((n, it.controls, variants[n][0]))
+                continue
+        with Image.open(it.path) as im:
+            size = pick_bucket(*im.size, sizes)
+        todo.setdefault(size, []).append(n)
+    if any(s is not None for s in samples):
+        logging.info("[ZenTrainer] disk cache: %d of %d pictures already encoded, carrying on",
+                     sum(s is not None for s in samples), len(items))
+
+    def load(n: int, size):
+        it = items[n]
+        inputs = _inputs_of(spec, it)
+        for c in inputs:
+            if c is None:
+                continue
+            with Image.open(c) as cim:
+                cw, ch = cim.size
+            if abs((cw / ch) / (size[0] / size[1]) - 1) > (0.02 if spec.edit_method == "concat" else 0.08):
+                logging.warning("[ZenTrainer] %s is a different shape from %s: it's cropped to match, which cuts "
+                                "part of it off", f"{c.parent.name}/{c.name}", it.path.name)
+        mask = load_image(it.mask, size, mode="L")[None, None] if it.mask else None
+        return load_image(it.path, size), [load_image(c, size) if c is not None else None for c in inputs], mask
+
+    batches = [(size, ns[i:i + DISK_BATCH]) for size, ns in todo.items() for i in range(0, len(ns), DISK_BATCH)]
+    done = len(items) - sum(len(ns) for ns in todo.values())
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        ahead = [pool.submit(load, n, batches[0][0]) for n in batches[0][1]] if batches else []
+        for b, (size, ns) in enumerate(batches):
+            loaded = [f.result() for f in ahead]
+            if b + 1 < len(batches):  # the next batch decodes while this one encodes
+                ahead = [pool.submit(load, n, batches[b + 1][0]) for n in batches[b + 1][1]]
+            targets = _encode_batch(vae, torch.stack([t for t, _, _ in loaded]), [items[n].path for n in ns])
+            pics = [(j, k, px) for j, (_, ins, _) in enumerate(loaded) for k, px in enumerate(ins) if px is not None]
+            refs_out = _encode_batch(vae, torch.stack([px for _, _, px in pics]), [items[ns[j]].path for j, _, _ in pics]) if pics else []
+            for j, n in enumerate(ns):
+                it, (_, ins, m) = items[n], loaded[j]
+                refs = None
+                if ins:
+                    refs = [None] * len(ins)
+                    for (jj, k, _), lat in zip(pics, refs_out):
+                        if jj == j:
+                            refs[k] = lat
+                latent = targets[j]
+                mask = torch.nn.functional.interpolate(m, size=tuple(latent.shape[-2:]), mode="area")[0, 0] if m is not None else None
+                file = folder / f"{n:06d}.pt"
+                _write_sample(file, {"latent": latent, "mask": mask, "refs": refs})
+                idx = [cap_index[t] for t in variants[n]]
+                samples[n] = DiskSample(file, latent.shape, idx[0], idx, refs is not None,
+                                        bool(grounding and it.controls), mask is not None)
+                if grounding and it.controls:
+                    grounded.append((n, it.controls, variants[n][0]))
+            done += len(ns)
+            if progress:
+                progress(done, total, f"encoding {items[ns[-1]].path.name}")
+    grounded.sort()
+    return samples, list(range(len(items))), grounded
+
+
+def _encode_batch(vae, pixels: torch.Tensor, paths: list) -> list:
+    """(B, H, W, 3) pictures of one size -> their latents, one VAE call; as _encode, never a NaN cached."""
+    latents = vae.encode(pixels).detach().cpu()
+    for lat, p in zip(latents, paths):
+        if not torch.isfinite(lat).all():
+            raise ValueError(f"the VAE returned NaN/inf for {Path(p).name}. The VAE is likely broken or missing "
+                             "weights (check ComfyUI's log for 'Missing VAE keys'); try a separate VAE file")
+    return list(latents)
+
+
+def has_inputs(s) -> bool:
+    """An edit pair: it has reference latents or its own (grounded) conditioning, without reading
+    a disk sample's file."""
+    if isinstance(s, DiskSample):
+        return s.has_refs or s.has_cond
+    return s.refs is not None or s.cond is not None
+
+
+def has_mask(s) -> bool:
+    return s.has_mask if isinstance(s, DiskSample) else s.mask is not None
+
+
+def sample_shape(s) -> tuple:
+    return s.shape if isinstance(s, DiskSample) else tuple(s.latent.shape)
+
+
+def caption_index(files, caption_ext: str = ".txt") -> dict[str, dict[str, str]]:
+    """A folder's caption sets from its file names, read once: stem -> {set: file name}. (A set
+    name has no dot, so <stem>.<set>.txt splits at its last one.)"""
+    out: dict[str, dict[str, str]] = {}
+    for f in files:
+        if not f.endswith(caption_ext):
+            continue
+        stem, _, name = f[: -len(caption_ext)].rpartition(".")
+        if stem and SET_NAME.match(name):
+            out.setdefault(stem, {})[name] = f
+    return out
+
+
+def caption_sets(img: Path, caption_ext: str = ".txt", index: dict[str, dict[str, str]] | None = None) -> dict[str, str]:
+    """All caption sets for an image: <stem>.txt is "default", <stem>.<set>.txt the rest. `index`:
+    its folder's caption_index (scan passes it: globbing the folder per picture is quadratic)."""
     out = {}
     default = img.with_suffix(caption_ext)
     if default.is_file():
         out["default"] = default.read_text(encoding="utf-8").strip()
-    for p in img.parent.glob(f"{glob_escape(img.stem)}.*{caption_ext}"):
-        name = p.name[len(img.stem) + 1 : -len(caption_ext)]
-        if SET_NAME.match(name):
-            out[name] = p.read_text(encoding="utf-8").strip()
+    if index is None:
+        index = caption_index((p.name for p in img.parent.glob(f"{glob_escape(img.stem)}.*{caption_ext}")), caption_ext)
+    for name, f in index.get(img.stem, {}).items():
+        out[name] = (img.parent / f).read_text(encoding="utf-8").strip()
     return out
 
 
@@ -188,11 +367,12 @@ def scan(root: Path, caption_ext: str = ".txt", warn: bool = True) -> list[Item]
         if head.isdigit() and "_" in d.name:
             repeats = max(1, int(head))
         index = control_index(d)
+        captions = caption_index(files, caption_ext)
         for f in sorted(files):
             p = d / f
             if p.suffix.lower() not in MEDIA_EXTS or is_mask_file(p) or is_control_file(p):
                 continue
-            caps = caption_sets(p, caption_ext)
+            caps = caption_sets(p, caption_ext, captions)
             if "default" not in caps and warn:
                 logging.warning("[ZenTrainer] no caption for %s; training it with an empty caption", p.name)
             sets = find_control_sets(p, index)
@@ -254,6 +434,8 @@ def apply_trigger(text: str, trigger: str, prepend: bool) -> str:
 def cache_key(items: list[Item], spec: DatasetSpec, encoder_id: str) -> str:
     h = hashlib.sha256()
     h.update(json.dumps([spec.resolution, spec.buckets, spec.bucket_step, encoder_id]).encode())
+    if spec.disk_cache:
+        h.update(b"disk")
     if any(is_video(it.path) for it in items):  # only then: image datasets keep their caches
         h.update(json.dumps([spec.video_frames, spec.video_fps, spec.video_mode, spec.video_clips,
                              spec.video_resolution]).encode())
@@ -345,7 +527,7 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
     texts = TextCache(cache_dir, encoder_id)
     if (path / "dataset.pt").is_file():
         try:
-            ds = _from_plain(torch.load(path / "dataset.pt", weights_only=False), texts)
+            ds = _from_plain(torch.load(path / "dataset.pt", weights_only=False), texts, path)
         except Exception as e:  # noqa: BLE001 - cut short or from an older build: rebuild it
             logging.warning("[ZenTrainer] dataset cache %s couldn't be read (%s); rebuilding it", key, e)
             shutil.rmtree(path, ignore_errors=True)
@@ -364,14 +546,22 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
                    else [(spec.video_resolution, spec.video_resolution)])
     lengths = None  # the clip lengths this VAE encodes exactly, worked out on the first video
 
-    samples: list[Sample] = []
+    disk = spec.disk_cache
+    if disk:
+        if h3 or any(is_video(it.path) for it in items):
+            raise ValueError("the disk cache is for picture datasets (not videos or MiniMax H3)")
+        (path / "samples").mkdir(parents=True, exist_ok=True)
+    samples: list = []
     owners: list[int] = []
     grounded: list[tuple[int, list[Path], str]] = []  # (sample, inputs, caption): encoded with the captions
+    if disk:
+        samples, owners, grounded = _disk_samples(spec, items, variants, cap_index, sizes, vae, path / "samples",
+                                                  progress, len(items) + len(captions))
     # MiniMax H3: (sample, inputs, first frame, last frame, caption, (w, h), frames), each sample's
     # conditioning built by ComfyUI's own H3 nodes after the pictures
     h3_jobs: list[tuple] = []
     sounds: list[tuple[int, Path, float, float]] = []  # (sample, video, t0, t1): encoded after the pictures
-    for n, it in enumerate(items):
+    for n, it in enumerate([] if disk else items):
         idx = [cap_index[t] for t in variants[n]]
         if is_video(it.path):
             p = video.probe(it.path)
@@ -430,7 +620,7 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
                     cw, ch = cim.size
                 if abs((cw / ch) / (size[0] / size[1]) - 1) > (0.02 if concat else 0.08):
                     logging.warning("[ZenTrainer] %s is a different shape from %s: it's cropped to match, which "
-                                    "cuts part of it off%s", c.name, it.path.name,
+                                    "cuts part of it off%s", f"{c.parent.name}/{c.name}", it.path.name,
                                     " (channel inputs line up pixel for pixel: make it the same shape)" if concat else "")
             refs = [_encode(vae, load_image(c, size).unsqueeze(0), c) if c is not None else None for c in inputs]
             if spec.edit_grounded and not concat:  # channel inputs reach the model, not its encoder
@@ -448,8 +638,16 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
         if progress and k % 10 == 0:
             progress(k + 1, len(sounds), f"encoding soundtracks ({path.name})")
 
+    # disk-cached grounded pairs carry their own conditioning: their plain captions aren't needed
+    # (thousands of them would be most of RAM)
+    needed = None
+    if disk:
+        needed = {""} | {captions[v] for sm in samples if not sm.has_cond for v in sm.variants}
     conditionings = []
     for n, c in enumerate(captions):
+        if needed is not None and c not in needed:
+            conditionings.append(None)
+            continue
         cond = texts.get(c)
         if cond is None:
             cond = _to_cpu(clip.encode_from_tokens_scheduled(clip.tokenize(c)))
@@ -463,9 +661,13 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
 
         for k, (i, inputs, text) in enumerate(grounded):
             pics = [grounding_pixels(c, clip) for c in inputs]
-            samples[i].cond = _to_cpu(encode_grounded(clip, text, pics))
-            if spec.caption_dropout:
-                samples[i].cond_empty = _to_cpu(encode_grounded(clip, "", pics))
+            cond = _to_cpu(encode_grounded(clip, text, pics))
+            empty = _to_cpu(encode_grounded(clip, "", pics)) if spec.caption_dropout else None
+            if disk:  # after every picture, as in RAM: the VAE and the text encoder each load once
+                fields = dict(torch.load(samples[i].file, weights_only=False))
+                _write_sample(Path(samples[i].file), {**fields, "cond": cond, "cond_empty": empty})
+            else:
+                samples[i].cond, samples[i].cond_empty = cond, empty
             if progress:
                 progress(k + 1, len(grounded), "encoding instructions with their pictures")
 
@@ -613,6 +815,16 @@ def _encode_audio(audio_vae, path: Path, t0: float, t1: float) -> torch.Tensor |
 
 
 def _to_plain(ds: Dataset, texts: "TextCache | None" = None) -> dict:
+    if ds.samples and isinstance(ds.samples[0], DiskSample):
+        return {
+            "version": 5,  # disk samples: their tensors in samples/, captions in the text cache
+            "text_keys": [texts.key(c) if cond is not None else None for c, cond in zip(ds.captions, ds.conditionings)],
+            "disk": [[Path(s.file).name, list(s.shape), s.caption, s.variants, s.has_refs, s.has_cond, s.has_mask]
+                     for s in ds.samples],
+            "captions": ds.captions,
+            "empty_caption": ds.empty_caption,
+            "owners": ds.owners,
+        }
     return {
         # 4: the captions' encodings are in the text cache (named by "text_keys"), not in here
         "version": 4 if texts else 3,
@@ -632,7 +844,17 @@ def _to_plain(ds: Dataset, texts: "TextCache | None" = None) -> dict:
     }
 
 
-def _from_plain(d: dict, texts: "TextCache | None" = None) -> Dataset:
+def _from_plain(d: dict, texts: "TextCache | None" = None, where: Path | None = None) -> Dataset:
+    if d.get("disk") is not None:
+        if texts is None or where is None:
+            raise ValueError("a disk cache reads its samples from its folder and captions from the text cache")
+        samples = [DiskSample(where / "samples" / name, *rest) for name, *rest in d["disk"]]
+        if not all(Path(sm.file).is_file() for sm in samples):
+            raise FileNotFoundError("a sample's file is gone from the disk cache")
+        conditionings = [texts.get(c) if k is not None else None for c, k in zip(d["captions"], d["text_keys"])]
+        if any(cond is None and k is not None for cond, k in zip(conditionings, d["text_keys"])):
+            raise FileNotFoundError("a caption's encoding is gone from the text cache")
+        return Dataset(samples, conditionings, d["captions"], d["empty_caption"], owners=d["owners"])
     masks = d.get("masks") or [None] * len(d["latents"])
     variants = d.get("variants") or [[c] for c in d["caption_idx"]]
     audio = d.get("audio") or [None] * len(d["latents"])
@@ -659,7 +881,7 @@ def _expand_repeats(ds: Dataset, items: list[Item]) -> Dataset:
         order += [i] * items[owner].repeats
     buckets: dict[tuple, list[int]] = {}
     for i in order:
-        buckets.setdefault(tuple(ds.samples[i].latent.shape), []).append(i)
+        buckets.setdefault(sample_shape(ds.samples[i]), []).append(i)
     ds.buckets = buckets
     return ds
 

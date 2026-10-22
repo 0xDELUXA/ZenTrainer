@@ -69,6 +69,9 @@ class DatasetSpec:
     # the text encoder sees the input pictures too (Qwen3-VL based: Krea 2, Qwen Image), as
     # krea2edit's identity edits do: conditioning becomes per image, encoded when the dataset caches
     edit_grounded: bool = False
+    # each picture's latents (and its own conditioning) in a file of its own, read when a step uses
+    # it, in bf16: for picture datasets bigger than RAM (thousands of grounded edit pairs)
+    disk_cache: bool = False
     # MiniMax H3 image-to-video: each clip conditioned on its own first frame ("first") or first
     # and last ("first_last"), as the fl2va model is at inference; the text encoder sees them too
     keyframes: str = ""

@@ -36,6 +36,8 @@ export interface TrainSpec {
     control_dropout?: number
     edit_template?: string
     edit_grounded?: boolean
+    /** each picture's latents in a file of its own, read as training uses them: datasets bigger than RAM */
+    disk_cache?: boolean
     keyframes?: string
     clip_stills?: boolean
     unmasked_weight: number

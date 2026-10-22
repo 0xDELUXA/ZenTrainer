@@ -6,6 +6,7 @@ Every path from a request is resolved and checked to stay inside its dataset fol
 from __future__ import annotations
 
 
+import os
 import re
 from pathlib import Path
 
@@ -45,31 +46,57 @@ def _inside(d: Path, rel: str) -> Path:
     return p
 
 
+# each dataset's summary, kept while none of its folders changed (a file added, removed or
+# rewritten: ZenTrainer's writes all swap a file in, which touches its folder), so the datasets
+# page doesn't scan thousands of pictures on every visit
+_summaries: dict[str, tuple[tuple, dict | None]] = {}
+
+
+def _stamp(d: Path) -> tuple:
+    out = []
+    for dirpath, _dirs, _files in os.walk(d):
+        try:
+            out.append((dirpath, os.stat(dirpath).st_mtime_ns))
+        except OSError:
+            pass
+    return tuple(out)
+
+
 def summary() -> list[dict]:
     r = root()
     out = []
     for d in sorted(p for p in r.iterdir() if p.is_dir() and not p.name.startswith((".", "_"))):
-        items = scan(d, warn=False)
-        if not items:
-            continue
-        stats = [i.path.stat() for i in items if i.path.exists()]
-        out.append({
-            "folder": d.name,
-            "images": len(items),
-            "masked": sum(1 for i in items if getattr(i, "mask", None)),
-            "pairs": sum(1 for i in items if i.control_sets),
-            "control_sets": control_counts(items),
-            "health": _health(d.name),
-            "bytes": sum(st.st_size for st in stats),
-            "modified": max((st.st_mtime for st in stats), default=0),
-            "videos": sum(1 for i in items if video.is_video(i.path)),
-            "steps_per_epoch": sum(i.repeats for i in items),
-            "captioned": sum(1 for i in items if i.caption),
-            "sets": sorted({s for i in items for s in i.captions} | {"default"}, key=lambda s: (s != "default", s)),
-            "thumbs": [{"subfolder": str(i.path.parent.relative_to(r)), "filename": i.path.name,
-                        "path": str(i.path.relative_to(d))} for i in items[:8]],
-        })
+        stamp = _stamp(d)
+        kept = _summaries.get(str(d))
+        if kept is None or kept[0] != stamp:
+            kept = (stamp, _summary(d, r))
+            _summaries[str(d)] = kept
+        if kept[1] is not None:
+            out.append({**kept[1], "health": _health(d.name)})  # stats snapshots change on their own
     return out
+
+
+def _summary(d: Path, r: Path) -> dict | None:
+    items = scan(d, warn=False)
+    if not items:
+        return None
+    stats = [i.path.stat() for i in items if i.path.exists()]
+    return {
+        "folder": d.name,
+        "images": len(items),
+        "masked": sum(1 for i in items if getattr(i, "mask", None)),
+        "pairs": sum(1 for i in items if i.control_sets),
+        "control_sets": control_counts(items),
+        "health": _health(d.name),
+        "bytes": sum(st.st_size for st in stats),
+        "modified": max((st.st_mtime for st in stats), default=0),
+        "videos": sum(1 for i in items if video.is_video(i.path)),
+        "steps_per_epoch": sum(i.repeats for i in items),
+        "captioned": sum(1 for i in items if i.caption),
+        "sets": sorted({s for i in items for s in i.captions} | {"default"}, key=lambda s: (s != "default", s)),
+        "thumbs": [{"subfolder": str(i.path.parent.relative_to(r)), "filename": i.path.name,
+                    "path": str(i.path.relative_to(d))} for i in items[:8]],
+    }
 
 
 def _set(name: str) -> str:
@@ -113,18 +140,30 @@ def _health(name: str) -> dict | None:
         return None
 
 
+_sizes: dict[tuple, tuple] = {}
+
+
 def _size(path: Path) -> tuple[int, int] | tuple[None, None]:
-    """A picture's or clip's width and height (the header only), or Nones if it can't be read."""
+    """A picture's or clip's width and height (the header only), or Nones if it can't be read.
+    Remembered per file version: a big dataset reopens without reading every header again."""
     from PIL import Image
 
-    clip = video.probe(path) if video.is_video(path) else None
-    if clip is not None:
-        return clip.width, clip.height
     try:
-        with Image.open(path) as im:
-            return im.size
+        st = path.stat()
     except OSError:
         return None, None
+    key = (str(path), st.st_mtime_ns, st.st_size)
+    if key not in _sizes:
+        clip = video.probe(path) if video.is_video(path) else None
+        if clip is not None:
+            _sizes[key] = (clip.width, clip.height)
+        else:
+            try:
+                with Image.open(path) as im:
+                    _sizes[key] = im.size
+            except OSError:
+                return None, None
+    return _sizes[key]
 
 
 def items(name: str, caption_ext: str = ".txt") -> dict:

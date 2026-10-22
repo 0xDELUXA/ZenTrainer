@@ -162,6 +162,9 @@ const VIDEO_MODES: [TrainSpec['dataset']['video_mode'], string][] = [
         <div class="sw-row"><ZenSwitch :model-value="!!spec.dataset.edit_grounded" @update:model-value="spec.dataset.edit_grounded = $event" /><span class="sw-state">{{ spec.dataset.edit_grounded ? 'On' : 'Off' }}</span></div>
       </ZenField>
     </template>
+    <ZenField label="Cache on disk" stack tip="Each picture's latents (and its own conditioning) in a file of its own, read as training uses them, in bf16: for picture datasets bigger than RAM, such as thousands of edit pairs with the encoder seeing the input">
+      <div class="sw-row"><ZenSwitch :model-value="!!spec.dataset.disk_cache" @update:model-value="spec.dataset.disk_cache = $event" /><span class="sw-state">{{ spec.dataset.disk_cache ? 'On' : 'Off' }}</span></div>
+    </ZenField>
     <ZenField label="Masked training" stack tip="Masked images learn only where it's white"><div class="sw-row"><ZenSwitch v-model="spec.dataset.masked_loss" /><span class="sw-state">{{ spec.dataset.masked_loss ? 'On' : 'Off' }}</span></div></ZenField>
     <ZenField v-if="spec.dataset.masked_loss" label="Unmasked weight" stack tip="0 ignores the rest; 0.1 learns it lightly">
       <ZenNumber v-model="spec.dataset.unmasked_weight" :min="0" :max="1" :step="0.05" :precision="2" />

@@ -6,8 +6,9 @@ import { ZenCompare } from '@nynxz/zenkit-ui'
 import type { DatasetItem } from '@/api/engine'
 import { vAutosize } from '@/lib/autosize'
 import { aspect, isSimplePair, isVideoPath, useDatasetContext } from './context'
+import MoreRows from './MoreRows.vue'
 
-const { zoom, inputs, cap, k, drafts, saving, save, selected, shown, toggleSelect, onItemClick, onItemMenu, ctrlView, full, thumb } = useDatasetContext()
+const { zoom, inputs, cap, k, drafts, saving, save, selected, shown, visible, more, toggleSelect, onItemClick, onItemMenu, ctrlView, full, thumb } = useDatasetContext()
 
 const dims = (w?: number | null, h?: number | null) => (w && h ? `${w}×${h}` : '')
 const inSize = (it: DatasetItem, c: string) => dims(...(it.control_sizes?.[c] ?? []))
@@ -21,7 +22,7 @@ const tag = (label: string, size: string) => (size ? `${label} · ${size}` : lab
 
 <template>
   <div class="pairs" :style="{ '--ph': `${zoom}px` }">
-    <article v-for="(it, i) in shown" :key="it.path" class="pair card" :class="{ sel: selected.has(it.path), dirty: drafts[k(it)] != null }" @contextmenu="onItemMenu(it, i, $event)">
+    <article v-for="(it, i) in visible" :key="it.path" class="pair card" :class="{ sel: selected.has(it.path), dirty: drafts[k(it)] != null }" @contextmenu="onItemMenu(it, i, $event)">
       <label class="check" :class="{ on: selected.has(it.path) }" @click.prevent="toggleSelect(it, i, $event)">
         <i :class="selected.has(it.path) ? 'mdi mdi-checkbox-marked' : 'mdi mdi-checkbox-blank-outline'" />
       </label>
@@ -65,6 +66,7 @@ const tag = (label: string, size: string) => (size ? `${label} · ${size}` : lab
         </span>
       </div>
     </article>
+    <MoreRows v-if="visible.length < shown.length" @more="more" />
   </div>
 </template>
 

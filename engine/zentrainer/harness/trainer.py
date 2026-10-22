@@ -389,7 +389,8 @@ class Trainer:
                                  "can't be (MOSS Image's can): use references for this model")
             if self.h3:
                 raise ValueError("channel inputs aren't for MiniMax H3: use references")
-            pairs = sum(any(r is not None for r in sm.refs or []) for sm in self.dataset.samples)
+            pairs = sum(sm.has_refs if isinstance(sm, data.DiskSample) else any(r is not None for r in sm.refs or [])
+                        for sm in self.dataset.samples)
             if not pairs:
                 raise ValueError(f"edit training, but no picture has an input in the control set(s) "
                                  f"{', '.join(s.dataset.control_sets)}")
@@ -407,7 +408,7 @@ class Trainer:
                                      "set Inputs join as to Channels (dataset.edit_method \"concat\")")
                 raise ValueError(f"{type(patcher.model).__name__} doesn't take reference images, so it can't train "
                                  "edits: pick an edit-capable model (Flux 3 Klein, Flux 2, Kontext, Qwen Image Edit)")
-            pairs = sum(sm.refs is not None or sm.cond is not None for sm in self.dataset.samples)
+            pairs = sum(data.has_inputs(sm) for sm in self.dataset.samples)
             if not pairs:
                 raise ValueError(f"edit training, but no picture has an input in the control set(s) "
                                  f"{', '.join(s.dataset.control_sets)}")
@@ -426,7 +427,7 @@ class Trainer:
                    "Turn on Train on sound")
             logging.warning("[ZenTrainer] %s", msg)
             self._status("loading", message=msg)
-        masked = sum(sm.mask is not None for sm in self.dataset.samples)
+        masked = sum(data.has_mask(sm) for sm in self.dataset.samples)
         if masked and not s.dataset.masked_loss:
             msg = (f"{masked} picture{'s have masks' if masked != 1 else ' has a mask'}, but 'Masked training' is "
                    "off: the masks are ignored and every part of those pictures trains, the parts they "
@@ -1029,7 +1030,9 @@ class Trainer:
         sample = self.dataset.samples[i]
         own = sample.refs or sample.cond is not None or self.concat_inputs
         key = (cap, tuple(sample.latent.shape), i if own else None, keep)
-        if key not in self._conds:
+        # a disk dataset's pairs (thousands, each its own): made each step, never all kept on the GPU
+        passing = own and isinstance(sample, data.DiskSample)
+        if passing or key not in self._conds:
             cond = self.dataset.conditionings[cap]
             if sample.cond is not None:  # grounded: the encoder saw this image's inputs
                 empty = cap == self.dataset.empty_caption and sample.cond_empty is not None
@@ -1043,7 +1046,10 @@ class Trainer:
 
                 cond = with_refs(cond, sample.refs, self.edit_method)
             with torch.no_grad():
-                self._conds[key] = self.denoiser.prepare(cond, x0[:1], self.device, shapes)
+                prepared = self.denoiser.prepare(cond, x0[:1], self.device, shapes)
+            if passing:
+                return prepared
+            self._conds[key] = prepared
         return self._conds[key]
 
     def _cond(self, i: int, x0: torch.Tensor, shapes: list | None = None) -> dict:

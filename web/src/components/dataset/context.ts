@@ -231,6 +231,15 @@ export function useDataset(name: () => string) {
             : it.path.toLowerCase()
     return [...rows].sort((a, b) => (key(a) > key(b) ? 1 : key(a) < key(b) ? -1 : 0) * sortDir.value)
   })
+  // a big dataset renders a page at a time (thousands of cards stall the browser): more as the
+  // end scrolls near (MoreRows); a new filter, search or sort starts from the top
+  const PAGE = 300
+  const limit = ref(PAGE)
+  watch([filter, query, sortKey, sortDir, reviewing, items], () => (limit.value = PAGE))
+  const visible = computed(() => shown.value.slice(0, limit.value))
+  const more = () => {
+    if (limit.value < shown.value.length) limit.value += PAGE
+  }
   function sortBy(k: typeof sortKey.value) {
     if (sortKey.value === k) sortDir.value = sortDir.value === 1 ? -1 : 1
     else {
@@ -356,7 +365,7 @@ export function useDataset(name: () => string) {
     filter, query, sortKey, sortDir, selected, reviewing, review, counts,
     isMuted, setMuted, imageFlags, statsPanel,
     faces, facesBusy, captionSubject, facesSetting, toggleFaces, faceOf, faceIssue, faceNote,
-    shown, sortBy, toggleSelect, onItemClick, menu, menuItems, onItemMenu, allShownSelected, toggleAll,
+    shown, visible, more, sortBy, toggleSelect, onItemClick, menu, menuItems, onItemMenu, allShownSelected, toggleAll,
     flash, save, removeMany,
     layout, ctrlView, full, thumb, thumbSize, lightbox, lbItems,
   }

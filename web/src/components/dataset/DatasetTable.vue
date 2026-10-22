@@ -4,8 +4,9 @@
 // is a bar on top instead of column heads.
 import { vAutosize } from '@/lib/autosize'
 import { kb, pct, useDatasetContext } from './context'
+import MoreRows from './MoreRows.vue'
 
-const { cap, k, drafts, saving, save, sortKey, sortDir, selected, isMuted, faceOf, faceIssue, faceNote, shown, sortBy, toggleSelect, onItemClick, onItemMenu, allShownSelected, toggleAll, full, thumb } = useDatasetContext()
+const { cap, k, drafts, saving, save, sortKey, sortDir, selected, isMuted, faceOf, faceIssue, faceNote, shown, visible, more, sortBy, toggleSelect, onItemClick, onItemMenu, allShownSelected, toggleAll, full, thumb } = useDatasetContext()
 const SORTS = [
   { key: 'name', label: 'Name' },
   { key: 'res', label: 'Size' },
@@ -28,7 +29,7 @@ const SORTS = [
     </div>
 
     <div
-      v-for="(it, i) in shown"
+      v-for="(it, i) in visible"
       :key="it.path"
       class="row card"
       :class="{ sel: selected.has(it.path), dirty: drafts[k(it)] != null, muted: isMuted(it) }"
@@ -63,6 +64,7 @@ const SORTS = [
         />
       </div>
     </div>
+    <MoreRows v-if="visible.length < shown.length" @more="more" />
   </div>
 </template>
 

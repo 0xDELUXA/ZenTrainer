@@ -3,14 +3,15 @@
 // repeats, image and face issues, no caption), mute and select on hover, the caption below.
 import { ZenTip } from '@nynxz/zenkit-ui'
 import { fileInfo, pct, secs, useDatasetContext } from './context'
+import MoreRows from './MoreRows.vue'
 
-const { zoom, inputs, fit, showMasks, activeSet, cap, selected, isMuted, setMuted, imageFlags, faceOf, faceIssue, faceNote, shown, toggleSelect, onItemClick, onItemMenu, full, thumb, thumbSize } = useDatasetContext()
+const { zoom, inputs, fit, showMasks, activeSet, cap, selected, isMuted, setMuted, imageFlags, faceOf, faceIssue, faceNote, shown, visible, more, toggleSelect, onItemClick, onItemMenu, full, thumb, thumbSize } = useDatasetContext()
 </script>
 
 <template>
   <div class="grid" :style="{ '--card': `${zoom}px` }">
     <article
-      v-for="(it, i) in shown"
+      v-for="(it, i) in visible"
       :key="it.path"
       class="card-item"
       :class="{ sel: selected.has(it.path), muted: isMuted(it) }"
@@ -61,6 +62,7 @@ const { zoom, inputs, fit, showMasks, activeSet, cap, selected, isMuted, setMute
         <span class="cap-text" :class="{ empty: !cap(it) }">{{ cap(it) || 'No caption' }}</span>
       </button>
     </article>
+    <MoreRows v-if="visible.length < shown.length" @more="more" />
   </div>
 </template>
 

@@ -1,0 +1,121 @@
+"""dataset.disk_cache: each picture's latents and its own (grounded) conditioning in a file of its
+own, read when a step uses it; plain captions only where something still needs them."""
+
+from pathlib import Path
+
+import torch
+from PIL import Image
+
+from zentrainer.harness import data
+from zentrainer.spec import DatasetSpec
+
+
+class FakeVAE:
+    def encode(self, px):
+        return px.movedim(-1, 1)[:, :, ::8, ::8].repeat(1, 2, 1, 1).float()  # (1, 6, h/8, w/8)
+
+
+class FakeTokenizer:
+    llama_template = "<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n"
+
+
+class FakeClip:
+    tokenizer = FakeTokenizer()
+
+    def __init__(self):
+        self.calls = []
+
+    def tokenize(self, text, images=(), **kw):
+        self.calls.append((text, len(images)))
+        return text, len(images)
+
+    def encode_from_tokens_scheduled(self, tokens):
+        text, n = tokens
+        return [[torch.full((1, 3, 4), float(len(text) + 100 * n)), {"pooled_output": None}]]
+
+
+def _dataset(root: Path) -> Path:
+    ds = root / "pairs"
+    (ds / "_controls" / "input").mkdir(parents=True)
+    for name, color in (("a", "red"), ("b", "blue")):
+        Image.new("RGB", (64, 64), color).save(ds / f"{name}.png")
+        (ds / f"{name}.txt").write_text(f"make {name} green")
+        Image.new("RGB", (64, 64), "white").save(ds / "_controls" / "input" / f"{name}.png")
+    Image.new("RGB", (64, 64), "gray").save(ds / "plain.png")  # no input: trains on its plain caption
+    (ds / "plain.txt").write_text("a gray square")
+    return ds
+
+
+def test_disk_samples_read_from_their_files_and_skip_unneeded_captions(tmp_path):
+    root = _dataset(tmp_path)
+    spec = DatasetSpec(folder="pairs", resolution=64, buckets=False, edit=True, control_sets=["input"],
+                       edit_grounded=True, disk_cache=True)
+    clip = FakeClip()
+    ds = data.build(spec, clip, FakeVAE(), root, tmp_path / "cache", "enc")
+
+    assert all(isinstance(s, data.DiskSample) for s in ds.samples)
+    by_caption = {ds.captions[s.caption]: s for s in ds.samples}
+    pair, plain = by_caption["make a green"], by_caption["a gray square"]
+    assert data.has_inputs(pair) and not data.has_inputs(plain)
+    assert pair.latent.dtype == torch.bfloat16 and pair.latent.shape == pair.shape == (6, 8, 8)
+    assert len(pair.refs) == 1 and pair.cond[0][0][0, 0, 0].item() == len("make a green") + 100
+    assert plain.refs is None and plain.cond is None
+    # the grounded pairs' plain captions were never encoded; the plain picture's and "" were
+    plain_texts = {t for t, n in clip.calls if n == 0}
+    assert plain_texts == {"a gray square", ""}
+    assert ds.conditionings[pair.caption] is None and ds.conditionings[plain.caption] is not None
+    assert sum(len(v) for v in ds.buckets.values()) == 3
+
+    again = data.build(spec, FakeClip(), FakeVAE(), root, tmp_path / "cache", "enc")  # the cache, read back
+    assert [s.file for s in again.samples] == [s.file for s in ds.samples]
+    assert torch.equal(again.samples[0].latent, ds.samples[0].latent)
+
+
+def test_a_folders_caption_sets_are_read_from_one_listing(tmp_path):
+    for name, text in (("a.txt", "plain"), ("a.nl.txt", "natural"), ("a.b.txt", "a.b's own"),
+                       ("a.b.nl.txt", "a.b natural"), ("a.Bad.txt", "not a set name")):
+        (tmp_path / name).write_text(text)
+    for img in ("a.png", "a.b.png"):
+        Image.new("RGB", (8, 8)).save(tmp_path / img)
+    index = data.caption_index([p.name for p in tmp_path.iterdir()])
+    for img in ("a.png", "a.b.png"):
+        p = tmp_path / img
+        assert data.caption_sets(p, ".txt", index) == data.caption_sets(p, ".txt")  # the same as globbing
+    assert data.caption_sets(tmp_path / "a.b.png", ".txt", index) == {"default": "a.b's own", "nl": "a.b natural"}
+
+
+class CountingVAE(FakeVAE):
+    def __init__(self):
+        self.pictures = 0
+
+    def encode(self, px):
+        self.pictures += px.shape[0]
+        return super().encode(px)
+
+
+def test_a_disk_build_cut_short_carries_on_from_its_files(tmp_path):
+    root = _dataset(tmp_path)
+    for name in ("c", "d", "e"):  # another shape too: batches are one size each
+        Image.new("RGB", (96, 64), "green").save(root / f"{name}.png")
+        (root / f"{name}.txt").write_text(f"make {name} red")
+        Image.new("RGB", (96, 64), "black").save(root / "_controls" / "input" / f"{name}.png")
+    spec = DatasetSpec(folder="pairs", resolution=64, buckets=True, bucket_step=16, edit=True, control_sets=["input"],
+                       edit_grounded=True, disk_cache=True)
+    vae, clip = CountingVAE(), FakeClip()
+    ds = data.build(spec, clip, vae, root, tmp_path / "cache", "enc")
+    assert vae.pictures == 6 + 5 and sum(n for _, n in clip.calls) == 5  # 6 pictures and 5 inputs; 5 grounded
+    first = {s.file: torch.load(s.file, weights_only=False) for s in ds.samples}
+
+    folder = Path(ds.samples[0].file).parent
+    (folder.parent / "dataset.pt").unlink()  # cut short: no dataset.pt, one picture never written,
+    Path(ds.samples[1].file).unlink()  # one written but never grounded
+    kept = torch.load(ds.samples[3].file, weights_only=False)
+    kept.pop("cond")
+    torch.save(kept, ds.samples[3].file)
+    vae, clip = CountingVAE(), FakeClip()
+    again = data.build(spec, clip, vae, root, tmp_path / "cache", "enc")
+    assert vae.pictures == 2  # the missing picture and its input
+    assert sorted(t for t, n in clip.calls if n) == sorted([ds.captions[ds.samples[1].caption], ds.captions[ds.samples[3].caption]])
+    for s in again.samples:
+        assert torch.equal(s.latent, first[s.file]["latent"]) and data.has_inputs(s) == (s.refs is not None)
+        assert (s.cond is None) == (first[s.file].get("cond") is None)
