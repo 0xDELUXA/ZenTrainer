@@ -1,12 +1,16 @@
 <script setup lang="ts">
-// Latest: one tile per sample prompt with its newest render, filling the card (2-4 columns).
+// Latest: one tile per sample prompt with its newest render, filling the card (2-4 columns). An
+// edit's tile wipes between its input picture and the render.
+import { ZenCompare } from '@nynxz/zenkit-ui'
 import { computed } from 'vue'
 import { viewUrl } from '@/api/engine'
 import { useRunContext } from './context'
 import { isVideo, useSamplesContext } from './samples'
 
 const { detail, sampling } = useRunContext()
-const { promptCount, latestFor, promptText, liveIndex, openGrid, hoverPlay, hoverPause } = useSamplesContext()
+const { promptCount, latestFor, promptText, liveIndex, openGrid, hoverPlay, hoverPause, inputFor, compare } = useSamplesContext()
+// an edit's render beside its input: a wipe, with the viewer a button away
+const wipe = (i: number) => compare.value && !!inputFor(i) && !!latestFor(i) && !isVideo(latestFor(i)!)
 
 const latestCols = computed(() => Math.min(4, Math.max(2, promptCount.value)))
 // tiles take the samples' own shape, so neither stills nor videos are cropped
@@ -25,6 +29,10 @@ const openLatest = (index: number) => openGrid(index, latestFor(index)!.step)
           <img v-if="sampling?.preview" :src="sampling.preview" alt="" />
           <div class="tile-bar"><div :style="{ width: `${sampling?.s_total ? ((sampling.s_step ?? 0) / sampling.s_total) * 100 : 0}%` }" /></div>
           <span class="tile-badge mono">{{ sampling?.s_step }}/{{ sampling?.s_total }}</span>
+        </template>
+        <template v-else-if="wipe(i - 1)">
+          <div class="tile-wipe"><ZenCompare :before="inputFor(i - 1)!" :after="viewUrl(latestFor(i - 1)!)" before-label="Input" :after-label="latestFor(i - 1)!.step === 0 ? 'Baseline' : `Step ${latestFor(i - 1)!.step}`" /></div>
+          <button class="tile-open" title="Open in the viewer" @click="openLatest(i - 1)"><i class="mdi mdi-arrow-expand" /></button>
         </template>
         <button v-else-if="latestFor(i - 1)" class="tile-btn" :class="{ stale: sampling && sampling.phase === 'sampling' && (sampling.index ?? 0) < i - 1 }" @click="openLatest(i - 1)">
           <video
@@ -108,6 +116,28 @@ const openLatest = (index: number) => openGrid(index, latestFor(index)!.step)
 }
 .tile-btn.stale img {
   opacity: 0.45;
+}
+.tile-wipe {
+  position: absolute;
+  inset: 0;
+}
+.tile-wipe :deep(.zen-compare) {
+  width: 100%;
+  height: 100%;
+}
+.tile-open {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: var(--r-sm);
+  background: rgb(0 0 0 / 0.55);
+  color: #fff;
+  cursor: zoom-in;
 }
 .tile-empty {
   position: absolute;

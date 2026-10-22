@@ -3,7 +3,7 @@
 // time. RunSamples makes it; Latest, Progression and Manual take it with useSamplesContext().
 import { computed, inject, onUnmounted, ref, type InjectionKey } from 'vue'
 import type { LightboxItem } from '@nynxz/zenkit-ui'
-import { promptText as specPrompt, viewUrl, type SampleRow } from '@/api/engine'
+import { promptText as specPrompt, thumbUrl, viewUrl, type SampleRow } from '@/api/engine'
 import { playTogether } from '@/lib/videoSync'
 import type { RunContext } from './context'
 
@@ -44,6 +44,16 @@ export function useSamples(run: RunContext) {
   })
   const latestFor = (i: number) => latestByIndex.value.get(i)
   const promptText = (i: number) => latestFor(i)?.prompt ?? prompts.value.find(([k]) => k === i)?.[1] ?? (detail.value?.spec.samples.prompts[i] != null ? specPrompt(detail.value.spec.samples.prompts[i]!) : '')
+  // edit runs: each prompt's input picture (dataset-relative), and whether tiles wipe between it
+  // and the render
+  const inputFor = (i: number) => {
+    const sp = detail.value?.spec
+    const p = sp?.dataset.edit ? sp.samples.prompts[i] : null
+    const c = p && typeof p !== 'string' ? p.control : null
+    return c ? thumbUrl(sp!.dataset.folder, c, 1024) : null
+  }
+  const hasInputs = computed(() => (detail.value?.spec.samples.prompts ?? []).some((_p, i) => !!inputFor(i)))
+  const compare = ref(true)
   const liveIndex = computed(() => (sampling.value?.phase === 'sampling' && !sampling.value.manual ? (sampling.value.index ?? -1) : -1))
   const liveManual = computed(() => (sampling.value?.manual ? sampling.value : null))
 
@@ -92,7 +102,7 @@ export function useSamples(run: RunContext) {
 
   return {
     steps, prompts, cell, latest, promptCount, latestFor, promptText, liveIndex, liveManual,
-    lb, openGrid, syncing, toggleSync, hoverPlay, hoverPause,
+    lb, openGrid, syncing, toggleSync, hoverPlay, hoverPause, inputFor, hasInputs, compare,
   }
 }
 

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Progression: each sample prompt across training, a row of thumbnails per prompt and a column
-// per sampled step, newest at the right (scrolled into view when it lands).
+// per sampled step, newest at the right (scrolled into view when it lands). Edit runs can head
+// each row with its input picture.
 import { nextTick, onMounted, ref, watch } from 'vue'
 import { viewUrl } from '@/api/engine'
 import ScrollArea from '@/components/ScrollArea.vue'
@@ -9,7 +10,7 @@ import { isVideo, rowHasVideo, useSamplesContext } from './samples'
 
 defineProps<{ size: number }>()
 const { detail, total } = useRunContext()
-const { steps, prompts, cell, openGrid, syncing, toggleSync, hoverPlay, hoverPause } = useSamplesContext()
+const { steps, prompts, cell, openGrid, syncing, toggleSync, hoverPlay, hoverPause, inputFor, hasInputs, compare } = useSamplesContext()
 
 // a step that isn't on the sampling schedule: someone pressed Sample now
 const isManual = (s: number) => {
@@ -30,6 +31,7 @@ onMounted(toEnd)
   <ScrollArea ref="gridScroll" axis="x" class="matrix-scroll">
     <div class="matrix" :style="{ '--t': `${size}px` }">
       <div class="mrow mhead">
+        <div v-if="hasInputs && compare" class="mstep mono input-col">input</div>
         <div
           v-for="s in steps"
           :key="s"
@@ -55,6 +57,9 @@ onMounted(toEnd)
           <span class="ellipsis">{{ prompt }}</span>
         </div>
         <div class="mrow" :data-syncing="syncing === `p${index}` || undefined">
+          <div v-if="hasInputs && compare" class="mcell input-cell">
+            <img v-if="inputFor(index)" :src="inputFor(index)!" loading="lazy" alt="The input picture" title="The picture this prompt edits" />
+          </div>
           <div v-for="s in steps" :key="s" class="mcell">
             <button v-if="cell(index, s)" @click="openGrid(index, s)">
               <video
@@ -168,6 +173,15 @@ onMounted(toEnd)
   object-fit: contain;
   display: block;
   transition: transform 0.15s ease;
+}
+/* the input picture heads each row, set apart from the renders */
+.input-cell {
+  box-shadow: inset 0 0 0 1px var(--zen-border);
+  margin-right: 6px;
+}
+.input-col {
+  margin-right: 6px;
+  color: var(--zen-muted);
 }
 .mcell button {
   display: block;

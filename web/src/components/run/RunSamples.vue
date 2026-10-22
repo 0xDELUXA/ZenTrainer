@@ -14,7 +14,7 @@ const run = useRunContext()
 const { detail, busy, sampling, status, running, sampleCkpt, sampleBusy, newestCkpt, sampleFinished, nextSample, send } = run
 const samples = useSamples(run)
 provide(SAMPLES, samples)
-const { steps, latest, promptCount, liveManual, lb } = samples
+const { steps, latest, promptCount, liveManual, lb, hasInputs, compare } = samples
 
 const sampleView = ref<'latest' | 'grid' | 'manual'>('latest')
 const manualCount = computed(() => {
@@ -61,6 +61,15 @@ const gridSize = computed(() => thumbPick.value ?? fitSize.value)
       <label class="zoom" :class="{ off: sampleView !== 'grid' }" title="Thumbnail size">
         <i class="mdi mdi-image-size-select-small" /><ZenSlider :model-value="gridSize" :min="64" :max="260" :step="4" @update:model-value="thumbPick = $event" />
       </label>
+      <button
+        v-if="hasInputs && sampleView !== 'manual'"
+        class="chip-btn"
+        :class="{ on: compare }"
+        :title="compare ? 'Showing each edit beside its input picture: hover to wipe between them' : 'Show each edit beside its input picture'"
+        @click="compare = !compare"
+      >
+        <i class="mdi mdi-compare-horizontal" /> Input
+      </button>
       <div class="seg" role="tablist">
         <button :class="{ on: sampleView === 'latest' }" @click="sampleView = 'latest'">Latest</button>
         <button :class="{ on: sampleView === 'grid' }" :disabled="!steps.length" title="Each prompt across training: in the viewer ←→ steps, ↑↓ prompts (or WASD)" @click="sampleView = 'grid'">Progression</button>
