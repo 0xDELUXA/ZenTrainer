@@ -125,6 +125,11 @@ const openLatest = (index: number) => openGrid(index, latestFor(index)!.step)
   width: 100%;
   height: 100%;
 }
+/* the whole picture, not ZenCompare's cover crop: an edit comes out its input's shape, not the
+   tile's, and both letterbox alike so they still line up. UPSTREAM: a fit prop on ZenCompare */
+.tile-wipe :deep(.zen-compare img) {
+  object-fit: contain;
+}
 .tile-open {
   position: absolute;
   top: 6px;

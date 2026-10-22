@@ -130,6 +130,10 @@ const tag = (label: string, size: string) => (size ? `${label} · ${size}` : lab
   width: 100%;
   height: 100%;
 }
+/* the whole picture, not ZenCompare's cover crop (an input a little off the result's shape) */
+.pane.compare :deep(.zen-compare img) {
+  object-fit: contain;
+}
 .pane-tag {
   position: absolute;
   left: 6px;
