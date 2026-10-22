@@ -664,3 +664,15 @@ def test_lora_files_save_in_their_own_dtype_and_the_state_keeps_full_weights(tmp
     assert safetensors.torch.load_file(path)["a.lokr_w2"].dtype == torch.bfloat16
     state = torch.load(next((tmp_path / "user").rglob("*.pt")), weights_only=False)
     assert state["live"]["a.lokr_w2"].item() == 1.0 + 2**-12 and "ema" not in state
+
+
+def test_skipped_blocks_get_no_adapters():
+    from zentrainer.harness.network import skipped
+
+    assert skipped("diffusion_model.layers.22.proj.q", "22")
+    assert not skipped("diffusion_model.layers.21.proj.q", "22")
+    assert skipped("diffusion_model.layers.31.proj.ffn_down", "22, 30-31")
+    assert not skipped("diffusion_model.final_linear_video", "22") and not skipped("diffusion_model.layers.3.x", "")
+    TrainSpec.from_dict({**_spec(), "network": {"skip_blocks": "22, 30-31"}})
+    with pytest.raises(SpecError, match="skip_blocks"):
+        TrainSpec.from_dict({**_spec(), "network": {"skip_blocks": "layers.22"}})

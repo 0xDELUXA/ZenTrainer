@@ -138,6 +138,9 @@ class NetworkSpec:
     # Fizgig's default) or "10-": the backward then stops at the first one, so steps are
     # quicker, and the model's early (layout, motion) blocks stay untouched. "" = every block.
     blocks: str = ""
+    # These blocks get no adapters, e.g. "22" or "22, 30-31" (AI Toolkit's ignore_if_contains on
+    # "layers.22."): a block sampling skips in the uncond (skip-layer guidance) stays the base's
+    skip_blocks: str = ""
 
 
 @dataclass
@@ -423,6 +426,8 @@ class TrainSpec:
                 raise SpecError("samples.prompts holds prompts (text) or {prompt, width, height, frames, seed}")
         if self.network.blocks and not re.fullmatch(r"\s*\d*\s*-?\s*\d*\s*", self.network.blocks):
             raise SpecError("network.blocks is a range like 20-49, 20- or 10")
+        if self.network.skip_blocks and not re.fullmatch(r"\s*\d+(\s*-\s*\d+)?(\s*,\s*\d+(\s*-\s*\d+)?)*\s*", self.network.skip_blocks):
+            raise SpecError("network.skip_blocks is blocks and ranges like 22 or 22, 30-31")
         if not 0.0 <= self.memory.tread < 1.0:
             raise SpecError("memory.tread is a share of the video tokens, from 0 (off) to below 1")
         if not 0.0 <= self.objective.uniform_mix <= 1.0:

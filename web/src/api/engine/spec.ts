@@ -71,6 +71,8 @@ export interface TrainSpec {
     base_strength?: number
     /** only these blocks get adapters, e.g. "20-49" ("" = all): the backward stops at the first */
     blocks?: string
+    /** these blocks get no adapters, e.g. "22" or "22, 30-31" */
+    skip_blocks?: string
   }
   optim: {
     optimizer: string

@@ -220,6 +220,9 @@ const targets = computed({
         <ZenField label="Blocks" stack tip="Only these transformer blocks get adapters, e.g. 20-49: the backward stops at the first one, so steps are quicker, and the early blocks (layout, motion) stay untouched. Empty = every block">
           <ZenInput :model-value="spec.network.blocks ?? ''" placeholder="all" @update:model-value="spec.network.blocks = String($event).trim()" />
         </ZenField>
+        <ZenField label="Skip blocks" stack tip="These blocks get no adapters, e.g. 22 or 22, 30-31 (AI Toolkit's ignore_if_contains). Skip-layer guidance skips a block in the uncond: left untrained, skipping it still means skipping the base's block">
+          <ZenInput :model-value="spec.network.skip_blocks ?? ''" placeholder="none" @update:model-value="spec.network.skip_blocks = String($event).trim()" />
+        </ZenField>
         <ZenField label="Train biases & norms" stack><div class="sw-row"><ZenSwitch v-model="spec.network.train_bias_norm" /><span class="sw-state">{{ spec.network.train_bias_norm ? 'On' : 'Off' }}</span></div></ZenField>
       </div>
     </div>

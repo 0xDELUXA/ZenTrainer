@@ -58,6 +58,21 @@ def in_blocks(name: str, blocks: str) -> bool:
     return (not lo or i >= int(lo)) and (not hi or i <= int(hi))
 
 
+def skipped(name: str, skip: str) -> bool:
+    """Is the layer in one of the skipped blocks ("22", "22, 30-31")?"""
+    if not skip.strip():
+        return False
+    m = _BLOCK_INDEX.search(name)
+    if m is None:
+        return False
+    i = int(m.group(1))
+    for part in skip.replace(" ", "").split(","):
+        lo, dash, hi = part.partition("-")
+        if (int(lo) <= i <= int(hi)) if dash else i == int(lo):
+            return True
+    return False
+
+
 def matches(name: str, targets: str | list[str]) -> bool:
     """Should the layer at module path `name` get an adapter?"""
     if not isinstance(targets, str):
@@ -302,7 +317,8 @@ class Network:
             if not hasattr(m, "weight_function") or getattr(m, "weight", None) is None:
                 continue
             if m.weight.ndim >= 2:
-                if not matches(name, spec.targets) or not in_blocks(name, getattr(spec, "blocks", "")):
+                if (not matches(name, spec.targets) or not in_blocks(name, getattr(spec, "blocks", ""))
+                        or skipped(name, getattr(spec, "skip_blocks", ""))):
                     continue
                 key = f"{name}.weight"
                 adapter = None
