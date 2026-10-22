@@ -113,8 +113,21 @@ def _health(name: str) -> dict | None:
         return None
 
 
-def items(name: str, caption_ext: str = ".txt") -> dict:
+def _size(path: Path) -> tuple[int, int] | tuple[None, None]:
+    """A picture's or clip's width and height (the header only), or Nones if it can't be read."""
     from PIL import Image
+
+    clip = video.probe(path) if video.is_video(path) else None
+    if clip is not None:
+        return clip.width, clip.height
+    try:
+        with Image.open(path) as im:
+            return im.size
+    except OSError:
+        return None, None
+
+
+def items(name: str, caption_ext: str = ".txt") -> dict:
 
     d, r = folder(name), root()
     from ..harness.data import muted as _muted
@@ -123,14 +136,7 @@ def items(name: str, caption_ext: str = ".txt") -> dict:
     rows = []
     for it in scan(d, caption_ext, warn=False):
         clip = video.probe(it.path) if video.is_video(it.path) else None
-        if clip is not None:
-            w, h = clip.width, clip.height
-        else:
-            try:
-                with Image.open(it.path) as im:
-                    w, h = im.size
-            except OSError:
-                w = h = None
+        w, h = (clip.width, clip.height) if clip is not None else _size(it.path)
         rows.append({
             "path": str(it.path.relative_to(d)),
             "subfolder": str(it.path.parent.relative_to(r)),  # for /view?type=input
@@ -144,6 +150,8 @@ def items(name: str, caption_ext: str = ".txt") -> dict:
             "captions": it.captions,
             # edit training's inputs, per control set
             "control_sets": {k: [str(c.relative_to(d)) for c in v] for k, v in it.control_sets.items()},
+            # each input's width and height, to compare with the picture's
+            "control_sizes": {str(c.relative_to(d)): _size(c) for v in it.control_sets.values() for c in v},
             "muted": sorted(s for s, paths in mutes.items() if str(it.path.relative_to(d)) in paths),
         })
         if video.is_video(it.path):

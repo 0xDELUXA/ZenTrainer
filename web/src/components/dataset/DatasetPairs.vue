@@ -1,11 +1,22 @@
 <script setup lang="ts">
 // Edit pairs: every input, then the result, the instruction beside them (one picture in and one
-// out, the same shape, as a drag-across compare).
+// out, the same shape, as a drag-across compare). Each picture's size is on it; an input of another
+// shape is flagged, as it's cropped to the result's (and channel inputs must line up).
 import { ZenCompare } from '@nynxz/zenkit-ui'
+import type { DatasetItem } from '@/api/engine'
 import { vAutosize } from '@/lib/autosize'
 import { aspect, isSimplePair, isVideoPath, useDatasetContext } from './context'
 
 const { zoom, inputs, cap, k, drafts, saving, save, selected, shown, toggleSelect, onItemClick, onItemMenu, ctrlView, full, thumb } = useDatasetContext()
+
+const dims = (w?: number | null, h?: number | null) => (w && h ? `${w}×${h}` : '')
+const inSize = (it: DatasetItem, c: string) => dims(...(it.control_sizes?.[c] ?? []))
+// another shape than the result (past 2%): cropped to fit
+function misfit(it: DatasetItem, c: string) {
+  const [w, h] = it.control_sizes?.[c] ?? []
+  return !!(w && h && it.width && it.height && Math.abs(w / h / (it.width / it.height) - 1) > 0.02)
+}
+const tag = (label: string, size: string) => (size ? `${label} · ${size}` : label)
 </script>
 
 <template>
@@ -17,19 +28,19 @@ const { zoom, inputs, cap, k, drafts, saving, save, selected, shown, toggleSelec
       <div class="pair-media">
         <!-- one picture in, one out, same shape: drag across to compare -->
         <div v-if="isSimplePair(it, inputs(it))" class="pane compare" :style="{ aspectRatio: aspect(it) }">
-          <ZenCompare :before="thumb({ path: inputs(it)[0]! }, 768)" :after="thumb(it, 768)" before-label="Input" after-label="Result" track-closest=".pair" />
+          <ZenCompare :before="thumb({ path: inputs(it)[0]! }, 768)" :after="thumb(it, 768)" :before-label="tag('Input', inSize(it, inputs(it)[0]!))" :after-label="tag('Result', dims(it.width, it.height))" track-closest=".pair" />
         </div>
         <template v-else>
           <button v-for="(c, n) in inputs(it)" :key="c" class="pane" :title="c" :data-peek="ctrlView(it, c)" @click="onItemClick(it, i, $event)">
             <video v-if="isVideoPath(c)" :src="ctrlView(it, c)" muted loop playsinline preload="metadata" @mouseenter="($event.target as HTMLVideoElement).play()" @mouseleave="($event.target as HTMLVideoElement).pause()" />
             <img v-else :src="thumb({ path: c }, 512)" loading="lazy" alt="" />
-            <span class="pane-tag">{{ inputs(it).length > 1 ? `Input ${n + 1}` : 'Input' }}</span>
+            <span class="pane-tag" :class="{ warn: misfit(it, c) }">{{ tag(inputs(it).length > 1 ? `Input ${n + 1}` : 'Input', inSize(it, c)) }}</span>
           </button>
           <i v-if="inputs(it).length" class="mdi mdi-arrow-right pair-arrow" />
           <button class="pane result" :title="it.path" :data-peek="full(it)" @click="onItemClick(it, i, $event)">
             <video v-if="it.kind === 'video'" :src="ctrlView(it, it.path)" muted loop playsinline preload="metadata" @mouseenter="($event.target as HTMLVideoElement).play()" @mouseleave="($event.target as HTMLVideoElement).pause()" />
             <img v-else :src="thumb(it, 512)" loading="lazy" alt="" />
-            <span class="pane-tag">{{ inputs(it).length ? 'Result' : 'No input' }}</span>
+            <span class="pane-tag">{{ tag(inputs(it).length ? 'Result' : 'No input', dims(it.width, it.height)) }}</span>
           </button>
         </template>
       </div>
@@ -47,7 +58,9 @@ const { zoom, inputs, cap, k, drafts, saving, save, selected, shown, toggleSelec
         />
         <span class="card-meta mono">
           {{ it.path.split('/').at(-1) }}<span v-if="it.width"> · {{ it.width }}×{{ it.height }}</span>
+          <span v-if="inputs(it).length === 1 && inSize(it, inputs(it)[0]!)"> · input {{ inSize(it, inputs(it)[0]!) }}</span>
           <span v-if="inputs(it).length > 1"> · {{ inputs(it).length }} inputs</span>
+          <span v-if="inputs(it).some((c) => misfit(it, c))" class="misfit" title="An input is another shape from the result: it's cropped to match, and channel inputs (MOSS) won't line up"> · shape differs</span>
           <span v-if="saving[k(it)]"> · saving…</span>
         </span>
       </div>
@@ -127,6 +140,12 @@ const { zoom, inputs, cap, k, drafts, saving, save, selected, shown, toggleSelec
   background: rgba(0, 0, 0, 0.55);
   color: #fff;
   pointer-events: none;
+}
+.pane-tag.warn {
+  background: color-mix(in srgb, var(--zen-warn) 85%, black);
+}
+.misfit {
+  color: var(--zen-warn);
 }
 .pair-arrow {
   color: var(--zen-muted);

@@ -626,7 +626,7 @@ def _special(t, it):
             px = edit._image(path)
             return edit.h3_keyframe_cond(clip, t.models.vae, text, px, None, *size), None
         return f"h3first|{base}|{size}", first
-    if d.edit_grounded:
+    if d.edit_grounded and d.edit_method != "concat":
         from .data.edit import encode_grounded, grounding_pixels
 
         def grounded(clip, text, negative):

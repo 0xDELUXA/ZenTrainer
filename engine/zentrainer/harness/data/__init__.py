@@ -272,7 +272,7 @@ def cache_key(items: list[Item], spec: DatasetSpec, encoder_id: str) -> str:
         if spec.keyframes:
             h.update(f"|keyframes:{spec.keyframes}".encode())
         if spec.edit:
-            if spec.edit_grounded:
+            if spec.edit_grounded and spec.edit_method != "concat":
                 h.update(b"grounded")
             if spec.edit_method == "concat":  # one slot per set, in order
                 h.update(f"|concat:{','.join(spec.control_sets)}".encode())
@@ -433,7 +433,7 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
                                     "cuts part of it off%s", c.name, it.path.name,
                                     " (channel inputs line up pixel for pixel: make it the same shape)" if concat else "")
             refs = [_encode(vae, load_image(c, size).unsqueeze(0), c) if c is not None else None for c in inputs]
-            if spec.edit_grounded:
+            if spec.edit_grounded and not concat:  # channel inputs reach the model, not its encoder
                 grounded.append((len(samples), it.controls, variants[n][0]))
         samples.append(Sample(latent, idx[0], mask, idx, refs=refs))
         owners.append(n)

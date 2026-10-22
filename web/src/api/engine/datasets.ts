@@ -96,6 +96,8 @@ export interface DatasetItem {
   muted?: string[]
   /** edit training's input picture(s) per control set, dataset-relative */
   control_sets?: Record<string, string[]>
+  /** each input's [width, height], by its path */
+  control_sizes?: Record<string, [number | null, number | null]>
   kind?: 'video'
   fps?: number | null
   frames?: number | null
