@@ -18,6 +18,7 @@ Headless (scriptable; starts ComfyUI in the background when it isn't running):
     zt sample RUN "prompt" [--base] [--size WxH] [--seed N]
     zt queue [pause|resume]    zt caption DATASET --model FILE [--style nl|tags] [--all]
     zt profile RUN             one step under the profiler: where the GPU time goes
+    zt shrink PATH... [--dtype bf16|fp16] [--dry-run]   rewrite fp32 LoRA files smaller
 
 The managed ComfyUI lives in ./comfyui (pinned by comfy.lock, own .venv) and uses its
 own input/, output/ and user/ folders, as any ComfyUI does. All gitignored. Models are never copied:
@@ -590,6 +591,56 @@ def cmd_profile(a) -> None:
     die("no profile came back (is the run training?)")
 
 
+_SHRINK = r"""
+import math, os, sys
+from pathlib import Path
+import torch
+from safetensors import safe_open
+from safetensors.torch import save_file
+
+to = {"bf16": torch.bfloat16, "fp16": torch.float16}[sys.argv[1]]
+dry = sys.argv[2] == "1"
+files = []
+for p in map(Path, sys.argv[3:]):
+    files += sorted(p.rglob("*.safetensors")) if p.is_dir() else [p]
+saved = 0
+for f in files:
+    with safe_open(str(f), "pt") as sf:
+        meta = sf.metadata()
+        keys = list(sf.keys())
+        wide = [k for k in keys if sf.get_slice(k).get_dtype() in ("F32", "F64")]
+        if not wide:
+            continue
+        before = f.stat().st_size
+        if dry:
+            # an fp32 tensor halves; the rest stays
+            gain = sum(4 * math.prod(sf.get_slice(k).get_shape()) for k in wide) // 2
+            print(f"{f}  {before / 1e6:,.0f} MB -> {(before - gain) / 1e6:,.0f} MB")
+            saved += gain
+            continue
+        out = {k: (sf.get_tensor(k).to(to) if k in wide else sf.get_tensor(k)) for k in keys}
+    part = f.with_name(f".{f.name}.part")
+    save_file(out, str(part), metadata=meta)
+    os.chmod(part, 0o644)
+    os.replace(part, f)
+    saved += before - f.stat().st_size
+    print(f"{f}  {before / 1e6:,.0f} MB -> {f.stat().st_size / 1e6:,.0f} MB")
+print(f"{'would save' if dry else 'saved'} {saved / 1e6:,.0f} MB")
+"""
+
+
+def cmd_shrink(a) -> None:
+    """Rewrite LoRA files' fp32 tensors in bf16 (or fp16), in place: half the size, nothing a
+    sample shows. Other tensors and the metadata stay. A checkpoint resumed from afterwards
+    continues from the rounded weights."""
+    if not venv_python().is_file():
+        die("no managed ComfyUI venv: run zt setup")
+    for p in a.paths:
+        if not Path(p).exists():
+            die(f"not found: {p}")
+    subprocess.run([str(venv_python()), "-I", "-c", _SHRINK, a.dtype, "1" if a.dry_run else "0", *a.paths], check=True)
+
+
 def cmd_queue(a) -> None:
     if a.action:
         _api(a, "POST", "/queue", {"action": a.action})
@@ -699,6 +750,11 @@ def main() -> None:
     s = _client(sub, "profile", cmd_profile, "profile one training step: where the GPU time goes")
     s.add_argument("run")
     s.add_argument("--lines", type=int, default=40)
+    s = sub.add_parser("shrink", help="rewrite fp32 LoRA files in bf16 (half the size)")
+    s.add_argument("paths", nargs="+", help=".safetensors files or folders of them")
+    s.add_argument("--dtype", choices=["bf16", "fp16"], default="bf16")
+    s.add_argument("--dry-run", action="store_true", help="only say what it would save")
+    s.set_defaults(fn=cmd_shrink)
     s = _client(sub, "queue", cmd_queue, "show the queue, or pause/resume it")
     s.add_argument("action", nargs="?", choices=["pause", "resume"])
     s = _client(sub, "caption", cmd_caption, "auto-caption a dataset")

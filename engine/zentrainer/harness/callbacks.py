@@ -217,7 +217,15 @@ class Samples(Callback):
             else:
                 path = folder_paths.get_full_path_or_raise("checkpoints", s.model_name)
                 self._alt = comfy.sd.load_checkpoint_guess_config(path, output_vae=False, output_clip=False)[0]
-        patched, _ = comfy.sd.load_lora_for_models(self._alt, None, t.network.state_dict(), s.lora_strength, 0)
+        weights = t.network.state_dict()
+        wide = getattr(t.network, "wide", None)
+        if wide is not None:  # the widened input layer: the same wrappers on this model (see wide_input.py)
+            weights = {k: v for k, v in weights.items() if not k.endswith(".set_weight")}
+        patched, _ = comfy.sd.load_lora_for_models(self._alt, None, weights, s.lora_strength, 0)
+        if wide is not None:
+            patched.add_weight_wrapper(f"{t.network.wide_name}.weight", wide.weight)
+            if wide.bias_delta is not None:
+                patched.add_weight_wrapper(f"{t.network.wide_name}.bias", wide.bias)
         base = t.spec.network.base_lora
         if base:  # the trained LoRA sits on it, so its samples do too
             if self._base_sd is None:
@@ -423,15 +431,24 @@ class Samples(Callback):
                     progress(i, 0, s.steps)
                     channels = model.model.latent_format.latent_channels
                     it = self.items[i]
+                    concat = getattr(t, "concat_inputs", 0)
+                    ref = None
                     if it.control and not getattr(t, "h3", False):  # an edit sample: the picture to edit as the reference, at its own shape
                         ref, it = _control(t, it, comp)
-                        from .data.edit import with_refs
+                        if not concat:
+                            from .data.edit import with_refs
 
-                        how = getattr(t, "edit_method", None)
-                        pos, neg = with_refs(pos, [ref], how), with_refs(neg, [ref], how)
+                            how = getattr(t, "edit_method", None)
+                            pos, neg = with_refs(pos, [ref], how), with_refs(neg, [ref], how)
                     t_lat = _latent_frames(vae, it.frames)
                     latent = torch.zeros([1, channels] + ([t_lat] if t_lat else []) + [it.height // comp, it.width // comp])
                     latent = comfy.sample.fix_empty_latent_channels(model, latent)
+                    if concat:  # channel inputs ride on every call: the sample's picture first, the rest empty
+                        from .data.edit import with_concat
+
+                        first = model.model.process_latent_in(ref.float()) if ref is not None else torch.zeros_like(latent)
+                        c = torch.cat([first] + [torch.zeros_like(latent)] * (concat - 1), dim=1)
+                        pos, neg = with_concat(pos, c), with_concat(neg, c)
                     noise = comfy.sample.prepare_noise(latent, it.seed)
                     def cb(step, x0, _x, total, _i=i):
                         progress(_i, step + 1, total, x0)

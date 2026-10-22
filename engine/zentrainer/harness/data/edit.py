@@ -61,6 +61,23 @@ def with_refs(conditioning: list, refs: list[torch.Tensor], ref_method: str | No
     return out
 
 
+def with_concat(conditioning: list, latent: torch.Tensor) -> list:
+    """A copy of a CLIP conditioning carrying `latent` ((1, C × inputs, h, w), processed; zeros
+    for a missing input) as the model's channel inputs: c_concat, the conds ComfyUI's concat_cond
+    makes. Set as a model cond directly, so it reaches the model whatever ComfyUI's own
+    concat_cond would make of it (see wide_input.py)."""
+    import comfy.conds
+
+    out = []
+    for cond, opts in conditioning:
+        opts = dict(opts)
+        conds = dict(opts.get("model_conds") or {})
+        conds["c_concat"] = comfy.conds.CONDNoiseShape(latent if latent.ndim == 4 else latent[None])
+        opts["model_conds"] = conds
+        out.append([cond, opts])
+    return out
+
+
 VISION = "<|vision_start|><|image_pad|><|vision_end|>"
 GROUNDING_PX = 768  # longest side of the picture the text encoder sees (krea2edit's grounding_px)
 

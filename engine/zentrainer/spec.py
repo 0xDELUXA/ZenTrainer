@@ -55,8 +55,14 @@ class DatasetSpec:
     # sets give each image several inputs. Any set turns edit on; edit with none means "control".
     control_sets: list[str] = field(default_factory=list)
     # how the input picture joins the sequence: "" = the model's own way ("index" for models
-    # without one, like Krea 2), or "index", "offset", "index_timestep_zero"
+    # without one, like Krea 2), or "index", "offset", "index_timestep_zero". "concat": channel
+    # inputs instead, each control set's picture (aligned with the target, the same size) as extra
+    # latent channels into a widened input layer, as ComfyUI's MOSS-Image control adapters
+    # (harness/wide_input.py)
     edit_method: str = ""
+    # channel inputs: the share of steps each input is left out (zeros), independently, so the
+    # adapter also works with some or none of them
+    control_dropout: float = 0.0
     # wrap each instruction: "{}" is the caption (NK2E's generalist was trained on "Make the
     # following edit to the reference image, ...: {}", so specialists on top of it want the same)
     edit_template: str = ""
@@ -308,6 +314,9 @@ class OutputSpec:
     # the LoRA: "latest" keeps only the newest (resume from the last save), "all" one per
     # checkpoint, "none" skips them (the run can't be resumed).
     keep_states: str = "latest"
+    # What the LoRA files are written in, apart from what trains (network.lora_dtype): bf16 halves
+    # an fp32 file and loses nothing a sample shows. The resume state keeps the full weights.
+    save_dtype: str = "bf16"  # bf16 | fp16 | fp32
 
 
 @dataclass
@@ -389,6 +398,7 @@ class TrainSpec:
         _choice("memory.training_dtype", self.memory.training_dtype, ("bf16", "fp16", "fp32"))
         _choice("samples.slg_mode", self.samples.slg_mode, ("off", "uncond", "standard"))
         _choice("output.keep_states", self.output.keep_states, ("latest", "all", "none"))
+        _choice("output.save_dtype", self.output.save_dtype, ("bf16", "fp16", "fp32"))
         if self.objective.shift < 0:
             raise SpecError("objective.shift must be >= 0 (0 = the model's own)")
         if not 0.0 <= self.samples.slg_start <= self.samples.slg_end <= 1.0:
@@ -414,8 +424,10 @@ class TrainSpec:
             raise SpecError("memory.tread is a share of the video tokens, from 0 (off) to below 1")
         if not 0.0 <= self.objective.uniform_mix <= 1.0:
             raise SpecError("objective.uniform_mix is a share between 0 and 1")
-        if self.dataset.edit_method not in ("", "index", "offset", "index_timestep_zero", "negative_index", "uxo"):
-            raise SpecError("dataset.edit_method is one of index, offset, index_timestep_zero (or empty for the model's own)")
+        if self.dataset.edit_method not in ("", "index", "offset", "index_timestep_zero", "negative_index", "uxo", "concat"):
+            raise SpecError("dataset.edit_method is one of index, offset, index_timestep_zero, concat (or empty for the model's own)")
+        if not 0.0 <= self.dataset.control_dropout < 1.0:
+            raise SpecError("dataset.control_dropout is a share of steps, 0 to below 1")
         if not 0.0 <= self.memory.tread_steps <= 1.0:
             raise SpecError("memory.tread_steps is a share between 0 and 1")
         if any(not isinstance(c, str) or not CONTROL_SET_NAME.match(c) for c in self.dataset.control_sets):

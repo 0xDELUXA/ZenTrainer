@@ -30,7 +30,10 @@ export interface TrainSpec {
     edit?: boolean
     /** control sets (named layers of input pictures) the run edits from, in order; any turns edit on */
     control_sets?: string[]
+    /** "concat": channel inputs (aligned pictures as extra latent channels, MOSS Image) */
     edit_method?: string
+    /** channel inputs: share of steps each input is left out */
+    control_dropout?: number
     edit_template?: string
     edit_grounded?: boolean
     keyframes?: string
@@ -158,7 +161,7 @@ export interface TrainSpec {
   }
   validation: { every: number; images: number; timesteps: number; seed: number }
   /** where checkpoints go and which resume states are kept */
-  output: { lora_dir: string | null; keep_states: 'latest' | 'all' | 'none' }
+  output: { lora_dir: string | null; keep_states: 'latest' | 'all' | 'none'; save_dtype: 'bf16' | 'fp16' | 'fp32' }
 }
 
 export interface Preset<T = unknown> {
@@ -264,6 +267,6 @@ export function defaultSpec(): TrainSpec {
       slg_end: 1,
     },
     validation: { every: 100, images: 4, timesteps: 4, seed: 1234 },
-    output: { lora_dir: null, keep_states: 'latest' },
+    output: { lora_dir: null, keep_states: 'latest', save_dtype: 'bf16' },
   }
 }

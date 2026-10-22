@@ -380,10 +380,31 @@ class Trainer:
                                   progress=lambda i, n, msg: self._status("loading", message=f"{msg} ({i}/{n})"),
                                   audio_vae=self.models.audio_vae, h3=self.h3)
         self.edit_method = None
-        if s.dataset.edit:
+        self.concat_inputs = 0  # channel inputs: how many input latents ride beside the noisy one
+        if s.dataset.edit and s.dataset.edit_method == "concat":
+            from .wide_input import input_layer
+
+            if input_layer(patcher.model) is None:
+                raise ValueError(f"channel inputs widen the model's input layer, and {type(patcher.model).__name__}'s "
+                                 "can't be (MOSS Image's can): use references for this model")
+            if self.h3:
+                raise ValueError("channel inputs aren't for MiniMax H3: use references")
+            pairs = sum(any(r is not None for r in sm.refs or []) for sm in self.dataset.samples)
+            if not pairs:
+                raise ValueError(f"edit training, but no picture has an input in the control set(s) "
+                                 f"{', '.join(s.dataset.control_sets)}")
+            self.concat_inputs = len(s.dataset.control_sets)
+            logging.info("[ZenTrainer] channel inputs: %d of %d pictures have one; %d input slot(s) (%s)",
+                         pairs, len(self.dataset.samples), self.concat_inputs, ", ".join(s.dataset.control_sets))
+        elif s.dataset.edit:
             from .data.edit import method, takes_references
 
             if not takes_references(patcher.model):
+                from .wide_input import input_layer
+
+                if input_layer(patcher.model) is not None:
+                    raise ValueError(f"{type(patcher.model).__name__} takes its inputs as channels, not references: "
+                                     "set Inputs join as to Channels (dataset.edit_method \"concat\")")
                 raise ValueError(f"{type(patcher.model).__name__} doesn't take reference images, so it can't train "
                                  "edits: pick an edit-capable model (Flux 3 Klein, Flux 2, Kontext, Qwen Image Edit)")
             pairs = sum(sm.refs is not None or sm.cond is not None for sm in self.dataset.samples)
@@ -488,7 +509,7 @@ class Trainer:
                          s.network.base_lora, s.network.base_strength, len(base))
         self.network = Network(patcher, s.network, self.device, bypass=bypass, init_weights=init, assist=assist,
                                preview=preview, preview_strength=s.samples.turbo_strength,
-                               base=base, base_strength=s.network.base_strength)
+                               base=base, base_strength=s.network.base_strength, wide_inputs=self.concat_inputs)
         self.optimizer, self.scheduler = optim.build(
             self.network.param_groups(s.optim.learning_rate, s.optim.lora_plus), s.optim)
         from .ema import EMA
@@ -995,17 +1016,23 @@ class Trainer:
         sample = self.dataset.samples[i]
         return self._prepared(i, sample.caption, x0, shapes)
 
-    def _prepared(self, i: int, cap: int, x0: torch.Tensor, shapes: list | None) -> dict:
+    def _prepared(self, i: int, cap: int, x0: torch.Tensor, shapes: list | None, keep: tuple | None = None) -> dict:
         """A caption's processed conds for sample i's shape; an edit pair's carry its own input
-        picture, so those are kept per sample."""
+        picture, so those are kept per sample. `keep`: which channel inputs this step keeps (None:
+        all)."""
         sample = self.dataset.samples[i]
-        key = (cap, tuple(sample.latent.shape), i if sample.refs or sample.cond is not None else None)
+        own = sample.refs or sample.cond is not None or self.concat_inputs
+        key = (cap, tuple(sample.latent.shape), i if own else None, keep)
         if key not in self._conds:
             cond = self.dataset.conditionings[cap]
             if sample.cond is not None:  # grounded: the encoder saw this image's inputs
                 empty = cap == self.dataset.empty_caption and sample.cond_empty is not None
                 cond = sample.cond_empty if empty else sample.cond
-            if sample.refs:
+            if self.concat_inputs:  # channel inputs: every call carries them, zeros where missing or left out
+                from .data.edit import with_concat
+
+                cond = with_concat(cond, self._concat(sample, keep))
+            elif sample.refs:
                 from .data.edit import with_refs
 
                 cond = with_refs(cond, sample.refs, self.edit_method)
@@ -1018,7 +1045,23 @@ class Trainer:
         cap = random.choice(sample.variants) if len(sample.variants) > 1 else sample.caption
         if self.spec.dataset.caption_dropout and random.random() < self.spec.dataset.caption_dropout:
             cap = self.dataset.empty_caption  # an edit pair keeps its input picture
-        return self._prepared(i, cap, x0, shapes)
+        keep = None
+        if self.concat_inputs and self.spec.dataset.control_dropout:  # each input left out on its own
+            keep = tuple(random.random() >= self.spec.dataset.control_dropout for _ in range(self.concat_inputs))
+        return self._prepared(i, cap, x0, shapes, keep)
+
+    def _concat(self, sample, keep: tuple | None) -> torch.Tensor:
+        """A sample's channel inputs, processed, (1, C × inputs, h, w): zeros where it has no input
+        in a set, or `keep` leaves it out."""
+        model = self.models.patcher.model
+        refs = sample.refs or [None] * self.concat_inputs
+        parts = []
+        for k, r in enumerate(refs):
+            if r is None or (keep is not None and not keep[k]):
+                parts.append(torch.zeros((1,) + tuple(sample.latent.shape)))
+            else:
+                parts.append(model.process_latent_in((r if r.ndim == 4 else r[None]).float()))
+        return torch.cat(parts, dim=1)
 
     def _handle_commands(self) -> None:
         import comfy.model_management as mm
@@ -1096,7 +1139,10 @@ class Trainer:
         folder = base / slugify(self.spec.name) if final else base / "checkpoints" / self.run_id
         folder.mkdir(parents=True, exist_ok=True)
         path = folder / f"{name}.safetensors"
-        weights = self.network.state_dict()
+        save_as = _DTYPES[self.spec.output.save_dtype]
+        weights = {k: v if k.endswith(".set_weight") else v.to(save_as) for k, v in self.network.state_dict().items()}
+        if live is None and save_as.itemsize < self.network.dtype.itemsize:
+            live = {k: v.detach() for k, v in self.network.params.items()}  # resume from the full weights, not the file's
         keep = self.spec.output.keep_states
         state = state_dir(self.run_id) / f"{name}.pt"
         _room_for(folder, sum(t.numel() * t.element_size() for t in weights.values()))
@@ -1121,7 +1167,8 @@ class Trainer:
                 "rng": self.generator.get_state(), "batches_epoch": self.batches.epoch,
                 "train_seconds": self.train_seconds,
                 **({"balance": self.objective.balance.state_dict()} if self.objective.balance is not None else {}),
-                **({"live": {k: v.cpu() for k, v in live.items()}, "ema": self.ema.state_dict()} if live is not None else {}),
+                **({"live": {k: v.cpu() for k, v in live.items()}} if live is not None else {}),
+                **({"ema": self.ema.state_dict()} if self.ema is not None else {}),
             }, str(tmp_state))
             os.replace(tmp_state, state)
             if keep == "latest":  # resume only ever needs the newest

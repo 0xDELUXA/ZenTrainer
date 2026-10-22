@@ -148,6 +148,14 @@ const targets = computed({
         :searchable="false"
       />
     </ZenField>
+    <ZenField label="Save as" stack tip="What the LoRA files are written in. bf16 is half of fp32 and loses nothing you'd see; training still runs in the LoRA precision, and resuming uses the full weights">
+      <ZenCombo
+        v-model="spec.output.save_dtype"
+        :items="[{ value: 'bf16', label: 'bf16 (recommended)' }, { value: 'fp16', label: 'fp16' }, { value: 'fp32', label: 'fp32 (twice the size)' }]"
+        :sorted="false"
+        :searchable="false"
+      />
+    </ZenField>
   </div>
   <button class="more" @click="advanced.training = !advanced.training">
     <i :class="advanced.training ? 'mdi mdi-chevron-up' : 'mdi mdi-chevron-down'" /> Advanced training

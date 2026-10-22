@@ -62,7 +62,9 @@ class Sample:
     mask: torch.Tensor | None = None  # (h, w) in [0, 1] at latent resolution
     variants: list[int] = field(default_factory=list)  # caption choices when mixing sets
     audio: torch.Tensor | None = None  # (C, 2, Ta): a clip's soundtrack latent (joint audio-video models)
-    refs: list[torch.Tensor] | None = None  # edit pairs: the control pictures' raw latents, as reference_latents
+    # edit pairs: the control pictures' raw latents, as reference_latents; for channel inputs
+    # ("concat"), one per control set in order, None where the picture has no input in that set
+    refs: list[torch.Tensor | None] | None = None
     # grounded edits: this image's own conditioning (the encoder saw its inputs), and the empty
     # caption with them for caption dropout
     cond: list | None = None
@@ -272,6 +274,8 @@ def cache_key(items: list[Item], spec: DatasetSpec, encoder_id: str) -> str:
         if spec.edit:
             if spec.edit_grounded:
                 h.update(b"grounded")
+            if spec.edit_method == "concat":  # one slot per set, in order
+                h.update(f"|concat:{','.join(spec.control_sets)}".encode())
             for c in it.controls:
                 cs = c.stat()
                 h.update(f"|control:{c}|{cs.st_mtime_ns}|{cs.st_size}".encode())
@@ -416,13 +420,19 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
         if h3 and spec.edit and it.controls:  # H3 takes them in its own conditioning, built below
             h3_jobs.append((len(samples), it.controls, None, None, variants[n][0], size, 1))
         elif spec.edit and it.controls:  # the input picture(s) at the target's size, as the model's references
-            for c in it.controls:
+            concat = spec.edit_method == "concat"
+            # channel inputs: each set's (first) input in its slot, lined up with the target
+            inputs = [next(iter(it.control_sets.get(c, [])), None) for c in spec.control_sets] if concat else it.controls
+            for c in inputs:
+                if c is None:
+                    continue
                 with Image.open(c) as cim:
                     cw, ch = cim.size
-                if abs((cw / ch) / (size[0] / size[1]) - 1) > 0.08:
+                if abs((cw / ch) / (size[0] / size[1]) - 1) > (0.02 if concat else 0.08):
                     logging.warning("[ZenTrainer] %s is a different shape from %s: it's cropped to match, which "
-                                    "cuts part of it off", c.name, it.path.name)
-            refs = [_encode(vae, load_image(c, size).unsqueeze(0), c) for c in it.controls]
+                                    "cuts part of it off%s", c.name, it.path.name,
+                                    " (channel inputs line up pixel for pixel: make it the same shape)" if concat else "")
+            refs = [_encode(vae, load_image(c, size).unsqueeze(0), c) if c is not None else None for c in inputs]
             if spec.edit_grounded:
                 grounded.append((len(samples), it.controls, variants[n][0]))
         samples.append(Sample(latent, idx[0], mask, idx, refs=refs))

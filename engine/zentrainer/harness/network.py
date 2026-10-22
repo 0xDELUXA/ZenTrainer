@@ -279,7 +279,7 @@ class Network:
     def __init__(self, patcher, spec: NetworkSpec, device: torch.device, *, bypass: bool = False,
                  init_weights: dict | None = None, assist: dict | None = None,
                  preview: dict | None = None, preview_strength: float = 1.0,
-                 base: dict | None = None, base_strength: float = 1.0):
+                 base: dict | None = None, base_strength: float = 1.0, wide_inputs: int = 0):
         from comfy.weight_adapter import BypassInjectionManager, adapter_maps, adapters
 
         self.spec = spec
@@ -340,6 +340,30 @@ class Network:
                 self._bypass.add_adapter(key, attached, strength=1.0)
             else:
                 patcher.add_weight_wrapper(key, _Pinned(attached))
+
+        # channel inputs: the input layer widened for the input pictures' latents (wide_input.py)
+        self.wide = None
+        if wide_inputs:
+            from .wide_input import WideInput, input_layer
+
+            found = input_layer(patcher.model)
+            if found is None:
+                raise RuntimeError(f"{type(patcher.model).__name__} has no input layer to widen for channel inputs")
+            name, layer = found
+            self.wide_name, self._wide_layer = name, layer
+            self.wide = WideInput(layer, wide_inputs, torch.float32, device).train()  # fp32 master, as darask0's
+            if f"{name}.set_weight" in init_weights:  # continuing a channel-input LoRA
+                base_w, base_b = self._wide_base()
+                self.wide.load(init_weights[f"{name}.set_weight"], init_weights.get(f"{name}.bias.set_weight"), base_w, base_b)
+            self.modules.append(self.wide)
+            self.params[f"{name}.zt_input_delta"] = self.wide.delta
+            self.params[f"{name}.zt_input_control"] = self.wide.control
+            patcher.add_weight_wrapper(f"{name}.weight", self.wide.weight)
+            if self.wide.bias_delta is not None:
+                self.params[f"{name}.zt_input_bias"] = self.wide.bias_delta
+                patcher.add_weight_wrapper(f"{name}.bias", self.wide.bias)
+            logging.info("[ZenTrainer] %s widened for %d input(s): %d -> %d channels", name, wide_inputs,
+                         layer.weight.shape[1], layer.weight.shape[1] * (1 + wide_inputs))
 
         if not self.params:
             sample = [n for n, m in patcher.model.named_modules()
@@ -402,15 +426,38 @@ class Network:
         return [p for p in self.params.values() if p.requires_grad]
 
     def param_groups(self, lr: float, lora_plus: float = 0.0) -> list:
-        """The trainable tensors, or with LoRA+ two groups: up (B) matrices at lr × lora_plus."""
-        if lora_plus <= 1:
+        """The trainable tensors, or groups: with LoRA+ the up (B) matrices at lr × lora_plus, with
+        channel inputs the input layer's new columns at lr × CONTROL_LR_SCALE."""
+        control = [self.wide.control] if self.wide is not None else []
+        up = [p for k, p in self.params.items() if p.requires_grad and ".lora_up." in f"{k}."] if lora_plus > 1 else []
+        rest = [p for p in self.trainable() if not any(p is q for q in up + control)]
+        if not up and not control:
             return self.trainable()
-        up = [p for k, p in self.params.items() if p.requires_grad and ".lora_up." in f"{k}."]
-        rest = [p for k, p in self.params.items() if p.requires_grad and ".lora_up." not in f"{k}."]
-        if not up:  # LoHa, LoKr, OFT: no up matrices to speed up
-            return self.trainable()
-        return [{"params": rest, "lr": lr}, {"params": up, "lr": lr * lora_plus, "lr_mult": lora_plus}]
+        groups = [{"params": rest, "lr": lr}]
+        if up:  # LoHa, LoKr, OFT have no up matrices to speed up
+            groups.append({"params": up, "lr": lr * lora_plus, "lr_mult": lora_plus})
+        if control:
+            from .wide_input import CONTROL_LR_SCALE
+
+            groups.append({"params": control, "lr": lr * CONTROL_LR_SCALE, "lr_mult": CONTROL_LR_SCALE})
+        return groups
+
+    def _wide_base(self) -> tuple[torch.Tensor, torch.Tensor | None]:
+        """The widened layer's own (base) weight and bias, full precision on the CPU."""
+        def plain(t):
+            if t is None:
+                return None
+            t = t.dequantize() if hasattr(t, "dequantize") else t
+            return t.detach().to("cpu", torch.float32)
+        return plain(self._wide_layer.weight), plain(getattr(self._wide_layer, "bias", None))
 
     def state_dict(self) -> dict[str, torch.Tensor]:
-        """Tensors in ComfyUI's LoRA-file layout, detached on CPU."""
-        return {k: v.detach().to("cpu", self.dtype).contiguous() for k, v in self.params.items()}
+        """Tensors in ComfyUI's LoRA-file layout, detached on CPU. A widened input layer is saved
+        whole, as ComfyUI's "set" patches."""
+        out = {k: v.detach().to("cpu", self.dtype).contiguous() for k, v in self.params.items() if ".zt_input_" not in k}
+        if self.wide is not None:
+            w, b = self.wide.full(*self._wide_base())
+            out[f"{self.wide_name}.set_weight"] = w.to(torch.bfloat16).contiguous()
+            if b is not None:
+                out[f"{self.wide_name}.bias.set_weight"] = b.to(torch.bfloat16).contiguous()
+        return out

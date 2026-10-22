@@ -6,7 +6,7 @@ import { computed } from 'vue'
 import { thumbUrl, type DatasetInfo, type TrainSpec } from '@/api/engine'
 import { items, useRunFormContext } from './form'
 
-const { spec, choices, datasets, dataset, pairCount, stage0, resuming, controlCounts, chosenInputs, toggleInput } = useRunFormContext()
+const { spec, choices, datasets, dataset, pairCount, stage0, resuming, controlCounts, chosenInputs, toggleInput, channelModel } = useRunFormContext()
 
 const NK2E_TEMPLATE =
   'Make the following edit to the reference image, changing only what is requested and keeping everything else identical: {}'
@@ -134,13 +134,31 @@ const VIDEO_MODES: [TrainSpec['dataset']['video_mode'], string][] = [
       </div>
     </ZenField>
     <template v-if="spec.dataset.edit">
+      <ZenField
+        label="Inputs join as"
+        stack
+        tip="References: each input picture joins the model's sequence beside the picture it makes, any size and framing (Flux 3 Klein, Flux 2, Kontext, Qwen Image Edit). Channels: each input is stacked onto the picture pixel for pixel, so it must line up with it (same framing and shape); cheap, and the LoRA runs in plain ComfyUI (InstructPixToPixConditioning for one input). MOSS Image takes channels"
+      >
+        <div class="seg">
+          <button :class="{ on: spec.dataset.edit_method !== 'concat' }" :disabled="channelModel || resuming" @click="spec.dataset.edit_method = ''">References</button>
+          <button :class="{ on: spec.dataset.edit_method === 'concat' }" :disabled="resuming" @click="spec.dataset.edit_method = 'concat'">Channels</button>
+        </div>
+      </ZenField>
+      <ZenField
+        v-if="spec.dataset.edit_method === 'concat'"
+        label="Input dropout"
+        stack
+        tip="Share of steps each input is left out, on its own: the LoRA also learns to work with some or none of them. 0 for edits that always have their input"
+      >
+        <ZenNumber :model-value="spec.dataset.control_dropout ?? 0" :min="0" :max="0.9" :step="0.05" :precision="2" @update:model-value="spec.dataset.control_dropout = $event" />
+      </ZenField>
       <ZenField label="Instruction template" stack tip="Wraps every instruction ({} is the caption), in training and samples alike. Training on top of NK2E? Use its template: its LoRA learned wrapped instructions">
         <div class="tpl-row">
           <ZenInput :model-value="spec.dataset.edit_template ?? ''" placeholder="None: the caption as it is" size="sm" @update:model-value="spec.dataset.edit_template = String($event)" />
           <button class="chip-btn" :class="{ on: spec.dataset.edit_template === NK2E_TEMPLATE }" title="NK2E's instruction template" @click="spec.dataset.edit_template = spec.dataset.edit_template === NK2E_TEMPLATE ? '' : NK2E_TEMPLATE">NK2E</button>
         </div>
       </ZenField>
-      <ZenField label="Encoder sees the input" stack tip="The text encoder looks at the input picture with the instruction (Qwen3-VL encoders: Krea 2, Qwen Image), as krea2edit's identity edits do: better at keeping who and what is in the picture. Each pair's text is encoded on its own, so caching takes longer">
+      <ZenField v-if="spec.dataset.edit_method !== 'concat'" label="Encoder sees the input" stack tip="The text encoder looks at the input picture with the instruction (Qwen3-VL encoders: Krea 2, Qwen Image), as krea2edit's identity edits do: better at keeping who and what is in the picture. Each pair's text is encoded on its own, so caching takes longer">
         <div class="sw-row"><ZenSwitch :model-value="!!spec.dataset.edit_grounded" @update:model-value="spec.dataset.edit_grounded = $event" /><span class="sw-state">{{ spec.dataset.edit_grounded ? 'On' : 'Off' }}</span></div>
       </ZenField>
     </template>

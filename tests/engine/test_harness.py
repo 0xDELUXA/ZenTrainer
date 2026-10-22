@@ -635,3 +635,32 @@ def test_training_on_keeps_the_old_final_as_a_checkpoint(tmp_path, monkeypatch):
     assert Path(row["path"]).is_file() and Path(row["state"]).is_file()
     assert row["lora_name"] == f"checkpoints/{rid}/x_{rid}_step000500.safetensors" and not row["final"]
     assert store.read(rid, "checkpoints")[1] == row and store.read(rid, "checkpoints")[0]["step"] == 250
+
+
+def test_lora_files_save_in_their_own_dtype_and_the_state_keeps_full_weights(tmp_path, monkeypatch):
+    import sys
+    import types
+
+    import safetensors.torch
+    import torch
+
+    fp = types.ModuleType("folder_paths")
+    fp.get_output_directory = lambda: str(tmp_path / "output")
+    fp.get_user_directory = lambda: str(tmp_path / "user")
+    fp.get_folder_paths = lambda _kind: []
+    monkeypatch.setitem(sys.modules, "folder_paths", fp)
+    from zentrainer.harness.trainer import Trainer
+    from zentrainer.spec import TrainSpec
+
+    w = torch.nn.Parameter(torch.tensor([1.0 + 2**-12]))  # lost in bf16
+    t = object.__new__(Trainer)
+    t.spec, t.run_id, t.step, t.store, t.ema, t.train_seconds = TrainSpec(name="x"), "r1", 10, None, None, 0.0
+    t.network = types.SimpleNamespace(dtype=torch.float32, params={"a.lokr_w2": w}, state_dict=lambda: {"a.lokr_w2": w.detach()})
+    t.optimizer = torch.optim.SGD([w], lr=0.1)
+    t.scheduler = torch.optim.lr_scheduler.LambdaLR(t.optimizer, lambda _s: 1.0)
+    t.generator, t.batches = torch.Generator(), types.SimpleNamespace(epoch=0)
+    t.objective, t.emit = types.SimpleNamespace(balance=None), lambda *_a: None
+    path = t._save("step000010", False, fp, safetensors.torch)
+    assert safetensors.torch.load_file(path)["a.lokr_w2"].dtype == torch.bfloat16
+    state = torch.load(next((tmp_path / "user").rglob("*.pt")), weights_only=False)
+    assert state["live"]["a.lokr_w2"].item() == 1.0 + 2**-12 and "ema" not in state

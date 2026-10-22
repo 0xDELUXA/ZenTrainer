@@ -15,6 +15,8 @@ import torch
 
 from ...spec import OptimSpec
 
+AUTOMAGIC3_CEILING = 4.0  # Automagic3's LR stays under this many times where it started
+
 
 class Lion(torch.optim.Optimizer):
     """Lion (Chen et al. 2023): sign of an interpolated momentum. Memory of one moment;
@@ -211,6 +213,15 @@ def build(params: Iterable[torch.nn.Parameter], spec: OptimSpec):
     if not available(d):
         raise RuntimeError(f"{d.label} needs `{d.pip}`: run `scripts/zt extras optimizers` (or pip install {d.pip})")
     opt = d.build(list(params), spec)
+    if d.adaptive and spec.lr_floor > 0:  # a group at a multiple of the LR floors at that multiple too
+        for g in opt.param_groups:
+            if "min_lr" in g:
+                g["min_lr"] = spec.learning_rate * spec.lr_floor * g.get("lr_mult", 1.0)
+    if d.id == "Automagic3":
+        # its own ceiling (1e3) never binds: a steady trend (an edit's new input columns, an input
+        # dropped half the time) kept it climbing to hundreds and the run blew up
+        for g in opt.param_groups:
+            g["max_lr"] = spec.learning_rate * AUTOMAGIC3_CEILING * g.get("lr_mult", 1.0)
     if d.schedule_free or d.adaptive:  # its own warmup / LR control; the schedule must stay flat
         sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda i: 1.0)
     else:
