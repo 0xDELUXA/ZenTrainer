@@ -462,7 +462,7 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
         from .edit import encode_grounded, grounding_pixels
 
         for k, (i, inputs, text) in enumerate(grounded):
-            pics = [grounding_pixels(c) for c in inputs]
+            pics = [grounding_pixels(c, clip) for c in inputs]
             samples[i].cond = _to_cpu(encode_grounded(clip, text, pics))
             if spec.caption_dropout:
                 samples[i].cond_empty = _to_cpu(encode_grounded(clip, "", pics))

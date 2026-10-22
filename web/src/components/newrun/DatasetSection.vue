@@ -137,11 +137,11 @@ const VIDEO_MODES: [TrainSpec['dataset']['video_mode'], string][] = [
       <ZenField
         label="Inputs join as"
         stack
-        tip="References: each input picture joins the model's sequence beside the picture it makes, any size and framing (Flux 3 Klein, Flux 2, Kontext, Qwen Image Edit). Channels: each input is stacked onto the picture pixel for pixel, so it must line up with it (same framing and shape); cheap, and the LoRA runs in plain ComfyUI (InstructPixToPixConditioning for one input). MOSS Image takes channels"
+        tip="References: each input picture joins the model's sequence beside the picture it makes, any size and framing (Flux 3 Klein, Flux 2, Kontext, Qwen Image Edit; MOSS Image through ZenTrainer's MOSS Edit nodes). Channels (MOSS Image): each input is stacked onto the picture pixel for pixel, so it must line up with it (same framing and shape); cheap, and the LoRA runs in plain ComfyUI (InstructPixToPixConditioning for one input)"
       >
         <div class="seg">
-          <button :class="{ on: spec.dataset.edit_method !== 'concat' }" :disabled="channelModel || resuming" @click="spec.dataset.edit_method = ''">References</button>
-          <button :class="{ on: spec.dataset.edit_method === 'concat' }" :disabled="resuming" @click="spec.dataset.edit_method = 'concat'">Channels</button>
+          <button :class="{ on: spec.dataset.edit_method !== 'concat' }" :disabled="resuming" @click="spec.dataset.edit_method = ''">References</button>
+          <button :class="{ on: spec.dataset.edit_method === 'concat' }" :disabled="!channelModel || resuming" @click="spec.dataset.edit_method = 'concat'">Channels</button>
         </div>
       </ZenField>
       <ZenField
@@ -158,7 +158,7 @@ const VIDEO_MODES: [TrainSpec['dataset']['video_mode'], string][] = [
           <button class="chip-btn" :class="{ on: spec.dataset.edit_template === NK2E_TEMPLATE }" title="NK2E's instruction template" @click="spec.dataset.edit_template = spec.dataset.edit_template === NK2E_TEMPLATE ? '' : NK2E_TEMPLATE">NK2E</button>
         </div>
       </ZenField>
-      <ZenField v-if="spec.dataset.edit_method !== 'concat'" label="Encoder sees the input" stack tip="The text encoder looks at the input picture with the instruction (Qwen3-VL encoders: Krea 2, Qwen Image), as krea2edit's identity edits do: better at keeping who and what is in the picture. Each pair's text is encoded on its own, so caching takes longer">
+      <ZenField v-if="spec.dataset.edit_method !== 'concat'" label="Encoder sees the input" stack tip="The text encoder looks at the input picture with the instruction (vision-language encoders: Krea 2, Qwen Image, MOSS Image), as krea2edit's identity edits do: better at keeping who and what is in the picture. Each pair's text is encoded on its own, so caching takes longer">
         <div class="sw-row"><ZenSwitch :model-value="!!spec.dataset.edit_grounded" @update:model-value="spec.dataset.edit_grounded = $event" /><span class="sw-state">{{ spec.dataset.edit_grounded ? 'On' : 'Off' }}</span></div>
       </ZenField>
     </template>

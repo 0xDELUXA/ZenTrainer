@@ -226,6 +226,12 @@ class Samples(Callback):
             patched.add_weight_wrapper(f"{t.network.wide_name}.weight", wide.weight)
             if wide.bias_delta is not None:
                 patched.add_weight_wrapper(f"{t.network.wide_name}.bias", wide.bias)
+        from .moss_refs import supports
+
+        if getattr(t, "edit_method", None) and supports(patched.model):  # as the training model is
+            from . import moss_refs
+
+            moss_refs.apply(patched)
         base = t.spec.network.base_lora
         if base:  # the trained LoRA sits on it, so its samples do too
             if self._base_sd is None:
@@ -630,7 +636,7 @@ def _special(t, it):
         from .data.edit import encode_grounded, grounding_pixels
 
         def grounded(clip, text, negative):
-            px = [grounding_pixels(path)]
+            px = [grounding_pixels(path, clip)]
             return encode_grounded(clip, text, px), encode_grounded(clip, negative, px)
         return f"grounded|{base}", grounded
     return None

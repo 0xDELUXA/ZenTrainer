@@ -412,6 +412,12 @@ class Trainer:
                 raise ValueError(f"edit training, but no picture has an input in the control set(s) "
                                  f"{', '.join(s.dataset.control_sets)}")
             self.edit_method = None if self.h3 else method(patcher.model, s.dataset.edit_method)
+            from .moss_refs import supports
+
+            if supports(patcher.model):  # ComfyUI's MOSS reads no references: ZenTrainer's patch adds them
+                from . import moss_refs
+
+                moss_refs.apply(patcher)
             logging.info("[ZenTrainer] edit training: %d of %d images have an input picture (references: %s)",
                          pairs, len(self.dataset.samples), self.edit_method or "the model's own")
         if self.h3 and not s.dataset.video_audio and _has_soundtracks(root):

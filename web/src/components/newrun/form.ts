@@ -117,15 +117,14 @@ export function useRunForm() {
   watch(controlCounts, (c, before) => {
     if (c.control && !before?.control && !resuming.value && !chosenInputs.value.length) toggleInput('control')
   })
-  // MOSS Image takes its inputs as channels (references need a model that reads them): picked for
-  // it, and put back to references for a model that can't
+  // only MOSS Image's input layer widens for channel inputs: put back to references for a model
+  // that can't take them
   const channelModel = computed(() => familyId.value === 'moss-image')
   watch(
     () => [channelModel.value, chosenInputs.value.length > 0] as const,
     ([channels, on]) => {
       if (!on || resuming.value) return
-      if (channels && !spec.dataset.edit_method) spec.dataset.edit_method = 'concat'
-      else if (!channels && spec.dataset.edit_method === 'concat' && familyId.value) spec.dataset.edit_method = ''
+      if (!channels && spec.dataset.edit_method === 'concat' && familyId.value) spec.dataset.edit_method = ''
     },
   )
   // another dataset: keep only the sets it has

@@ -26,8 +26,10 @@ def _reads(model, key: str) -> bool:
 
 def takes_references(model) -> bool:
     """Whether this ComfyUI model takes reference inputs: reference_latents, or MiniMax H3's own
-    reference blocks."""
-    return _reads(model, "reference_latents") or is_h3(model)
+    reference blocks; or MOSS Image, which ZenTrainer's patch teaches them (moss_refs.py)."""
+    from ..moss_refs import supports
+
+    return _reads(model, "reference_latents") or is_h3(model) or supports(model)
 
 
 def is_h3(model) -> bool:
@@ -43,6 +45,10 @@ def method(model, chosen: str = "") -> str | None:
     NK2E / Kontext-style scheme)."""
     if chosen:
         return chosen
+    from ..moss_refs import DEFAULT, supports
+
+    if supports(model):  # ai-toolkit's MOSS-Image Edit layout (ComfyUI's "ai-toolkit" format)
+        return DEFAULT
     dm = getattr(model, "diffusion_model", None)
     own = getattr(dm, "default_ref_method", None) or getattr(getattr(dm, "params", None), "default_ref_method", None)
     return None if own else "index"
@@ -80,6 +86,25 @@ def with_concat(conditioning: list, latent: torch.Tensor) -> list:
 
 VISION = "<|vision_start|><|image_pad|><|vision_end|>"
 GROUNDING_PX = 768  # longest side of the picture the text encoder sees (krea2edit's grounding_px)
+# MOSS Image's encoder sees pictures as ai-toolkit's MOSS-Image Edit training shows them (and ComfyUI's
+# Text Encode MOSS-Image Edit, its "ai-toolkit" format): each scaled to at most this area, "Picture N:"
+# before it. Qwen3.5 makes a token of every 32 px square: ~144 tokens a picture
+MOSS_GROUNDING_AREA = 384 * 384
+
+
+def is_moss(clip) -> bool:
+    return type(getattr(clip, "tokenizer", None)).__name__ == "MOSSImageTokenizer"
+
+
+def moss_grounding(image: torch.Tensor) -> torch.Tensor:
+    """(1, H, W, 3) -> as MOSS's encoder sees it: area-scaled to at most MOSS_GROUNDING_AREA."""
+    import math
+
+    import comfy.utils
+
+    scale = min(1.0, math.sqrt(MOSS_GROUNDING_AREA / (image.shape[1] * image.shape[2])))
+    size = (round(image.shape[2] * scale), round(image.shape[1] * scale))
+    return comfy.utils.common_upscale(image.movedim(-1, 1), size[0], size[1], "area", "disabled").movedim(1, -1)
 
 
 def instruction(text: str, template: str) -> str:
@@ -91,20 +116,25 @@ def grounded_template(clip, n: int) -> str | None:
     when it isn't a vision-language chat encoder. Its own template matters: Krea 2's carries a
     system prompt that qwen3vl's default picture template doesn't."""
     tok = getattr(clip, "tokenizer", None)
+    if is_moss(clip):  # its conditioning template, an open think block and all; ai-toolkit's numbered pictures
+        pictures = "".join(f"Picture {i + 1}: {VISION}" for i in range(n))
+        return "<|im_start|>user\n" + pictures + "{}<|im_end|>\n<|im_start|>assistant\n<think>\n"
     base = getattr(tok, "llama_template", None)
     if not isinstance(base, str) or "user\n" not in base:
         return None
     return base.replace("user\n", "user\n" + VISION * n, 1)
 
 
-def grounding_pixels(path) -> torch.Tensor:
-    """An input picture as the text encoder sees it: whole (never cropped to the target),
-    longest side at most GROUNDING_PX. (1, H, W, 3) in [0, 1]."""
+def grounding_pixels(path, clip=None) -> torch.Tensor:
+    """An input picture as the text encoder sees it: whole (never cropped to the target), longest
+    side at most GROUNDING_PX (MOSS: moss_grounding). (1, H, W, 3) in [0, 1]."""
     import numpy as np
     from PIL import Image, ImageOps
 
     with Image.open(path) as im:
         im = ImageOps.exif_transpose(im).convert("RGB")
+        if is_moss(clip):
+            return moss_grounding(torch.from_numpy(np.asarray(im, dtype=np.float32) / 255.0)[None])
         if max(im.size) > GROUNDING_PX:
             s = GROUNDING_PX / max(im.size)
             im = im.resize((max(1, round(im.width * s)), max(1, round(im.height * s))), Image.Resampling.LANCZOS)
@@ -115,7 +145,9 @@ def encode_grounded(clip, text: str, pictures: list[torch.Tensor]):
     """A caption's conditioning with the encoder looking at these pictures."""
     template = grounded_template(clip, len(pictures))
     if template is None:
-        raise ValueError("grounded edits need a vision-language text encoder (Qwen3-VL: Krea 2, Qwen Image)")
+        raise ValueError("grounded edits need a vision-language text encoder (Qwen3-VL: Krea 2, Qwen Image; Qwen3.5: MOSS Image)")
+    if is_moss(clip):
+        text = text.strip()  # as MOSS's own template does
     tokens = clip.tokenize(text, images=pictures, llama_template=template)
     return clip.encode_from_tokens_scheduled(tokens)
 
