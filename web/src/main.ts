@@ -18,6 +18,7 @@ const router = createRouter({
     { path: '/tools', component: () => import('./views/ToolsView.vue') },
     { path: '/tools/merge', component: () => import('./views/MergeView.vue') },
     { path: '/tools/compact', component: () => import('./views/MergeView.vue'), props: { compact: true } },
+    { path: '/tools/inspect', component: () => import('./views/InspectView.vue') },
     { path: '/tools/split-videos', component: () => import('./views/SplitVideosView.vue') },
     { path: '/loras/merge', redirect: (to) => ({ path: '/tools/merge', query: to.query }) },
     { path: '/simple/run/:id', component: () => import('./views/SimpleRunView.vue'), props: true },

@@ -30,6 +30,14 @@ export const TOOLS: Tool[] = [
     accent: '#22c55e',
   },
   {
+    id: 'inspect',
+    name: 'Inspect a model file',
+    description: 'Look inside any .safetensors file, a LoRA or a whole model: its layers, shapes, precisions and metadata. Save a copy with other metadata, another precision, or layers left out.',
+    icon: 'mdi mdi-file-tree-outline',
+    category: 'loras',
+    accent: '#f59e0b',
+  },
+  {
     id: 'split-videos',
     name: 'Split videos into clips',
     description: 'Cut a dataset’s long videos into short clips spread through each one, soundtrack kept. The originals move aside, so training uses the clips.',

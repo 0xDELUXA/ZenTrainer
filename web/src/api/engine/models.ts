@@ -1,4 +1,5 @@
-// Model families, downloads, training adapters, noise schedules, LoRA merging (engine server/routes/models.py, loras.py).
+// Model families, downloads, training adapters, noise schedules, LoRA merging, inspecting
+// .safetensors files (engine server/routes/models.py, loras.py).
 
 import { call } from './client'
 import type { TrainSpec } from './spec'
@@ -14,6 +15,41 @@ export interface ModelFile {
   from_template: boolean
   /** the name ComfyUI's loaders list it by; null when not installed */
   installed: string | null
+}
+
+export type TensorFolder = 'loras' | 'diffusion_models' | 'checkpoints' | 'vae' | 'text_encoders'
+
+export interface TensorRow {
+  name: string
+  dtype: string
+  shape: number[]
+  params: number
+}
+
+/** a .safetensors file read from its header (engine/zentrainer/models/tensors.py) */
+export interface TensorFileInfo {
+  size: number
+  params: number
+  by_dtype: Record<string, { tensors: number; params: number; bytes: number }>
+  metadata: Record<string, string>
+  tensors: TensorRow[]
+  kind: 'lora' | 'model'
+  algorithm?: 'LoRA' | 'LoKr' | 'LoHa'
+  layers?: number
+  ranks?: number[]
+  quantized: boolean
+}
+
+export interface TensorCopy {
+  folder: TensorFolder
+  name: string
+  out_name: string
+  /** replaces the file's metadata; leave out to keep it */
+  metadata?: Record<string, string>
+  dtype?: 'bf16' | 'fp16' | 'fp32' | null
+  /** tensor names, or prefixes everything under is left out */
+  drop?: string[]
+  overwrite?: boolean
 }
 
 export interface SampleDefaults {
@@ -124,6 +160,13 @@ export const modelsApi = {
   clearDownloads: () => call<{ ok: true }>('/downloads/clear', { method: 'POST' }),
   mergeLoras: (body: { members: { name: string; strength: number }[]; out_name: string; max_rank?: number; energy?: number }) =>
     call<{ lora_name: string; mean_rank?: number; kept_energy?: number; bytes: number }>('/loras/merge', { method: 'POST', body: JSON.stringify(body) }),
+  tensorFiles: () => call<{ folders: Partial<Record<TensorFolder, string[]>> }>('/tensors/files').then((r) => r.folders),
+  inspectTensors: (folder: TensorFolder, name: string) => call<TensorFileInfo>(`/tensors?${new URLSearchParams({ folder, name })}`),
+  /** what the copy would hold, without writing it */
+  planTensorCopy: (body: TensorCopy) =>
+    call<{ tensors: number; bytes: number; converted: number; dropped: number }>('/tensors/copy', { method: 'POST', body: JSON.stringify({ ...body, dry_run: true }) }),
+  copyTensors: (body: TensorCopy) =>
+    call<{ folder: TensorFolder; name: string; bytes: number; tensors: number; converted: number; dropped: number }>('/tensors/copy', { method: 'POST', body: JSON.stringify(body) }),
   /** a model's own noise schedule from its file's header (engine/zentrainer/models/noise.py) */
   noise: (folder: 'diffusion_models' | 'checkpoints', name: string) =>
     call<NoiseProfile>(`/noise?${new URLSearchParams({ folder, name })}`),

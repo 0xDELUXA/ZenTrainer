@@ -1,8 +1,10 @@
-"""Model families, downloads, training adapters, and a model's noise schedule."""
+"""Model families, downloads, training adapters, a model's noise schedule, and inspecting or
+copying a .safetensors file."""
 
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 from aiohttp import web
 
@@ -146,3 +148,82 @@ def register(server) -> None:
 
         downloads.manager().clear()
         return web.json_response({"ok": True})
+
+    # ---- inspecting a .safetensors file, and saving a copy --------------------------------------
+
+    def _tensor_file(folder: str, name: str) -> str | None:
+        import folder_paths
+
+        from ...models import tensors
+
+        if folder not in tensors.FOLDERS or not name.lower().endswith(".safetensors"):
+            return None
+        return folder_paths.get_full_path(folder, name)
+
+    @routes.get("/zentrainer/api/tensors/files")
+    async def tensor_files(_request):
+        """The .safetensors files ComfyUI lists in each model folder."""
+        import folder_paths
+
+        from ...models import tensors
+
+        def listing():
+            out = {}
+            for folder in tensors.FOLDERS:
+                try:
+                    names = folder_paths.get_filename_list(folder)
+                except KeyError:
+                    continue
+                out[folder] = sorted(n.replace("\\", "/") for n in names if n.lower().endswith(".safetensors"))
+            return out
+
+        return web.json_response({"folders": await asyncio.to_thread(listing)})
+
+    @routes.get("/zentrainer/api/tensors")
+    async def inspect_tensors(request):
+        """?folder=&name=: the file's tensors (name, dtype, shape), metadata and totals, from its header."""
+        from ...models import tensors
+
+        path = _tensor_file(request.query.get("folder", ""), request.query.get("name", ""))
+        if not path:
+            return _bad("not found", 404)
+        try:
+            return web.json_response(await asyncio.to_thread(tensors.inspect, path))
+        except (OSError, ValueError) as e:
+            return _bad(f"can't read it: {e}")
+
+    @routes.post("/zentrainer/api/tensors/copy")
+    async def copy_tensors(request):
+        """Save a copy beside the file: {folder, name, out_name, metadata?, dtype?, drop?: [names or
+        prefixes], dry_run?}. metadata replaces the file's; dry_run says what the copy would hold."""
+        import os
+        import re as _re
+
+        from ...models import tensors
+
+        b = await request.json()
+        folder, name = str(b.get("folder", "")), str(b.get("name", "")).replace("\\", "/")
+        path = _tensor_file(folder, name)
+        if not path:
+            return _bad("not found", 404)
+        dtype = b.get("dtype") or None
+        drop = [str(x) for x in b.get("drop") or []]
+        meta = b.get("metadata")
+        if meta is not None and not isinstance(meta, dict):
+            return _bad("metadata must be an object of strings")
+        if b.get("dry_run"):
+            return web.json_response(await asyncio.to_thread(tensors.plan, path, dtype, drop))
+        stem = _re.sub(r"[^A-Za-z0-9_. ()-]+", "_", str(b.get("out_name") or "")).strip("._ ")
+        if stem.lower().endswith(".safetensors"):
+            stem = stem[: -len(".safetensors")]
+        if not stem:
+            return _bad("give the copy a name")
+        out = Path(path).with_name(f"{stem}.safetensors")
+        try:
+            stats = await asyncio.to_thread(tensors.save_copy, path, out, meta, dtype, drop, bool(b.get("overwrite")))
+        except FileExistsError as e:
+            return _bad(str(e), 409)
+        except (OSError, ValueError) as e:
+            return _bad(f"can't save the copy: {e}")
+        sub = os.path.dirname(name)
+        return web.json_response({"folder": folder, "name": f"{sub}/{out.name}" if sub else out.name, **stats})
