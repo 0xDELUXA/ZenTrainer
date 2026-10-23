@@ -9,7 +9,6 @@ import { inputChoices } from '@/api/comfy'
 import { EngineError, engine } from '@/api/engine'
 import { fmtBytes } from '@/stores/downloads'
 
-const props = defineProps<{ compact?: boolean }>()
 const route = useRoute()
 const keep = ref(99.9) // % of each layer's change (Frobenius) the shrink keeps
 const loras = ref<string[]>([])
@@ -27,8 +26,7 @@ onMounted(async () => {
   const names = (Array.isArray(add) ? add : add ? [add] : []).filter((x): x is string => typeof x === 'string')
   const each = names.length >= 3 ? 0.7 : names.length === 2 ? 0.95 : 1
   members.value = names.map((name) => ({ name, strength: each }))
-  if (props.compact) members.value = [{ name: names[0] ?? '', strength: 1 }]
-  else if (!members.value.length) members.value = [{ name: '', strength: 0.7 }, { name: '', strength: 0.7 }]
+  if (!members.value.length) members.value = [{ name: '', strength: 0.7 }, { name: '', strength: 0.7 }]
 })
 const items = computed(() => loras.value.map((n) => ({ value: n, label: n })))
 const ready = computed(() => members.value.filter((m) => m.name).length >= 1 && outName.value.trim())
@@ -43,7 +41,7 @@ async function run() {
     result.value = await engine.mergeLoras({
       members: members.value.filter((m) => m.name),
       out_name: outName.value.trim(),
-      max_rank: shrink.value || props.compact ? maxRank.value : 0,
+      max_rank: shrink.value ? maxRank.value : 0,
       energy: keep.value / 100,
     })
   } catch (e) {
@@ -58,13 +56,13 @@ async function run() {
   <div class="page merge">
     <div class="page-head">
       <div class="titles">
-        <h1><RouterLink to="/tools" class="crumb">Tools</RouterLink> {{ compact ? 'Compact a LoRA' : 'Merge LoRAs' }}</h1>
-        <p class="lede">{{ compact ? 'A smaller LoRA that keeps what matters.' : 'Bake several LoRAs into one, at the strengths you choose.' }}</p>
+        <h1><RouterLink to="/tools" class="crumb">Tools</RouterLink> Merge LoRAs</h1>
+        <p class="lede">Bake several LoRAs into one, at the strengths you choose.</p>
       </div>
     </div>
 
     <section class="card col">
-      <div class="eyebrow">{{ compact ? 'LoRA' : 'LoRAs' }}</div>
+      <div class="eyebrow">LoRAs</div>
       <div v-for="(m, i) in members" :key="i" class="mrow">
         <ZenCombo v-model="m.name" :items="items" placeholder="Pick a LoRA…" :item-height="30" />
         <div class="str">
@@ -74,7 +72,7 @@ async function run() {
         <button class="x" title="Remove" @click="members.splice(i, 1)"><i class="mdi mdi-close" /></button>
       </div>
       <div class="foot">
-        <button v-if="!compact" class="add" @click="add"><i class="mdi mdi-plus" /> Add a LoRA</button>
+        <button class="add" @click="add"><i class="mdi mdi-plus" /> Add a LoRA</button>
         <RouterLink
           v-if="members.some((m) => m.name)"
           :to="{ path: '/apps/text-to-image', query: { loras: JSON.stringify(members.filter((m) => m.name)) } }"
@@ -82,7 +80,7 @@ async function run() {
         >
           <ZenButton size="sm" icon="mdi mdi-creation-outline">Test in Text to Image</ZenButton>
         </RouterLink>
-        <span v-if="!compact" class="muted small">Total strength {{ total.toFixed(2) }}. A soup of 3 runs on one subject: 0.7 each; 2 runs: 0.95. Too strong (waxy, ignores prompts)? Lower them; no retraining.</span>
+        <span class="muted small">Total strength {{ total.toFixed(2) }}. A soup of 3 runs on one subject: 0.7 each; 2 runs: 0.95. Too strong (waxy, ignores prompts)? Lower them; no retraining.</span>
       </div>
     </section>
 
@@ -93,8 +91,8 @@ async function run() {
         <div class="f">
           <span class="small muted">Shrink</span>
           <div class="sw">
-            <ZenSwitch v-if="!compact" v-model="shrink" />
-            <template v-if="shrink || compact">
+            <ZenSwitch v-model="shrink" />
+            <template v-if="shrink">
               <span class="small">to rank ≤</span>
               <ZenNumber v-model="maxRank" :min="1" :max="128" :step="4" :precision="0" />
             </template>
@@ -102,14 +100,14 @@ async function run() {
           </div>
         </div>
       </div>
-      <label v-if="shrink || compact" class="f keep">
+      <label v-if="shrink" class="f keep">
         <span class="small muted">Keep {{ keep.toFixed(1) }}% of each layer’s change (Frobenius)</span>
         <ZenSlider v-model="keep" :min="90" :max="100" :step="0.1" />
         <span class="small muted">Per layer, the fewest directions that hold this share, up to the rank above. 99.9% is near-lossless; 95% is much smaller and still close.</span>
       </label>
       <div v-if="error" class="err small">{{ error }}</div>
       <div class="acts">
-        <ZenButton variant="primary" :icon="compact ? 'mdi mdi-arrow-collapse-all' : 'mdi mdi-call-merge'" :disabled="!ready || busy" @click="run">{{ busy ? (compact ? 'Compacting…' : 'Merging…') : compact ? 'Compact' : 'Merge' }}</ZenButton>
+        <ZenButton variant="primary" icon="mdi mdi-call-merge" :disabled="!ready || busy" @click="run">{{ busy ? 'Merging…' : 'Merge' }}</ZenButton>
       </div>
       <div v-if="result" class="done">
         <i class="mdi mdi-check-circle-outline" />

@@ -24,7 +24,7 @@ export const TOOLS: Tool[] = [
   {
     id: 'compact',
     name: 'Compact a LoRA',
-    description: 'Shrink one LoRA to a smaller rank, keeping the share of each layer’s change you choose (Frobenius). Smaller files, faster to run, a little noise dropped.',
+    description: 'Shrink a LoRA or LoKr to the size you want: rank goes to the layers that change most, across the whole file, optionally weighed against the base model. A LoKr can stay one or become a LoRA.',
     icon: 'mdi mdi-arrow-collapse-all',
     category: 'loras',
     accent: '#22c55e',

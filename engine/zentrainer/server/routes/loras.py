@@ -1,9 +1,12 @@
-"""The LoRA library behind zenkit-ui's LoRA picker (previews, info, favorites), and merging LoRAs."""
+"""The LoRA library behind zenkit-ui's LoRA picker (previews, info, favorites), merging LoRAs,
+and compacting one to a size budget."""
 
 from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+
+import threading
 
 from aiohttp import web
 
@@ -150,3 +153,104 @@ def register(server) -> None:
         except Exception as e:
             return _bad(f"merge failed: {e}")
         return web.json_response({"lora_name": f"merged/{out.name}", **stats})
+
+    # ---- compacting a LoRA or LoKr to a budget for the whole file (loras/compact.py) ----------------
+    analyses: dict[tuple, object] = {}  # the last few, so moving the target doesn't redo the SVDs
+    lock = threading.Lock()
+
+    def _analysis(path: str, fmt: str, base: str | None):
+        import os
+
+        from ...loras import compact
+
+        key = (path, os.path.getmtime(path), fmt, base)
+        with lock:
+            if key in analyses:
+                return analyses[key]
+        an = compact.analyze(path, fmt, base)
+        with lock:
+            analyses[key] = an
+            while len(analyses) > 3:
+                analyses.pop(next(iter(analyses)))
+        return an
+
+    def _compact_args(b: dict):
+        import folder_paths
+
+        path = _lora_path(str(b.get("name", "")).replace("\\", "/"))
+        if not path:
+            raise ValueError("can't find that LoRA")
+        base = None
+        if b.get("base"):
+            folder = str(b["base"].get("folder", "diffusion_models"))
+            if folder not in ("diffusion_models", "checkpoints"):
+                raise ValueError("the base model is a diffusion model or a checkpoint")
+            base = folder_paths.get_full_path(folder, str(b["base"].get("name", "")))
+            if not base:
+                raise ValueError("can't find that base model")
+        fmt = "lora" if b.get("format") == "lora" else "same"
+        target = b.get("target") or {}
+        keep = float(target["keep"]) if "keep" in target else None
+        params = int(target["params"]) if "params" in target else None
+        if keep is None and params is None:
+            keep = 0.99
+        return path, fmt, base, keep, params, max(0, int(b.get("max_rank") or 0))
+
+    @routes.post("/zentrainer/api/loras/compact/analyze")
+    async def compact_analyze(request):
+        """{name, format?: same|lora, base?: {folder, name}, max_rank?, target?: {keep: 0-1} | {params}}:
+        the size-against-share curve, and the ranks a target keeps (layer by layer)."""
+        import os
+
+        from ...loras import compact
+
+        try:
+            path, fmt, base, keep, params, max_rank = _compact_args(await request.json())
+            an = await asyncio.to_thread(_analysis, path, fmt, base)
+        except (ValueError, OSError, KeyError) as e:
+            return _bad(str(e))
+
+        def answer():
+            ks = compact.ranks(an, keep=keep, params=params, max_rank=max_rank)
+            return {"original": {"params": an.original_params, "bytes": os.path.getsize(path)},
+                    "curve": compact.curve(an, max_rank), "plan": compact.summary(an, ks),
+                    "names": [layer.name for layer in an.layers], "kind": sorted({layer.kind for layer in an.layers}),
+                    "full_ranks": [layer.s.numel() for layer in an.layers],
+                    "unsupported": an.unsupported, "base_matched": an.base_matched}
+
+        return web.json_response(await asyncio.to_thread(answer))
+
+    @routes.post("/zentrainer/api/loras/compact")
+    async def compact_lora(request):
+        """The analyze body plus {out_name, dtype?: bf16|fp16|fp32, overwrite?}. Saves to
+        output/zentrainer/loras/compact/ (the ZenTrainer folder's output/loras/compact/ if set)."""
+        import re as _re
+
+        from ...loras import compact
+
+        b = await request.json()
+        try:
+            path, fmt, base, keep, params, max_rank = _compact_args(b)
+        except (ValueError, KeyError) as e:
+            return _bad(str(e))
+        name = _re.sub(r"[^A-Za-z0-9_.-]+", "_", str(b.get("out_name") or "")).strip("._")
+        if name.lower().endswith(".safetensors"):
+            name = name[: -len(".safetensors")]
+        if not name:
+            return _bad("give the compacted LoRA a name")
+        out = paths.lora_dir() / "compact" / f"{name}.safetensors"
+        if out.exists() and not b.get("overwrite"):
+            return _bad(f"compact/{out.name} already exists", 409)
+
+        def run():
+            an = _analysis(path, fmt, base)
+            ks = compact.ranks(an, keep=keep, params=params, max_rank=max_rank)
+            return compact.build(path, out, an, ks, str(b.get("dtype") or "bf16"), bool(b.get("overwrite")))
+
+        try:
+            stats = await asyncio.to_thread(run)
+        except FileExistsError as e:
+            return _bad(str(e), 409)
+        except (ValueError, OSError) as e:
+            return _bad(f"compact failed: {e}")
+        return web.json_response({"lora_name": f"compact/{out.name}", **stats})

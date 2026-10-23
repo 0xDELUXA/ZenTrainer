@@ -52,6 +52,37 @@ export interface TensorCopy {
   overwrite?: boolean
 }
 
+export interface CompactRequest {
+  name: string
+  /** same: keep the file's kind; lora: LoKr layers become LoRA */
+  format?: 'same' | 'lora'
+  base?: { folder: 'diffusion_models' | 'checkpoints'; name: string } | null
+  max_rank?: number
+  target?: { keep: number } | { params: number }
+}
+
+export interface CompactPlan {
+  params: number
+  kept: number
+  layers: number
+  layers_kept: number
+  mean_rank: number
+  max_rank: number
+  ranks: number[]
+}
+
+export interface CompactAnalysis {
+  original: { params: number; bytes: number }
+  /** (parameters, share kept) along the file's ranking */
+  curve: [number, number][]
+  plan: CompactPlan
+  names: string[]
+  kind: ('lora' | 'lokr' | 'lokr_lora')[]
+  full_ranks: number[]
+  unsupported: string[]
+  base_matched: number | null
+}
+
 export interface SampleDefaults {
   model: string
   steps: number
@@ -160,6 +191,10 @@ export const modelsApi = {
   clearDownloads: () => call<{ ok: true }>('/downloads/clear', { method: 'POST' }),
   mergeLoras: (body: { members: { name: string; strength: number }[]; out_name: string; max_rank?: number; energy?: number }) =>
     call<{ lora_name: string; mean_rank?: number; kept_energy?: number; bytes: number }>('/loras/merge', { method: 'POST', body: JSON.stringify(body) }),
+  /** what compacting a LoRA to a target keeps, layer by layer (engine/zentrainer/loras/compact.py) */
+  analyzeCompact: (body: CompactRequest) => call<CompactAnalysis>('/loras/compact/analyze', { method: 'POST', body: JSON.stringify(body) }),
+  compactLora: (body: CompactRequest & { out_name: string; dtype?: 'bf16' | 'fp16' | 'fp32'; overwrite?: boolean }) =>
+    call<Omit<CompactPlan, 'ranks'> & { lora_name: string; bytes: number }>('/loras/compact', { method: 'POST', body: JSON.stringify(body) }),
   tensorFiles: () => call<{ folders: Partial<Record<TensorFolder, string[]>> }>('/tensors/files').then((r) => r.folders),
   inspectTensors: (folder: TensorFolder, name: string) => call<TensorFileInfo>(`/tensors?${new URLSearchParams({ folder, name })}`),
   /** what the copy would hold, without writing it */
