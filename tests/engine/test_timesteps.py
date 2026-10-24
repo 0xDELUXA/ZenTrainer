@@ -53,6 +53,23 @@ def test_flex_weighting_leans_to_heavy_noise():
     assert weighted[0] > plain[0] and weighted[1] < plain[1]
 
 
+def test_a_steps_numbers_are_read_together_at_its_end():
+    # the noise chart's draws stay unread through the step (reading them stalls the GPU), then
+    # settle hands back the loss and grad norm with them, in the order each micro-batch drew
+    o = Objective(ObjectiveSpec(target="x0"))  # a plain MSE against x0: the losses are scale²
+    o.start_step()
+    x0 = torch.zeros(2, 4, 2, 2)
+    for scale, sigma in ((1.0, torch.tensor([0.9, 0.2])), (2.0, torch.tensor([0.5, 0.1]))):
+        o.train_loss(x0, x0, torch.full_like(x0, scale), sigma, percents=1 - sigma)
+    assert o.drawn == []
+    loss, norm = o.settle(torch.tensor(3.5), torch.tensor(0.25))
+    assert (loss, norm) == (3.5, 0.25)
+    assert [(round(p, 2), round(s, 2), v) for p, s, v in o.drawn] == \
+        [(0.1, 0.9, 1.0), (0.8, 0.2, 1.0), (0.5, 0.5, 4.0), (0.9, 0.1, 4.0)]
+    o.start_step()
+    assert o.drawn == [] and o.settle(torch.tensor(1.0)) == [1.0]
+
+
 def test_bias_reaches_sigmas_through_a_shift():
     p = sample_percents(ObjectiveSpec(bias="high_noise"), 1000, torch.Generator().manual_seed(0))
     assert sigmas_for(None, p, shift=1.0).median() > 0.85

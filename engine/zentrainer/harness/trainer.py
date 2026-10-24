@@ -161,6 +161,10 @@ TIGHTEN_RETRIES = 3
 TRIAL_STEPS = (4, 7)
 TRIAL_SLOWER = 1.08
 
+# the run page's phase timings (data, forward, backward, optimizer) come from every this-many-th
+# step: timing them stalls the GPU at each phase's end
+PHASES_EVERY = 10
+
 
 class _Lazy:
     """Stands in for an object until it's actually used (the text encoder, for a cache hit)."""
@@ -920,21 +924,25 @@ class Trainer:
         s = self.spec
         ms = self.denoiser.model_sampling
         acc = s.optim.grad_accumulation_steps
-        total_loss = 0.0
-        # where the step's time goes (synchronised, so each phase owns its GPU work): data,
-        # forward, backward, optimizer. Shown on the run page; a sync per phase costs ~nothing
+        total_loss = torch.zeros((), device=self.device)
+        # where the step's time goes: data, forward, backward, optimizer, shown on the run page.
+        # Timing a phase means waiting for the GPU at its end, which leaves the GPU idle while the
+        # next phase's work is queued (about 5% of a step), so only every PHASES_EVERY-th step does
+        timed = self.step % PHASES_EVERY == 0
         sync = torch.cuda.synchronize if self.device.type == "cuda" else (lambda: None)
         ph = {"data": 0.0, "forward": 0.0, "backward": 0.0, "optimizer": 0.0}
         mark = time.perf_counter()
 
         def lap(name):
             nonlocal mark
+            if not timed:
+                return
             sync()
             now = time.perf_counter()
             ph[name] += now - mark
             mark = now
 
-        self.objective.drawn = []
+        self.objective.start_step()
         for a in range(acc):
             idx = next(self.batches)
             x0, weight, shapes = self.batch(idx)
@@ -956,7 +964,7 @@ class Trainer:
             lap("forward")
             scaled = loss / acc
             (self.scaler.scale(scaled) if self.scaler else scaled).backward()
-            total_loss += loss.item()
+            total_loss += loss.detach().float()
             lap("backward")
 
         if self.scaler:
@@ -967,7 +975,6 @@ class Trainer:
                 p.grad = p.grad.to(p.dtype)
         clip = s.optim.max_grad_norm
         norm = torch.nn.utils.clip_grad_norm_(params, clip if clip > 0 else float("inf"))
-        self.last_grad_norm = float(norm)
         if self.scaler:
             self.scaler.step(self.optimizer)
             self.scaler.update()
@@ -978,8 +985,11 @@ class Trainer:
         self.scheduler.step()
         self.optimizer.zero_grad(set_to_none=True)
         lap("optimizer")
-        self.last_phases = {k: round(v, 4) for k, v in ph.items()}
-        self.last_loss = total_loss / acc
+        if timed:
+            self.last_phases = {k: round(v, 4) for k, v in ph.items()}
+        # the step's one wait for the GPU: its loss, grad norm and noise chart, read together
+        loss_sum, grad_norm = self.objective.settle(total_loss, torch.as_tensor(norm))
+        self.last_loss, self.last_grad_norm = loss_sum / acc, grad_norm
 
     def _tread(self, idx: list[int]) -> dict | None:
         """TREAD's block replacements for this step: only on a video clip, only for models whose

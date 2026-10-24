@@ -6,6 +6,9 @@ and Manager show.
 ## Unreleased
 
 ### Training
+- **Steps wait for the GPU once instead of six times:** the loss, gradient norm and noise chart are
+  read together at the step's end, and the run page's phase timings come from every 10th step.
+  The GPU no longer idles between phases.
 - **"int8 forward" off now does what it says:** int8 models dequantize to bf16 for every matmul.
   ComfyUI had started multiplying in int8 whenever a layer trains, so turning it off changed
   nothing.

@@ -167,6 +167,26 @@ class Objective:
         self.loss_fn = LOSSES[spec.loss]
         self.balance = Balance() if spec.weighting == "balance" else None
         self.drawn: list[tuple[float, float, float]] = []  # (percent, σ, loss) since the trainer took them
+        self._unread: list[tuple] = []  # this step's (percents, σ, loss), still on the GPU: see settle
+
+    def start_step(self) -> None:
+        self.drawn, self._unread = [], []
+
+    def settle(self, *values: torch.Tensor) -> list[float]:
+        """The step's numbers off the GPU in one read: `values` (one-element tensors, returned as
+        floats) and what each sample drew and lost, into `drawn`. Reading any of them makes the CPU
+        wait for the GPU to finish, so a step does it once, at its end."""
+        unread, self._unread = self._unread, []
+        parts = [v.detach().float().reshape(1) for v in values] + [t for _, s, l in unread for t in (s, l)]
+        if not parts:
+            return []
+        flat = torch.cat([t.to(parts[0].device) for t in parts]).tolist()
+        out, rest = flat[:len(values)], flat[len(values):]
+        for p, s, _ in unread:
+            n = len(s)
+            self.drawn += zip(p.tolist(), rest[:n], rest[n:2 * n])
+            rest = rest[2 * n:]
+        return out
 
     def noisy(self, model_sampling, sigma: torch.Tensor, noise: torch.Tensor, x0: torch.Tensor) -> torch.Tensor:
         # noise_scaling reshapes a (B,) sigma itself, as in ComfyUI's samplers
@@ -199,7 +219,9 @@ class Objective:
         plain loss, so its curve means the same with or without."""
         loss = self.loss(x_t, x0, x0_pred, sigma, weight)
         if percents is not None:  # what each sample drew and lost, plain: the run page's noise chart
-            self.drawn += zip(percents.tolist(), sigma.detach().float().cpu().tolist(), loss.detach().float().cpu().tolist())
+            # (read at the step's end, by settle: reading it here would stall the GPU before the backward)
+            self._unread.append((percents.detach().float().cpu(), sigma.detach().float().reshape(-1),
+                                 loss.detach().float().reshape(-1)))
         if self.balance is not None and percents is not None:
             return loss * self.balance(percents, loss).to(loss)
         w = timestep_weight(self.spec, sigma)
