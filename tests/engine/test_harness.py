@@ -678,10 +678,11 @@ def test_skipped_blocks_get_no_adapters():
         TrainSpec.from_dict({**_spec(), "network": {"skip_blocks": "layers.22"}})
 
 
-def test_compile_is_auto_unless_set(monkeypatch):
+def test_compile_is_auto_unless_set_and_never_with_offloading(monkeypatch):
     from zentrainer.harness.kernels import compile as comp
 
-    assert comp.wanted(True, 10, True) == (True, "") and comp.wanted(False, 5000, False) == (False, "")
+    assert comp.wanted(True, 10, False) == (True, "") and comp.wanted(False, 5000, False) == (False, "")
+    assert not comp.wanted(True, 5000, True)[0]  # asked for, but offloaded weights break compiled graphs
     monkeypatch.setattr(comp.os, "name", "posix")
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object() if name == "triton" else None)
     assert comp.wanted(None, comp.AUTO_STEPS, False)[0]

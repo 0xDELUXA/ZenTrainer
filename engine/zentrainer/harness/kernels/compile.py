@@ -22,17 +22,19 @@ AUTO_STEPS = 500
 
 
 def wanted(setting: bool | None, steps: int, offloading: bool) -> tuple[bool, str]:
-    """Whether to compile, and why when it was decided for the user (setting None). Auto needs
-    Triton, which inductor generates its kernels with (often missing on Windows, where it also
-    needs a C++ compiler), and no offloading: weights moving between CPU and GPU recompile."""
+    """Whether to compile, and why when it wasn't simply what was asked. Never with weights
+    offloaded, even when asked: they move between CPU and GPU during a step, which compiled
+    graphs don't survive (an illegal memory access, a 16 GB card streaming 2 GB of Krea 2 with
+    compile on). Auto (setting None) also needs Triton, which inductor generates its kernels with
+    (often missing on Windows, where it also needs a C++ compiler)."""
+    if offloading:
+        return False, "not compiling with weights offloaded" + (" (turned off: weights that move break compiled graphs)" if setting else "")
     if setting is not None:
         return setting, ""
     import importlib.util
 
     if os.name == "nt" or importlib.util.find_spec("triton") is None:
         return False, "not compiling (needs Triton; turn it on in Memory to try)"
-    if offloading:
-        return False, "not compiling with weights offloaded"
     if steps < AUTO_STEPS:
         return False, f"not compiling a run under {AUTO_STEPS} steps (the compile would cost more than it saves)"
     return True, f"compiling: {steps} steps repay the first steps' compile"

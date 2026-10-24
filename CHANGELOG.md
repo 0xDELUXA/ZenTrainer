@@ -11,8 +11,9 @@ and Manager show.
   gradient to int8 (stochastically, so unbiased); turn it off in Memory to train with a bf16
   backward.
 - **Compile blocks is Auto by default:** on for runs of 500 steps or more when Triton is installed
-  and weights aren't offloaded (Krea 2 at 1024: about 14% faster once compiled). On and Off still
-  do what they say.
+  (Krea 2 at 1024: about 14% faster once compiled). Never with weights offloaded, even when turned
+  on (or set by a recipe): weights moving between CPU and GPU crashed compiled runs with an illegal
+  memory access on a 16 GB card.
 - **Experimental: fused q/k norm + rope for Krea 2** (memory.fused_qk_rope, off by default): the
   attention's norms and rope run as one op with its own backward instead of six separate ones.
   Same maths, slightly less rounding.
