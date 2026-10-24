@@ -1,0 +1,22 @@
+# Left out of the ComfyUI Registry / Manager pack (`comfy node publish` packs what git tracks,
+# minus these). The node pack needs the engine, the built app and its frontend extension:
+# [tool.comfy] includes keeps web/dist and engine/js in, even though web/ is listed here.
+
+# running ZenTrainer from a clone: the launchers and zt
+cli/
+scripts/
+start-linux.sh
+start-windows.bat
+
+# the web app's source (the pack carries it built, as web/dist)
+web/
+
+# development
+tests/
+pytest.ini
+examples/
+.github/
+.gitattributes
+
+# README images (the Registry page links them from GitHub)
+docs/
