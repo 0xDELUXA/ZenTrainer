@@ -44,6 +44,8 @@ def wizard() -> bool:
             ui.ok(f"added {path}")
         else:
             ui.warn(f"{path} isn't a folder")
+    for name, mem in comfy.gpus():
+        ui.ok(f"found {name} ({mem / 2**30:.0f} GB)")
     detected = comfy.pick_torch(L["torch"]["variants"])
     labels = {"cpu": "CPU only (no GPU: very slow)"}
     torch = ui.choose("PyTorch build", [(f"{v}{'  (detected)' if v == detected else ''}" if v not in labels else labels[v], v)

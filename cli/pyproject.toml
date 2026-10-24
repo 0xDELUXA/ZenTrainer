@@ -4,9 +4,10 @@ version = "0.1.0"
 description = "zt: set up, run, update and watch ZenTrainer from a terminal."
 requires-python = ">=3.10"
 dependencies = [
-  "rich>=13.7",
-  "questionary>=2.0",
-  "textual>=1.0",
+  "rich>=13.7",          # what you read: colours, tables, progress
+  "questionary>=2.0",    # what you answer: arrow-key menus, confirms, path completion
+  "textual>=1.0",        # zt monitor: the live dashboard
+  "nvidia-ml-py>=12",    # NVIDIA's NVML binding: the driver's CUDA version and the GPUs
 ]
 
 [project.scripts]

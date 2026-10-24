@@ -55,12 +55,43 @@ def link(target: Path, at: Path) -> None:
 
 # ---- the PyTorch build for this machine ---------------------------------------------------------
 
-def driver_cuda() -> tuple[int, int] | None:
-    if not shutil.which("nvidia-smi"):
+def _nvml():
+    """NVML (NVIDIA's library, part of the driver) ready to query, or None without an NVIDIA driver."""
+    try:
+        import pynvml
+
+        pynvml.nvmlInit()
+        return pynvml
+    except Exception:
         return None
-    out = subprocess.run(["nvidia-smi"], capture_output=True, text=True).stdout
-    m = re.search(r"CUDA (?:UMD )?Version:\s*(\d+)\.(\d+)", out)  # newer drivers say "CUDA UMD Version"
-    return (int(m[1]), int(m[2])) if m else None
+
+
+def driver_cuda() -> tuple[int, int] | None:
+    """The newest CUDA the NVIDIA driver supports, e.g. (13, 0)."""
+    nvml = _nvml()
+    if not nvml:
+        return None
+    try:
+        v = nvml.nvmlSystemGetCudaDriverVersion_v2()  # 13040 -> 13.4
+        return v // 1000, (v % 1000) // 10
+    finally:
+        nvml.nvmlShutdown()
+
+
+def gpus() -> list[tuple[str, int]]:
+    """Each NVIDIA GPU's name and memory in bytes."""
+    nvml = _nvml()
+    if not nvml:
+        return []
+    try:
+        out = []
+        for i in range(nvml.nvmlDeviceGetCount()):
+            h = nvml.nvmlDeviceGetHandleByIndex(i)
+            name = nvml.nvmlDeviceGetName(h)
+            out.append((name.decode() if isinstance(name, bytes) else name, nvml.nvmlDeviceGetMemoryInfo(h).total))
+        return out
+    finally:
+        nvml.nvmlShutdown()
 
 
 def pick_torch(variants: dict) -> str:
@@ -355,6 +386,8 @@ def doctor() -> None:
     row("uv", bool(uv_bin), f"{uv_ver}  [dim]{uv_bin}[/]" if uv_bin else "not found")
     cuda = driver_cuda()
     row("driver", bool(cuda) or None, "CUDA %d.%d" % cuda if cuda else "no NVIDIA driver found")
+    for i, (name, mem) in enumerate(gpus()):
+        row(f"gpu {i}", True, f"{name}, {mem / 2**30:.0f} GB")
     if repo.venv_python().is_file():
         code = ("import torch;print(torch.__version__, 'cuda' if torch.cuda.is_available() else 'no-cuda',"
                 " torch.cuda.get_device_name(0) if torch.cuda.is_available() else '')")
