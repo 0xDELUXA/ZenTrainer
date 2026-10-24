@@ -3,6 +3,7 @@ thing it replaces (and only by a complete build), and it finds a free port rathe
 Everything runs on throwaway git repositories under tmp_path."""
 
 import json
+import os
 import socket
 import subprocess
 from pathlib import Path
@@ -130,6 +131,22 @@ def test_a_taken_port_moves_to_the_next_free_one(clones):
         assert got != taken and not ports.taken(got)
         with pytest.raises(SystemExit):  # a --port given on the command line is kept to
             ports.free(taken)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="TIME_WAIT doesn't block a bind on Windows")
+def test_a_port_a_server_just_let_go_of_is_free():
+    # the server closes its side first, as one that stops does: its connection lingers in TIME_WAIT.
+    # It sets SO_REUSEADDR as ComfyUI's (aiohttp's) does; Linux lets a bind through only when both do
+    with socket.socket() as server:
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind(("127.0.0.1", 0))
+        server.listen()
+        port = server.getsockname()[1]
+        client = socket.create_connection(("127.0.0.1", port))
+        conn, _ = server.accept()
+        conn.close()
+    client.close()
+    assert not ports.taken(port)
 
 
 def test_follow_reads_only_new_rows_from_either_server():

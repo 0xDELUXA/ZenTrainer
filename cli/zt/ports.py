@@ -8,6 +8,7 @@ are a --port from the command line (None when not given).
 from __future__ import annotations
 
 import json
+import os
 import socket
 import urllib.request
 
@@ -55,6 +56,11 @@ def taken(port: int) -> bool:
         if s.connect_ex(("127.0.0.1", port)) == 0:
             return True
     with socket.socket() as s:
+        # a server that just stopped leaves its closed connections on the port for about a minute
+        # (TIME_WAIT); ComfyUI binds through those, so the test must too. Not on Windows, where the
+        # same flag would let it bind over a program still using the port.
+        if os.name != "nt":
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             s.bind(("127.0.0.1", port))
         except OSError:
