@@ -89,21 +89,45 @@ in its top bar (or open `/zentrainer/` on its port, e.g. http://127.0.0.1:8188/z
 models, `input/` and `output/`; it needs ComfyUI 0.41 or newer and says so if yours is older.
 Nothing extra to install: everything it needs ships with ComfyUI (optional optimizers:
 `pip install -r requirements-optional.txt`). A Registry/Manager install includes the built app; a
-git clone needs it built once (`cd web && pnpm install && pnpm build`).
+git clone needs it once: `scripts/zt web` fetches the prebuilt one (or builds it, with pnpm).
 
-**Its own pinned ComfyUI, with `scripts/zt`** (for keeping training separate, below): a
+**Its own pinned ComfyUI, from a clone** (for keeping training separate, below): a
 dedicated ComfyUI at the tested commit with its own venv, reading your existing models in place.
-Updating your main ComfyUI or its custom nodes can't break a run.
+Updating your main ComfyUI or its custom nodes can't break a run. Only git is needed:
 
-## Run it (scripts/zt)
+| | |
+|---|---|
+| **Linux** | `git clone https://github.com/Nynxz/ZenTrainer && cd ZenTrainer && ./start-linux.sh` |
+| **Windows** | Install [Git for Windows](https://git-scm.com/download/win), clone the repository, then double-click `start-windows.bat` |
+
+The first run installs [uv](https://docs.astral.sh/uv/) if it's missing (it brings its own
+Python), asks where your models are and which PyTorch build to use, then sets up and starts.
+After that it opens a menu (start, doctor, extras, settings) and checks for updates on the way
+in: an update only ever fast-forwards a clean checkout, and it's skipped when you have local
+changes or commits. Arguments pass through to `zt`, e.g. `./start-linux.sh start --open`.
+If ZenTrainer is already running it says where; if another program has its port (8189), it
+uses the next free one. macOS isn't supported yet.
+
+## Run it (zt)
+
+`zt` is ZenTrainer's command line (`cli/`, run through uv): the start scripts open its menu, and
+every command works on its own too. `scripts/zt` runs it from a clone; to type just `zt`
+anywhere, install it once with `uv tool install --editable ./cli`.
 
 ```sh
-scripts/zt setup --models-from /path/to/your/ComfyUI   # clone pinned ComfyUI, install, link the engine
-scripts/zt start --open                                # http://127.0.0.1:8189/zentrainer/
-scripts/zt dev                                         # ComfyUI + web app with hot reload (:5173/zentrainer/)
-scripts/zt restart                                     # restart ComfyUI (picks up engine changes)
-scripts/zt doctor                                      # what's installed, where models come from
+zt                      # the menu: first-run setup, update check, start, monitor
+zt setup --models-from /path/to/your/ComfyUI   # clone pinned ComfyUI, install, link the engine
+zt start --open         # http://127.0.0.1:8189/zentrainer/
+zt monitor              # a live dashboard: queue, runs, loss, memory (p pause, s stop, c save)
+zt dev                  # ComfyUI + web app with hot reload (:5173/zentrainer/)
+zt restart              # restart ComfyUI (picks up engine changes)
+zt doctor               # what's installed, where models come from
+zt update               # pull ZenTrainer, re-sync ComfyUI and the web app
 ```
+
+Headless, for scripts or a machine without a browser: `zt train spec.json --follow`, `zt runs`,
+`zt follow RUN`, `zt pause|stop|save RUN`, `zt resume RUN`, `zt sample RUN "prompt"`,
+`zt queue`, `zt caption DATASET --model FILE`. `zt --help` lists them all.
 
 `--models-from` takes an existing ComfyUI install (its `models/` and its
 `extra_model_paths.yaml`) or a plain models folder. To point at a yaml directly, use
@@ -113,15 +137,15 @@ into `comfyui/`: ComfyUI loads that file on its own.
 
 Datasets go in `comfyui/input/<name>/`; trained LoRAs land in
 `comfyui/output/zentrainer/loras/`, and run history in `comfyui/user/zentrainer/`. That's your
-work: to reinstall, use `scripts/zt update` rather than deleting `comfyui/`, or move those three
+work: to reinstall, use `zt update` rather than deleting `comfyui/`, or move those three
 folders out first. Theme packs are bundled; `--zenkit` is optional.
 
-Prefer one ComfyUI? `scripts/zt attach /path/to/ComfyUI` links the engine into it
+Prefer one ComfyUI? `zt attach /path/to/ComfyUI` links the engine into it
 instead. It works as long as that ComfyUI is close to the pin in `comfy.lock`.
 
 `comfy.lock` pins the ComfyUI commit and torch build that the harness is tested
 against. The harness uses ComfyUI internals, so move the pin with
-`scripts/zt update --ref <commit|tag>` and test before committing it.
+`zt update --ref <commit|tag>` and test before committing it.
 
 ## How it works
 
@@ -140,8 +164,8 @@ docs/     architecture, apps; banner/ holds the README banner's source
 
 ## Develop
 
-`scripts/zt dev` is the loop: web edits hot-reload at http://localhost:5173/zentrainer/,
-engine (Python) edits need `scripts/zt restart` (or Restart on the System page).
+`zt dev` is the loop: web edits hot-reload at http://localhost:5173/zentrainer/,
+engine (Python) edits need `zt restart` (or Restart on the System page).
 
 ```sh
 # tests (no GPU)
