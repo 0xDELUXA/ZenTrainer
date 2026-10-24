@@ -73,7 +73,7 @@ const gridSize = computed(() => thumbPick.value ?? fitSize.value)
       <div class="seg" role="tablist">
         <button :class="{ on: sampleView === 'latest' }" @click="sampleView = 'latest'">Latest</button>
         <button :class="{ on: sampleView === 'grid' }" :disabled="!steps.length" title="Each prompt across training: in the viewer ←→ steps, ↑↓ prompts (or WASD)" @click="sampleView = 'grid'">Progression</button>
-        <button :class="{ on: sampleView === 'manual' }" title="Try any prompt at the current step, apart from the run's samples" @click="sampleView = 'manual'">Manual<span v-if="manualCount" class="muted"> {{ manualCount }}</span><i class="mdi mdi-circle live-dot" :class="{ off: !liveManual }" /></button>
+        <button class="manual-tab" :class="{ on: sampleView === 'manual' }" title="Try any prompt at the current step, apart from the run's samples" @click="sampleView = 'manual'">Manual<span v-if="manualCount" class="muted"> {{ manualCount }}</span><i v-if="liveManual" class="mdi mdi-circle live-dot" title="Rendering a try" /></button>
       </div>
       <button
         v-if="running"
@@ -103,14 +103,18 @@ const gridSize = computed(() => thumbPick.value ?? fitSize.value)
 
 <style scoped src="./section.css"></style>
 <style scoped>
-.live-dot {
-  color: var(--zen-accent);
-  font-size: 8px;
-  margin-left: 4px;
-  vertical-align: middle;
+.manual-tab {
+  position: relative;
 }
-.live-dot.off {
-  visibility: hidden; /* keeps its room: the tab doesn't change width when a render starts */
+/* over the tab's corner, so it takes no room: no gap while idle, no jump when a render starts */
+.live-dot {
+  position: absolute;
+  top: 1px;
+  right: 2px;
+  color: var(--zen-accent);
+  font-size: 7px;
+  line-height: 1;
+  pointer-events: none;
 }
 .samples-head {
   align-items: center;

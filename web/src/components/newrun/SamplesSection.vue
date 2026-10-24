@@ -19,6 +19,29 @@ function useSuggestion() {
   if (!s?.installed) return
   Object.assign(spec.samples, { model_name: s.installed, steps: s.steps, cfg: s.cfg, sampler: s.sampler, scheduler: s.scheduler })
 }
+// the scheduler, or "custom": the sigmas typed here (steps then follow from them)
+const scheduleItems = computed(() => [...items(choices.scheduler ?? ['normal']), { value: 'custom', label: 'Custom sigmas', keywords: 'custom sigmas manual' }])
+const schedule = computed({
+  get: () => (spec.samples.sigmas?.length ? 'custom' : spec.samples.scheduler),
+  set: (v: string) => {
+    if (v === 'custom') spec.samples.sigmas = spec.samples.sigmas?.length ? spec.samples.sigmas : [1, 0.9, 0.75, 0.55, 0.35, 0.15, 0]
+    else {
+      spec.samples.sigmas = []
+      spec.samples.scheduler = v
+    }
+  },
+})
+const sigmasText = ref((spec.samples.sigmas ?? []).join(', '))
+watch(() => spec.samples.sigmas, (v) => {
+  if ((v ?? []).join(', ') !== sigmasText.value.split(/[\s,]+/).filter(Boolean).map(Number).join(', ')) sigmasText.value = (v ?? []).join(', ')
+})
+function setSigmas(input: string | number) {
+  const text = String(input)
+  sigmasText.value = text
+  const v = text.split(/[\s,]+/).filter(Boolean).map(Number)
+  if (v.length >= 2 && v.every((x, i) => Number.isFinite(x) && x >= 0 && (!i || x <= v[i - 1]!))) spec.samples.sigmas = v
+}
+const sigmasBad = computed(() => schedule.value === 'custom' && sigmasText.value.split(/[\s,]+/).filter(Boolean).map(Number).join(', ') !== (spec.samples.sigmas ?? []).join(', '))
 const slgLayersText = computed({
   get: () => spec.samples.slg_layers.join(', '),
   set: (v: string) => (spec.samples.slg_layers = (v.match(/\d+/g) ?? []).map(Number)),
@@ -243,7 +266,11 @@ async function savePromptSet(name: string) {
       </div>
     </ZenField>
     <ZenField label="Sampler" stack><ZenCombo v-model="spec.samples.sampler" :items="items(choices.sampler ?? ['euler'])" /></ZenField>
-    <ZenField label="Scheduler" stack><ZenCombo v-model="spec.samples.scheduler" :items="items(choices.scheduler ?? ['normal'])" /></ZenField>
+    <ZenField label="Scheduler" stack><ZenCombo v-model="schedule" :items="scheduleItems" :sorted="false" /></ZenField>
+    <ZenField v-if="schedule === 'custom'" label="Sigmas" stack class="wide-f" :tip="`The noise levels sampling steps through, high to low (one step between each pair: ${Math.max(0, (spec.samples.sigmas?.length ?? 1) - 1)} steps), in the model's own sigma scale: 1 to 0 for flow models (Krea 2, Flux, MOSS). Steps above then doesn't apply`">
+      <ZenInput :model-value="sigmasText" :class="{ bad: sigmasBad }" placeholder="1, 0.9, 0.75, 0.55, 0.35, 0.15, 0" @update:model-value="setSigmas" />
+      <span v-if="sigmasBad" class="small warn">two or more numbers, high to low, none below 0</span>
+    </ZenField>
     <ZenField label="Seed" stack><ZenNumber v-model="spec.samples.seed" :min="0" :step="1" :precision="0" /></ZenField>
     <ZenField label="Skip-layer guidance" stack tip="Negative pass: skip layers in the unconditional pass (free). Extra pass: one more forward per step">
       <div class="seg">

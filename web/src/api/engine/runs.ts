@@ -100,6 +100,8 @@ export interface SampleRow {
   manual?: boolean
   /** a manual render without the LoRA, to compare with the one at the same index */
   base?: boolean
+  /** a manual render's sampling (its own, or the run's) */
+  sampling?: { sampler: string; scheduler: string; steps: number; cfg: number; sigmas?: number[] }
   seed?: number
   width?: number
   height?: number

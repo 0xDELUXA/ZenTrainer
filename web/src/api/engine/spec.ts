@@ -151,6 +151,8 @@ export interface TrainSpec {
     cfg: number
     sampler: string
     scheduler: string
+    /** custom sigmas, high to low, in place of the scheduler and steps; [] = the scheduler */
+    sigmas?: number[]
     seed: number
     baseline: boolean
     model_name: string | null
@@ -279,6 +281,7 @@ export function defaultSpec(): TrainSpec {
       cfg: 5,
       sampler: 'euler',
       scheduler: 'normal',
+      sigmas: [],
       seed: 42,
       baseline: true,
       model_name: null,

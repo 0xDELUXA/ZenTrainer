@@ -3,7 +3,8 @@
 // from the run's samples. One row per try: its prompt, then its renders across (no LoRA, then
 // each step), with the tries still waiting their turn.
 import { ZenButton, ZenCombo, ZenNumber, ZenSwitch } from '@nynxz/zenkit-ui'
-import { computed, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { inputChoices } from '@/api/comfy'
 import { viewUrl, type SampleRow } from '@/api/engine'
 import { vAutosize } from '@/lib/autosize'
 import { useRunContext } from './context'
@@ -28,7 +29,7 @@ const manualGroups = computed(() => {
 async function again(g: { index: number; base: SampleRow | null; steps: SampleRow[] }) {
   const x = g.steps.at(-1) ?? g.base
   if (!x) return
-  await queueTry({ prompt: x.prompt, width: x.width, height: x.height, frames: x.frames, seed: x.seed, base: false, index: g.index }, x.prompt, g.index)
+  await queueTry({ prompt: x.prompt, width: x.width, height: x.height, frames: x.frames, seed: x.seed, base: false, index: g.index, ...(x.sampling ?? {}) }, x.prompt, g.index)
 }
 // the cards for tries not landed yet: the first one is live while a manual render runs (even
 // one this page didn't queue, e.g. after a reload)
@@ -67,20 +68,68 @@ const tryPrompt = ref('')
 const trySize = ref('')
 const tryFrames = ref<number | null>(null)
 const tryBase = ref(true)
+// a try's own sampling (else the run's): sampler, scheduler or custom sigmas, steps, CFG
+const tune = ref(false)
+const tuned = reactive({ sampler: '', scheduler: '', steps: null as number | null, cfg: null as number | null, sigmas: '' })
+const samplerNames = ref<string[]>([])
+const schedulerNames = ref<string[]>([])
+onMounted(async () => {
+  ;[samplerNames.value, schedulerNames.value] = await Promise.all([inputChoices('KSampler', 'sampler_name'), inputChoices('KSampler', 'scheduler')])
+})
+const run = computed(() => detail.value?.spec.samples)
+const runSchedule = computed(() => (run.value?.sigmas?.length ? 'custom' : run.value?.scheduler ?? 'normal'))
+const samplerItems = computed(() => [{ value: '', label: `Run's (${run.value?.sampler ?? 'euler'})` }, ...samplerNames.value.map((v) => ({ value: v, label: v }))])
+const schedulerItems = computed(() => [
+  { value: '', label: `Run's (${runSchedule.value})` },
+  ...schedulerNames.value.map((v) => ({ value: v, label: v })),
+  { value: 'custom', label: 'Custom sigmas' },
+])
+const sigmaList = computed(() => tuned.sigmas.split(/[\s,]+/).filter(Boolean).map(Number))
+const sigmaError = computed(() => {
+  if (tuned.scheduler !== 'custom') return ''
+  const v = sigmaList.value
+  if (v.length < 2 || v.some((x) => !Number.isFinite(x))) return 'two or more numbers, high to low'
+  if (v.some((x, i) => x < 0 || (i && x > v[i - 1]!))) return 'high to low, none below 0'
+  return ''
+})
+function sampling(): Record<string, unknown> {
+  if (!tune.value) return {}
+  const out: Record<string, unknown> = {}
+  if (tuned.sampler) out.sampler = tuned.sampler
+  if (tuned.scheduler === 'custom') out.sigmas = sigmaList.value
+  else if (tuned.scheduler) out.scheduler = tuned.scheduler
+  if (tuned.steps != null && tuned.scheduler !== 'custom') out.steps = tuned.steps
+  if (tuned.cfg != null) out.cfg = tuned.cfg
+  return out
+}
+const ownSampling = computed(() => Object.keys(sampling()).length > 0)
+// what the next try renders with, its own settings or the run's
+const samplingSummary = computed(() => {
+  const own = tune.value
+  const sampler = (own && tuned.sampler) || run.value?.sampler || 'euler'
+  const custom = own && tuned.scheduler === 'custom'
+  const sched = custom ? 'custom' : (own && tuned.scheduler) || runSchedule.value
+  const steps = custom ? Math.max(0, sigmaList.value.length - 1) : (own && tuned.steps) || (runSchedule.value === 'custom' ? (run.value?.sigmas?.length ?? 1) - 1 : run.value?.steps ?? 20)
+  const cfg = (own && tuned.cfg != null ? tuned.cfg : run.value?.cfg) ?? 1
+  return `${sampler} · ${sched} · ${steps} steps · cfg ${cfg}`
+})
+const samplingText = (x: SampleRow) =>
+  x.sampling ? ` · ${x.sampling.sampler} / ${x.sampling.scheduler} · ${x.sampling.steps} steps · cfg ${x.sampling.cfg}` : ''
 async function renderTry() {
   // one try per line: several prompts queue at once
   const lines = tryPrompt.value.split('\n').map((l) => l.trim()).filter(Boolean)
-  if (!lines.length) return
+  if (!lines.length || sigmaError.value) return
+  const own = sampling()
   const [w, h] = trySize.value ? trySize.value.split('x').map(Number) : [undefined, undefined]
   tryPrompt.value = ''
   if (sampleCkpt.value) {
     // finished: one job renders them all on the newest checkpoint
     queueFinishedTries(lines)
-    await sampleFinished(lines.map((prompt) => ({ prompt, width: w, height: h, frames: tryFrames.value ?? undefined, base: tryBase.value })))
+    await sampleFinished(lines.map((prompt) => ({ prompt, width: w, height: h, frames: tryFrames.value ?? undefined, base: tryBase.value, ...own })))
     return
   }
   for (const prompt of lines)
-    await queueTry({ prompt, width: w, height: h, frames: tryFrames.value ?? undefined, base: tryBase.value }, prompt)
+    await queueTry({ prompt, width: w, height: h, frames: tryFrames.value ?? undefined, base: tryBase.value, ...own }, prompt)
 }
 const trySizes = computed(() => {
   const sp = detail.value?.spec.samples
@@ -125,11 +174,26 @@ const tileOf = (x: SampleRow | null | undefined) => {
         :placeholder="`Try a prompt ${running ? 'at this step' : newestCkpt ? `on the step ${newestCkpt.step} checkpoint` : ''}, e.g. [trigger] reading a book in a cafe (one per line for several)`"
         @keydown.ctrl.enter="renderTry"
       />
-      <div class="try-opts">
-        <ZenCombo v-model="trySize" :items="trySizes" :sorted="false" :searchable="false" size="sm" />
+      <div class="try-bar">
+        <ZenCombo v-model="trySize" class="size" :items="trySizes" :sorted="false" :searchable="false" size="sm" />
         <ZenNumber v-if="(detail.spec.samples.frames ?? 1) > 1" :model-value="tryFrames ?? detail.spec.samples.frames ?? 1" :min="1" :max="361" :step="17" :precision="0" size="sm" title="Frames" @update:model-value="tryFrames = $event" />
+        <button class="chip small" :class="{ on: tune, own: tune && ownSampling }" title="Its own sampler, scheduler (or custom sigmas), steps and CFG, to compare them as the run trains" @click="tune = !tune">
+          <i class="mdi mdi-tune-variant" /> <span class="mono">{{ samplingSummary }}</span> <i :class="tune ? 'mdi mdi-chevron-up' : 'mdi mdi-chevron-down'" />
+        </button>
         <label class="base-sw small" title="Also render the same prompt and seed without the LoRA, to compare"><ZenSwitch v-model="tryBase" size="sm" /> Compare with base</label>
-        <ZenButton size="sm" variant="primary" icon="mdi mdi-creation-outline" :disabled="(status !== 'training' && !sampleCkpt) || !tryPrompt.trim()" :title="status === 'training' ? 'Queues it (Ctrl+Enter). One prompt per line queues several' : sampleCkpt ? `Renders with the step ${sampleCkpt.step} checkpoint (Ctrl+Enter). One prompt per line for several` : 'Only while it trains, or once it has a checkpoint'" @click="renderTry">Render</ZenButton>
+        <span class="grow" />
+        <ZenButton size="sm" variant="primary" icon="mdi mdi-creation-outline" :disabled="(status !== 'training' && !sampleCkpt) || !tryPrompt.trim() || !!sigmaError" :title="status === 'training' ? 'Queues it (Ctrl+Enter). One prompt per line queues several' : sampleCkpt ? `Renders with the step ${sampleCkpt.step} checkpoint (Ctrl+Enter). One prompt per line for several` : 'Only while it trains, or once it has a checkpoint'" @click="renderTry">Render</ZenButton>
+      </div>
+      <div v-if="tune" class="try-tune">
+        <label class="f"><span class="lbl">Sampler</span><ZenCombo v-model="tuned.sampler" :items="samplerItems" :sorted="false" size="sm" /></label>
+        <label class="f"><span class="lbl">Scheduler</span><ZenCombo v-model="tuned.scheduler" :items="schedulerItems" :sorted="false" size="sm" /></label>
+        <label v-if="tuned.scheduler === 'custom'" class="f wide">
+          <span class="lbl">Sigmas, high to low <span v-if="sigmaError" class="warn">· {{ sigmaError }}</span><span v-else class="muted">· {{ Math.max(0, sigmaList.length - 1) }} steps</span></span>
+          <input v-model="tuned.sigmas" class="sigmas mono" :class="{ bad: sigmaError }" placeholder="1, 0.9, 0.7, 0.4, 0.15, 0" title="The noise levels the sampler steps through (one step between each pair), in the model's own sigma scale: 1 to 0 for flow models (Krea 2, Flux, MOSS)" />
+        </label>
+        <label v-else class="f num"><span class="lbl">Steps</span><ZenNumber :model-value="tuned.steps ?? run?.steps ?? 20" :min="1" :max="200" :step="1" :precision="0" size="sm" @update:model-value="tuned.steps = $event" /></label>
+        <label class="f num"><span class="lbl">CFG</span><ZenNumber :model-value="tuned.cfg ?? run?.cfg ?? 1" :min="0" :max="30" :step="0.5" :precision="1" size="sm" @update:model-value="tuned.cfg = $event" /></label>
+        <button v-if="ownSampling" class="link small" title="Back to the run's own sample settings" @click="Object.assign(tuned, { sampler: '', scheduler: '', steps: null, cfg: null, sigmas: '' })">Use the run's settings</button>
       </div>
     </div>
     <div v-if="!manualGroups.length && !waitingCards.length" class="muted small empty-manual">
@@ -152,7 +216,7 @@ const tileOf = (x: SampleRow | null | undefined) => {
         <div class="mprompt">
           <span class="mtext" :title="rowOf(g).prompt">{{ rowOf(g).prompt }}</span>
           <span class="mmeta mono">
-            {{ rowOf(g).width }}×{{ rowOf(g).height }}<template v-if="(rowOf(g).frames ?? 1) > 1"> · {{ rowOf(g).frames }}f</template> · seed {{ rowOf(g).seed }}
+            {{ rowOf(g).width }}×{{ rowOf(g).height }}<template v-if="(rowOf(g).frames ?? 1) > 1"> · {{ rowOf(g).frames }}f</template> · seed {{ rowOf(g).seed }}{{ samplingText(rowOf(g)) }}
           </span>
           <span class="macts" :class="{ held: syncing === `m${g.index}` }">
             <button
@@ -203,19 +267,15 @@ const tileOf = (x: SampleRow | null | undefined) => {
   gap: 12px;
 }
 .try {
-  /* one row: the prompt grows, its options and Render sit at its right (they wrap below when narrow) */
+  /* the prompt, then one bar: its options, the sampling it uses, Render at the end */
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
+  flex-direction: column;
   gap: 8px;
-}
-.try-in {
-  flex: 1 1 320px;
-  min-width: 0;
 }
 .try-in {
   display: block;
   width: 100%;
+  min-width: 0;
   resize: none;
   overflow-y: auto;
   font: inherit;
@@ -232,15 +292,86 @@ const tileOf = (x: SampleRow | null | undefined) => {
   outline: none;
   border-color: var(--zen-accent);
 }
-.try-opts {
+.try-bar {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
   align-items: center;
-  flex: 0 0 auto;
-  min-height: 38px; /* the prompt box's one-line height, so they line up with it */
+  gap: 8px;
 }
-.try-opts > :first-child {
+.try-bar .size {
   width: 170px;
+}
+.grow {
+  flex: 1;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  background: none;
+  border: 1px solid var(--zen-border);
+  border-radius: var(--zen-radius);
+  color: var(--zen-muted);
+  padding: 4px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.chip .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chip.on {
+  border-color: color-mix(in srgb, var(--zen-accent) 60%, var(--zen-border));
+}
+.chip.own {
+  color: var(--zen-accent);
+}
+.try-tune {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 12px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--zen-border) 70%, transparent);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--zen-surface) 60%, transparent);
+}
+.f {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 180px;
+}
+.f.num {
+  width: 120px;
+}
+.f.wide {
+  flex: 1 1 280px;
+  width: auto;
+}
+.lbl {
+  font-size: 11px;
+  color: var(--zen-muted);
+}
+.sigmas {
+  width: 100%;
+  font-size: 12px;
+  color: var(--zen-text);
+  background: var(--zen-field-bg);
+  border: 1px solid var(--zen-border);
+  border-radius: var(--zen-radius);
+  padding: 5px 8px;
+}
+.sigmas.bad {
+  border-color: var(--zen-warn);
+}
+.link {
+  background: none;
+  border: 0;
+  padding: 6px 0;
+  color: var(--zen-accent);
+  cursor: pointer;
 }
 .empty-manual {
   padding: 8px 0;

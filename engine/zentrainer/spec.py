@@ -281,6 +281,9 @@ class SampleSpec:
     cfg: float = 5.0
     sampler: str = "euler"
     scheduler: str = "normal"
+    # Custom sigmas, high to low (e.g. [1.0, 0.94, 0.85, 0.7, 0.5, 0.3, 0.12, 0]): the noise levels
+    # sampling steps through, in place of the scheduler and steps (len - 1 steps). [] = the scheduler.
+    sigmas: list[float] = field(default_factory=list)
     seed: int = 42
     # Render the prompts once before training: the base model's look, to compare against.
     baseline: bool = True
@@ -450,6 +453,7 @@ class TrainSpec:
             if sl.anchor_weight < 0:
                 raise SpecError("slider.anchor_weight can't be negative")
         _choice("samples.slg_mode", self.samples.slg_mode, ("off", "uncond", "standard"))
+        check_sigmas(self.samples.sigmas)
         _choice("output.keep_states", self.output.keep_states, ("latest", "all", "none"))
         _choice("output.save_dtype", self.output.save_dtype, ("bf16", "fp16", "fp32"))
         if self.objective.shift < 0:
@@ -531,6 +535,21 @@ def _choice(name: str, value: str, options: tuple[str, ...]) -> None:
 
 def slugify(name: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]+", "-", name).strip("-").lower() or "run"
+
+
+def check_sigmas(sigmas) -> list[float]:
+    """Custom sigmas as floats, or SpecError: at least two, none negative, never rising."""
+    if not sigmas:
+        return []
+    try:
+        out = [float(x) for x in sigmas]
+    except (TypeError, ValueError):
+        raise SpecError("samples.sigmas are numbers, high to low (e.g. 1, 0.8, 0.5, 0.2, 0)") from None
+    if len(out) < 2:
+        raise SpecError("samples.sigmas need at least two values (one step goes from the first to the second)")
+    if any(x < 0 for x in out) or any(b > a for a, b in zip(out, out[1:])):
+        raise SpecError("samples.sigmas go from high to low and none is below 0")
+    return out
 
 
 def sample_prompts(s: SampleSpec) -> list[SamplePrompt]:

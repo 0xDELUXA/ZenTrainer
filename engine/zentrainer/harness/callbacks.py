@@ -171,6 +171,8 @@ class Samples(Callback):
                  self.prompts[i], s.negative, it.width, it.height, it.frames, s.fps, it.seed, s.steps, s.cfg,
                  s.sampler, s.scheduler, s.slg_mode, s.slg_layers, s.slg_double_layers, s.slg_scale, s.slg_start,
                  s.slg_end, s.lora_strength if t.spec.network.init_from else None, it.control]
+        if s.sigmas:  # only then: baselines kept before custom sigmas existed still match
+            parts.append(s.sigmas)
         return hashlib.sha1(json.dumps(parts, default=str).encode()).hexdigest()[:20]
 
     def _baseline_dir(self) -> Path:
@@ -335,7 +337,8 @@ class Samples(Callback):
         encoded, then the encoder freed once) and one sampling session (the model switched to
         sampling once, back to training once); `more()` can hand over tries queued meanwhile,
         which join the same session. Each try: {prompt, width?, height?, frames?, seed?, base?,
-        index?}."""
+        index?, sampler?, scheduler?, steps?, cfg?, sigmas?} (the last five: its own sampling,
+        else the run's; see _try_sampling)."""
         from ..spec import SamplePrompt
         from .data import apply_trigger
 
@@ -365,10 +368,11 @@ class Samples(Callback):
                                         int(time.time()) % 100000 if a.get("seed") is None else a["seed"],
                                         a.get("control") or None)
                     self.items, self.prompts, self._conds = [item], [text], conds
+                    over = _try_sampling(s, a)
                     if a.get("base"):  # the same prompt and seed without the LoRA, to compare against
                         with t.network.disabled():
-                            rows += self.render(t, manual=n, base=True, stay=True)
-                    rows += self.render(t, manual=n, stay=True)
+                            rows += self.render(t, manual=n, base=True, stay=True, over=over)
+                    rows += self.render(t, manual=n, stay=True, over=over)
                 tries = more() if more else []
         finally:
             self.items, self.prompts, self._conds = saved
@@ -386,17 +390,20 @@ class Samples(Callback):
             liker.close()  # it finishes what's queued, then stops
         self._liker = None
 
-    def render(self, t: Trainer, manual: int | None = None, base: bool = False, stay: bool = False) -> list[dict]:
+    def render(self, t: Trainer, manual: int | None = None, base: bool = False, stay: bool = False,
+               over=None) -> list[dict]:
         """The run's samples (or, from render_manual, one try). `stay` leaves the model set up
-        for sampling afterwards: the caller renders more and switches back once. With weight
-        averaging on, samples show the average, as the checkpoints do."""
+        for sampling afterwards: the caller renders more and switches back once. `over`: sample
+        settings in place of the run's (a try's own sampler, steps...). With weight averaging
+        on, samples show the average, as the checkpoints do."""
         ema = getattr(t, "ema", None)
         if ema is not None and not base:
             with ema.applied():
-                return self._render(t, manual, base, stay)
-        return self._render(t, manual, base, stay)
+                return self._render(t, manual, base, stay, over)
+        return self._render(t, manual, base, stay, over)
 
-    def _render(self, t: Trainer, manual: int | None = None, base: bool = False, stay: bool = False) -> list[dict]:
+    def _render(self, t: Trainer, manual: int | None = None, base: bool = False, stay: bool = False,
+                over=None) -> list[dict]:
         if self._conds is None:
             self.on_start(t)
         if not self._conds:
@@ -407,7 +414,9 @@ class Samples(Callback):
         import comfy.sample
         from PIL import Image
 
-        s = t.spec.samples
+        s = over or t.spec.samples
+        sigmas = torch.tensor(s.sigmas, dtype=torch.float32) if s.sigmas else None  # in place of the scheduler
+        steps = len(s.sigmas) - 1 if s.sigmas else s.steps
         vae = t.models.vae
         comp = vae.spacial_compression_encode()
         out_dir = _out_dir(t)
@@ -460,7 +469,7 @@ class Samples(Callback):
                         if t.store:
                             t.store.append(t.run_id, "samples", reused)
                         continue
-                    progress(i, 0, s.steps)
+                    progress(i, 0, steps)
                     channels = model.model.latent_format.latent_channels
                     it = self.items[i]
                     concat = getattr(t, "concat_inputs", 0)
@@ -489,8 +498,8 @@ class Samples(Callback):
                         # as in training: bypass adapters keep their own (fp32) weights beside the
                         # model's bf16 activations, and only autocast reconciles the two
                         with torch.autocast(t.device.type, dtype=t.train_dtype, enabled=t.train_dtype != torch.float32):
-                            o = comfy.sample.sample(m, noise, s.steps, s.cfg, s.sampler, s.scheduler,
-                                                    pos, neg, latent, seed=it.seed, disable_pbar=True, callback=cb)
+                            o = comfy.sample.sample(m, noise, steps, s.cfg, s.sampler, s.scheduler, pos, neg, latent,
+                                                    sigmas=sigmas, seed=it.seed, disable_pbar=True, callback=cb)
                         img = vae.decode(first_stream(o))
                         return o, img.reshape(-1, *img.shape[-3:])
 
@@ -523,7 +532,9 @@ class Samples(Callback):
                         row["sweep"] = list(sweep)
                     if manual is not None:
                         row.update(manual=True, index=manual, width=self.items[i].width, height=self.items[i].height,
-                                   seed=self.items[i].seed, frames=self.items[i].frames, base=base)
+                                   seed=self.items[i].seed, frames=self.items[i].frames, base=base,
+                                   sampling={"sampler": s.sampler, "scheduler": "custom" if s.sigmas else s.scheduler,
+                                             "steps": steps, "cfg": s.cfg, **({"sigmas": list(s.sigmas)} if s.sigmas else {})})
                     # recorded as each one lands, so the UI swaps that tile now, not after the pass
                     rows.append(row)
                     t.emit(events.SAMPLE, row)
@@ -861,3 +872,40 @@ def _strip(shots: list, strengths) -> "Image.Image":
         tw = draw.textlength(label, font=font)
         draw.text((x + (w - tw) / 2, band * 0.18), label, fill=(235, 235, 240), font=font)
     return out
+
+
+def _try_sampling(s, a: dict):
+    """A try's own sampler, scheduler, steps, cfg or sigmas laid over the run's sample settings
+    (s), or None when it sets none. What ComfyUI doesn't have, or doesn't parse, is left as the
+    run's, with a warning: a typo shouldn't cost the render."""
+    import dataclasses
+
+    import comfy.samplers
+
+    from ..spec import SpecError, check_sigmas
+
+    got = {}
+    if a.get("sampler"):
+        if a["sampler"] in comfy.samplers.KSampler.SAMPLERS:
+            got["sampler"] = str(a["sampler"])
+        else:
+            logging.warning("[ZenTrainer] try: no sampler %r here, using the run's", a["sampler"])
+    if a.get("scheduler") and a["scheduler"] != "custom":
+        if a["scheduler"] in comfy.samplers.KSampler.SCHEDULERS:
+            got["scheduler"] = str(a["scheduler"])
+        else:
+            logging.warning("[ZenTrainer] try: no scheduler %r here, using the run's", a["scheduler"])
+    for key, kind, lo, hi in (("steps", int, 1, 200), ("cfg", float, 0.0, 30.0)):
+        if a.get(key) is not None:
+            try:
+                got[key] = min(hi, max(lo, kind(a[key])))
+            except (TypeError, ValueError):
+                logging.warning("[ZenTrainer] try: %s %r isn't a number, using the run's", key, a[key])
+    if a.get("sigmas") is not None:
+        try:
+            got["sigmas"] = check_sigmas(a["sigmas"])
+        except SpecError as e:
+            logging.warning("[ZenTrainer] try: %s; using the run's", e)
+    elif got.get("scheduler"):  # a scheduler of its own replaces the run's custom sigmas
+        got["sigmas"] = []
+    return dataclasses.replace(s, **got) if got else None

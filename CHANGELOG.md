@@ -6,6 +6,14 @@ and Manager show.
 ## Unreleased
 
 ### Runs
+- **Try other samplers as the run trains:** Manual's Sampling chip opens a sampler, scheduler,
+  steps and CFG for the next tries (the run's own until changed), and each try's card says what it
+  used. Custom sigmas, high to low, in place of a scheduler: for tries and for the run's samples
+  (Samples → Scheduler → Custom sigmas).
+- The Manual tab no longer has a gap beside it; its rendering dot sits on its corner.
+- **Lighter run page:** the noise chart starts folded (it remembers being opened), and its dots are
+  drawn on a canvas instead of a page element each, so moving the mouse over it or a step landing
+  doesn't rebuild hundreds of them.
 - **Slider LoRAs:** New run → Model → Add → Slider: a LoRA whose strength moves pictures along one
   attribute (+1 one way, −1 the other, 0 the base model).
   - **From image pairs:** the dataset's pictures and a picture set beside them (`_controls/<set>/`,
