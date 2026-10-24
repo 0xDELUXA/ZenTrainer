@@ -15,8 +15,9 @@ and Manager show.
   on (or set by a recipe): weights moving between CPU and GPU crashed compiled runs with an illegal
   memory access on a 16 GB card.
 - **Experimental: fused q/k norm + rope for Krea 2** (memory.fused_qk_rope, off by default): the
-  attention's norms and rope run as one op with its own backward instead of six separate ones.
-  Same maths, slightly less rounding.
+  attention's norms and rope run as one op with its own backward instead of six separate ones:
+  6–7% a step on Krea 2 and MOSS at 1024. Same maths, slightly less rounding. Skipped when the
+  blocks compile, which fuse them already (and faster with it off).
 - **Steps wait for the GPU once instead of six times:** the loss, gradient norm and noise chart are
   read together at the step's end, and the run page's phase timings come from every 10th step.
   The GPU no longer idles between phases.

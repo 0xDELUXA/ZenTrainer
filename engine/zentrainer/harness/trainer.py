@@ -220,6 +220,11 @@ class Trainer:
                 compile_on, why = wanted(self.spec.memory.compile_blocks, self.spec.optim.steps, self.spec.memory.offloading)
                 if why:
                     logging.info("[ZenTrainer] %s", why)
+                if compile_on and compat.fused_qk_rope:
+                    # compile fuses the norms and rope itself, and the custom op would keep it from
+                    # fusing what's around them: Krea 2 at 1024, 1.38 s a step compiled, 1.42 with it
+                    compat.fused_qk_rope = False
+                    logging.info("[ZenTrainer] fused q/k norm + rope off: the compiled blocks fuse them already")
                 # compiled first, so checkpointing wraps the compiled forward
                 with compiled_blocks(dm, compile_on) as self._compiled, \
                         gradient_checkpointing(dm, self.spec.memory.gradient_checkpointing,
