@@ -349,7 +349,7 @@ class Trainer:
         import folder_paths
 
         s = self.spec
-        compat.apply()  # ComfyUI model fixes for training (see compat.py)
+        compat.apply(qk_rope=s.memory.fused_qk_rope)  # ComfyUI model fixes for training (see compat.py)
         from .kernels import int8_backward
 
         int8_backward.enable("w8a8" if s.memory.w8a8_backward else "fused" if s.memory.fused_int8_backward else "")

@@ -13,6 +13,9 @@ and Manager show.
 - **Compile blocks is Auto by default:** on for runs of 500 steps or more when Triton is installed
   and weights aren't offloaded (Krea 2 at 1024: about 14% faster once compiled). On and Off still
   do what they say.
+- **Experimental: fused q/k norm + rope for Krea 2** (memory.fused_qk_rope, off by default): the
+  attention's norms and rope run as one op with its own backward instead of six separate ones.
+  Same maths, slightly less rounding.
 - **Steps wait for the GPU once instead of six times:** the loss, gradient norm and noise chart are
   read together at the step's end, and the run page's phase timings come from every 10th step.
   The GPU no longer idles between phases.
