@@ -16,7 +16,7 @@ export const TOOLS: Tool[] = [
   {
     id: 'merge',
     name: 'Merge LoRAs',
-    description: 'Bake several LoRAs into one at the strengths you choose, and optionally shrink it to a small rank. A soup of a few runs on one subject, or a stack in one file.',
+    description: 'Bake several LoRAs into one at the strengths you choose: a soup of a few runs on one subject, or a whole stack in one file.',
     icon: 'mdi mdi-call-merge',
     category: 'loras',
     accent: '#a855f7',
@@ -24,7 +24,7 @@ export const TOOLS: Tool[] = [
   {
     id: 'compact',
     name: 'Compact a LoRA',
-    description: 'Shrink a LoRA or LoKr to the size you want: rank goes to the layers that change most, across the whole file, optionally weighed against the base model. A LoKr can stay one or become a LoRA.',
+    description: 'Shrink a LoRA or LoKr to the size you want, keeping rank where the layers change most. A LoKr can stay one or become a LoRA.',
     icon: 'mdi mdi-arrow-collapse-all',
     category: 'loras',
     accent: '#22c55e',
@@ -32,7 +32,7 @@ export const TOOLS: Tool[] = [
   {
     id: 'inspect',
     name: 'Inspect a model file',
-    description: 'Look inside any .safetensors file, a LoRA or a whole model: its layers, shapes, precisions and metadata. Save a copy with other metadata, another precision, or layers left out.',
+    description: 'Look inside any .safetensors file, a LoRA or a whole model: layers, shapes, precisions, metadata. Save a copy changed.',
     icon: 'mdi mdi-file-tree-outline',
     category: 'loras',
     accent: '#f59e0b',
@@ -47,4 +47,4 @@ export const TOOLS: Tool[] = [
   },
 ]
 
-export const TOOL_CATEGORIES: Record<Tool['category'], string> = { loras: 'LoRAs', datasets: 'Datasets' }
+export const TOOL_CATEGORIES: Record<Tool['category'], string> = { loras: 'LoRAs and models', datasets: 'Datasets' }
