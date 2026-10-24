@@ -128,7 +128,7 @@ const form = reactive({
 /** Whether this run samples (so temperature, top-p and top-k apply): Vary, or a fixed seed. */
 const sampled = computed(() => form.vary || (form.advanced && form.fixedSeed != null))
 const LENGTHS: { v: '' | number; label: string; tip: string }[] = [
-  { v: '', label: 'Style', tip: "The style's own limit (300 tokens for prose, 2000 for structured JSON)" },
+  { v: '', label: 'Style', tip: "The style's own: no limit for most (up to 4096 tokens: the model ends its caption itself), 300 for a short caption" },
   { v: 600, label: '600', tip: 'Up to 600 tokens' },
   { v: 1200, label: '1200', tip: 'Up to 1200 tokens' },
   { v: 0, label: 'No limit', tip: 'As long as the model wants (stopped at 4096 tokens, in case it never ends)' },
@@ -485,11 +485,10 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
         <span class="small">Answer is a structured JSON caption</span>
       </label>
       <div class="own-acts">
-        <ZenButton size="sm" icon="mdi mdi-content-save-outline" :disabled="!form.prompt.trim() || (!!own && !dirty)" :title="own ? 'Save your changes to this style' : 'Keep this instruction as a style of your own'" @click="saveStyle">
+        <ZenButton class="nowrap" size="sm" icon="mdi mdi-content-save-outline" :disabled="!form.prompt.trim() || (!!own && !dirty)" :title="own ? 'Save your changes to this style (kept on this ComfyUI, for every browser)' : 'Keep this instruction as a style of your own (kept on this ComfyUI, for every browser)'" @click="saveStyle">
           {{ own ? (dirty ? 'Save changes' : 'Saved') : 'Save as style' }}
         </ZenButton>
         <button v-if="own" class="mini" title="Delete this style" @click="removeStyle"><i class="mdi mdi-trash-can-outline" /></button>
-        <span class="muted small">Saved styles follow you to any browser on this ComfyUI.</span>
       </div>
       <p v-if="showPrompt && subjectNote" class="told-wrap"><span class="eyebrow">Then</span>{{ subjectNote }}</p>
     </div>
@@ -807,8 +806,13 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
 }
 .own-acts {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+.own-acts .nowrap {
+  flex: none;
+  white-space: nowrap;
 }
 .pv-grid {
   display: grid;

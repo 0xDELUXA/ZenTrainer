@@ -33,8 +33,9 @@ and Manager show.
 - **A datasets folder of their own** (Settings → Storage): input/datasets/, so datasets stop
   sharing ComfyUI's input folder with everything else uploaded there, or any folder. Nothing is
   moved: Settings lists the datasets still in the old place, and runs still find them there.
-- **Caption length, cut-offs and re-rolls:** a Length choice when captioning (the style's own, 600,
-  1200, or no limit); captions that ran out of room are flagged, listed on the job ("N cut off",
+- **Caption length, cut-offs and re-rolls:** captions are no longer cut at 300 tokens: most styles
+  have no limit now (up to 4096; the model ends a caption itself), a short caption keeps 300, and
+  a Length choice when captioning sets one (600, 1200, or no limit); captions that ran out of room are flagged, listed on the job ("N cut off",
   to review them or re-caption them with no limit), and marked in the try-on; and Wording: Vary
   samples each run with a new seed, so captioning an image again words it differently. Advanced
   adds a fixed seed (repeatable re-rolls), temperature, top-p, top-k, a repetition penalty (for a

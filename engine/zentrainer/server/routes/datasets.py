@@ -211,8 +211,7 @@ def register(server) -> None:
         job = captioner.create(**{f: getattr(job, f) for f in ("dataset", "set_name", "clip_name", "clip_type", "prompt",
                                                                "mode", "paths", "subject", "preview")},
                                # 0 = no limit; unset = the style's own
-                               max_length=_length(length) if length is not None else (style.max_length if not b.get("prompt")
-                                                                                       else 2000 if fmt == "fibo_json" else 300),
+                               max_length=_length(length) if length is not None else (style.max_length if not b.get("prompt") else 0),
                                seed=int(b["seed"]) if b.get("seed") is not None else None,
                                **_sampling(b),
                                format=fmt,
@@ -273,7 +272,7 @@ def register(server) -> None:
             return _bad("rewrite as fibo_json, or give an instruction (prompt) for plain text")
         job = captioner.create(dataset="", set_name="", clip_name=str(b["clip_name"]), clip_type=str(b.get("clip_type") or "auto"),
                                prompt=str(b.get("prompt") or ""), preview=len(prompts), rewrite=prompts, format=fmt,
-                               max_length=_length(b["max_length"]) if b.get("max_length") is not None else (2000 if fmt == "fibo_json" else 400),
+                               max_length=_length(b["max_length"]) if b.get("max_length") is not None else 0,
                                seed=int(b["seed"]) if b.get("seed") is not None else None, **_sampling(b))
         return await _submit_caption(job, "rewrite prompts", b.get("client_id"))
 

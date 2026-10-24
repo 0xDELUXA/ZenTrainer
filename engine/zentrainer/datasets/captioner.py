@@ -31,7 +31,9 @@ class Style(NamedTuple):
     # "text": the answer as written; "fibo_json": a structured caption (structured.py), checked and
     # kept compact, or not written at all
     format: str = "text"
-    max_length: int = 300  # tokens the answer may take
+    # tokens the answer may take; 0 = no limit (NO_LIMIT): the model ends a caption itself, and a
+    # limit only cuts one off (a looping model is what repetition_penalty is for)
+    max_length: int = 0
 
 
 STYLES = {
@@ -39,12 +41,13 @@ STYLES = {
                 "Describe this image for training an image model: the subject, their appearance, clothing and pose, "
                 "the setting, lighting and photographic or artistic style. One detailed paragraph. "
                 "Start directly with the description; no preamble."),
-    "short": Style("Short caption", "Write a single-sentence caption for this image. Start directly; no preamble."),
+    "short": Style("Short caption", "Write a single-sentence caption for this image. Start directly; no preamble.",
+                   max_length=300),  # one sentence: past this it's rambling
     "tags": Style("Tags",
                   "List comma-separated tags for this image: subject, features, clothing, pose, setting, lighting, "
                   "style, most important first. Output only the tags."),
     # Fibo 2.0's own caption format, with Bria's VGL prompts (structured.py)
-    "fibo_json": Style("Fibo structured JSON", structured.caption_instruction(), "fibo_json", 2000),
+    "fibo_json": Style("Fibo structured JSON", structured.caption_instruction(), "fibo_json"),
 }
 JSON_TRIES = 3  # answers a structured caption gets (greedy, then sampled) before the image is skipped
 # max_length 0 = no limit: the answer runs until the model ends it. Still capped, so a model that
@@ -70,7 +73,7 @@ class CaptionJob:
     paths: list[str] = field(default_factory=list)  # dataset-relative; mode "selected"
     subject: str = ""  # what to call the main subject (a trigger word, a name)
     preview: int = 0  # > 0: caption this many images, write nothing
-    max_length: int = 300  # tokens an answer may take; 0 = no limit (NO_LIMIT)
+    max_length: int = 0  # tokens an answer may take; 0 = no limit (NO_LIMIT)
     # None: the model's single most likely answer (the same every time). A number: sampled with
     # that seed, so another number words it differently (re-rolling a caption)
     seed: int | None = None
