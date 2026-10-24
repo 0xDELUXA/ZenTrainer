@@ -6,6 +6,13 @@ and Manager show.
 ## Unreleased
 
 ### Training
+- **Faster by default on int8 models:** the int8 backward (W8A8) is now on, so the frozen layers'
+  gradients run on int8 tensor cores too: about 16% faster on Krea 2 int8 at 1024. It rounds the
+  gradient to int8 (stochastically, so unbiased); turn it off in Memory to train with a bf16
+  backward.
+- **Compile blocks is Auto by default:** on for runs of 500 steps or more when Triton is installed
+  and weights aren't offloaded (Krea 2 at 1024: about 14% faster once compiled). On and Off still
+  do what they say.
 - **Steps wait for the GPU once instead of six times:** the loss, gradient norm and noise chart are
   read together at the step's end, and the run page's phase timings come from every 10th step.
   The GPU no longer idles between phases.

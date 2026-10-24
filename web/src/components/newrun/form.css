@@ -101,6 +101,20 @@ h2 {
   font-size: 12px;
   color: var(--zen-muted);
 }
+.sw-auto {
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--zen-muted);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.sw-auto:hover {
+  color: var(--zen-text);
+}
 .inline {
   display: flex;
   align-items: center;

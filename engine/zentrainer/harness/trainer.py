@@ -214,11 +214,14 @@ class Trainer:
                 self._status("loading")
                 self.setup()
                 self._status("training")
-                from .kernels.compile import compiled_blocks
+                from .kernels.compile import compiled_blocks, wanted
 
                 dm = self.models.patcher.model.diffusion_model
+                compile_on, why = wanted(self.spec.memory.compile_blocks, self.spec.optim.steps, self.spec.memory.offloading)
+                if why:
+                    logging.info("[ZenTrainer] %s", why)
                 # compiled first, so checkpointing wraps the compiled forward
-                with compiled_blocks(dm, self.spec.memory.compile_blocks) as self._compiled, \
+                with compiled_blocks(dm, compile_on) as self._compiled, \
                         gradient_checkpointing(dm, self.spec.memory.gradient_checkpointing,
                                                self.spec.memory.checkpoint_depth, self.spec.memory.offloading,
                                                self.spec.memory.checkpoint_skip) as ckpt:

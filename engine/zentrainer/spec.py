@@ -228,10 +228,12 @@ class MemorySpec:
     # int8 ConvRot bases: the backward's gradient quantized to int8 as well, so the frozen layers'
     # input gradients run on int8 tensor cores (Triton kernels: 2x the bf16 backward on H3's
     # clip-size layers, RTX 5090). Some gradient precision for the speed (OneTrainer's W8A8).
-    w8a8_backward: bool = False
+    # On by default: 1.60 -> 1.35 s a step on Krea 2 int8 at 1024 (RTX 5090); no effect elsewhere
+    w8a8_backward: bool = True
     # torch.compile the repeated transformer block: fuses the elementwise work around the matmuls.
-    # The first steps (and the first sample) take longer while it compiles.
-    compile_blocks: bool = False
+    # The first steps (and the first sample) take longer while it compiles. None (the default) =
+    # auto: on for runs long enough to repay that, with Triton and no offloading (kernels/compile.py)
+    compile_blocks: bool | None = None
     # int8 bases: trained layers run ComfyUI's int8 kernel forward (activations quantized) instead
     # of a dequantized bf16 matmul. Off = the bf16 forward (slower; for comparing quality).
     int8_forward: bool = True

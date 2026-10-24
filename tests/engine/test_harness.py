@@ -676,3 +676,16 @@ def test_skipped_blocks_get_no_adapters():
     TrainSpec.from_dict({**_spec(), "network": {"skip_blocks": "22, 30-31"}})
     with pytest.raises(SpecError, match="skip_blocks"):
         TrainSpec.from_dict({**_spec(), "network": {"skip_blocks": "layers.22"}})
+
+
+def test_compile_is_auto_unless_set(monkeypatch):
+    from zentrainer.harness.kernels import compile as comp
+
+    assert comp.wanted(True, 10, True) == (True, "") and comp.wanted(False, 5000, False) == (False, "")
+    monkeypatch.setattr(comp.os, "name", "posix")
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object() if name == "triton" else None)
+    assert comp.wanted(None, comp.AUTO_STEPS, False)[0]
+    assert not comp.wanted(None, comp.AUTO_STEPS - 1, False)[0]  # too short to repay the compile
+    assert not comp.wanted(None, 5000, True)[0]  # offloaded weights recompile
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: None)
+    assert not comp.wanted(None, 5000, False)[0]  # no Triton

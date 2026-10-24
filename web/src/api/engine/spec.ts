@@ -123,8 +123,10 @@ export interface TrainSpec {
     tread?: number
     /** fused Triton backward for int8 ConvRot layers */
     fused_int8_backward?: boolean
+    /** int8 ConvRot bases: the input gradients on int8 tensor cores (engine default on) */
     w8a8_backward?: boolean
-    compile_blocks?: boolean
+    /** torch.compile the main blocks; unset/null = auto (long runs, with Triton, no offloading) */
+    compile_blocks?: boolean | null
     /** int8 bases: frozen layers run the int8 kernel forward (engine default on) */
     int8_forward?: boolean
     tread_steps?: number

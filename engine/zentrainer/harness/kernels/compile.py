@@ -11,8 +11,32 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 
 import torch
+
+# memory.compile_blocks unset: compile when a run is at least this long. Compiling costs about 40 s
+# up front (Krea 2, 1024 px, RTX 5090) and then saves 0.2 s a step, so it pays back after about
+# 200 steps; at 512 px it saves far less, and the margin keeps a short run from losing.
+AUTO_STEPS = 500
+
+
+def wanted(setting: bool | None, steps: int, offloading: bool) -> tuple[bool, str]:
+    """Whether to compile, and why when it was decided for the user (setting None). Auto needs
+    Triton, which inductor generates its kernels with (often missing on Windows, where it also
+    needs a C++ compiler), and no offloading: weights moving between CPU and GPU recompile."""
+    if setting is not None:
+        return setting, ""
+    import importlib.util
+
+    if os.name == "nt" or importlib.util.find_spec("triton") is None:
+        return False, "not compiling (needs Triton; turn it on in Memory to try)"
+    if offloading:
+        return False, "not compiling with weights offloaded"
+    if steps < AUTO_STEPS:
+        return False, f"not compiling a run under {AUTO_STEPS} steps (the compile would cost more than it saves)"
+    return True, f"compiling: {steps} steps repay the first steps' compile"
+
 
 def main_blocks(diffusion_model) -> list:
     """The model's main repeated blocks: of its outermost block lists, the one with the most

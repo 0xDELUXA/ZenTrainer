@@ -19,8 +19,8 @@ const setup = computed((): { k: string; v: string; title?: string }[] => {
   const mem = [
     m.offloading ? 'offload' : '',
     m.int8_forward !== false && /int8/i.test(model) ? 'int8 fwd' : '',
-    m.w8a8_backward ? 'W8A8' : m.fused_int8_backward ? 'fused int8' : '',
-    m.compile_blocks ? 'compile' : '',
+    m.w8a8_backward !== false && /int8/i.test(model) ? 'W8A8' : m.fused_int8_backward ? 'fused int8' : '',
+    m.compile_blocks ? 'compile' : m.compile_blocks == null ? 'compile auto' : '',
     m.gradient_checkpointing ? (m.checkpoint_skip ? `checkpoint · keep ${m.checkpoint_skip}` : 'checkpoint') : '',
     m.tread ? `TREAD ${Math.round(m.tread * 100)}%` : '',
   ].filter(Boolean)
