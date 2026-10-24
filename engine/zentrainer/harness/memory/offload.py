@@ -49,6 +49,55 @@ def overlap(on: bool) -> None:
         mm.get_offload_stream, _original = _original, None
 
 
+# With cuda_malloc (ComfyUI's default) a streamed layer's weights are fresh allocations on its
+# offload stream, and uncast_bias_weight orders their free after the layer's forward only. Training
+# keeps them for the backward too (autograd saves the weight), and cudaMallocAsync frees in the
+# offload stream's order: the backward GEMM still queued on the compute stream can find them reused,
+# or unmapped by the next empty_cache. A CUDA coredump caught it as a Warp MMU Fault in a bf16
+# cuBLAS GEMM, ~1 run in 3 on Krea 2 offloaded with Automagic3 + EMA (their long step tail lets the
+# CPU run far ahead of the GPU) right after the weights moved; never with CUDA_LAUNCH_BLOCKING.
+# So while grads are on, a streamed weight the layer uses as it is gets copied once on the compute
+# stream: autograd keeps the copy, freed in the compute stream's order. (record_stream on the
+# original also orders it, but holds every block's weights until the GPU catches up: out of VRAM.)
+_cast = None
+
+
+def _own(t):
+    import torch
+
+    qdata = getattr(t, "_qdata", None)
+    if isinstance(qdata, torch.Tensor) and hasattr(t, "_copy_with"):
+        return t._copy_with(qdata=qdata.clone())  # a quantized weight: its scales are cloned too
+    return t.clone()
+
+
+def _guarded_cast(*args, **kwargs):
+    import torch
+
+    out = _cast(*args, **kwargs)
+    if len(out) == 3 and out[2] is not None and out[2][0] is not None and torch.is_grad_enabled() \
+            and not torch.compiler.is_compiling():
+        weight, bias, state = out
+        _, weight_a, bias_a = state
+        if weight is not None and weight is weight_a:
+            weight = _own(weight)
+        if bias is not None and bias is bias_a:
+            bias = _own(bias)
+        out = (weight, bias, state)
+    return out
+
+
+def guard_backward(on: bool) -> None:
+    """Streamed weights the backward keeps are the compute stream's own (on), or ComfyUI's (off)."""
+    global _cast
+    import comfy.ops
+
+    if on and _cast is None:
+        _cast, comfy.ops.cast_bias_weight = comfy.ops.cast_bias_weight, _guarded_cast
+    elif not on and _cast is not None:
+        comfy.ops.cast_bias_weight, _cast = _cast, None
+
+
 # ComfyUI logs a bare "Pin error." when it can't pin an offloaded weight (and drops CUDA's code).
 # Unpinned weights copy to the GPU synchronously, so offloaded steps slow down and can't overlap.
 # While training, every pin it tries is counted, and a summary with the CUDA codes is logged when

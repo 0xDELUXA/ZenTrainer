@@ -6,6 +6,11 @@ and Manager show.
 ## Unreleased
 
 ### Training
+- **Fixed: "illegal memory access" with weights offloaded:** a streamed layer's weights could be
+  freed while its backward was still queued on the GPU, and the run crashed a step or two later
+  (often right after a resume or once the weights moved between CPU and GPU). Most likely with
+  Automagic and EMA, whose long optimizer step lets the CPU run far ahead of the GPU. The backward
+  now keeps its own copy of each streamed weight (a copy on the GPU, not over PCIe).
 - **Pausing lets ComfyUI work:** a paused run that sees a workflow queued in ComfyUI saves its
   state and lets go of ComfyUI (its queue and the GPU), and stays paused; Resume continues from
   there (a model reload). Nothing else in ZenTrainer's queue starts meanwhile. Needs resume states
