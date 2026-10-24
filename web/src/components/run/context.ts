@@ -1,8 +1,9 @@
 // One run as the run page and its parts see it: the stored run, kept live from the engine's
 // websocket events, and what they all derive from it (progress, checkpoints, likeness, the
 // commands). RunView makes it; its parts take it with useRunContext().
-import { computed, inject, onMounted, onUnmounted, ref, watch, type InjectionKey, type Ref } from 'vue'
+import { computed, inject, onMounted, onUnmounted, ref, shallowReactive, type InjectionKey, type Ref, watch } from 'vue'
 import { onComfyMessage } from '@/api/comfy'
+import { keepCompact } from '@/lib/resumed'
 import {
   ACTIVE,
   EVENTS,
@@ -43,7 +44,10 @@ export function useRun(id: Ref<string>) {
 
   async function load() {
     try {
-      detail.value = await engine.run(id.value)
+      const d = await engine.run(id.value)
+      // shallow: a long run's rows (thousands, each with its noise levels) stay plain objects
+      d.metrics = shallowReactive(d.metrics)
+      detail.value = d
       lrInput.value = detail.value.metrics.at(-1)?.lr ?? detail.value.spec.optim.learning_rate
     } catch (e) {
       error.value = String(e)
@@ -63,7 +67,10 @@ export function useRun(id: Ref<string>) {
       if (!d || m.data.run_id !== id.value) return
       if (m.type === EVENTS.metrics) {
         const row = m.data as unknown as MetricRow
-        if (!d.metrics.length || d.metrics.at(-1)!.step < row.step) d.metrics.push(row)
+        if (!d.metrics.length || d.metrics.at(-1)!.step < row.step) {
+          d.metrics.push(row)
+          keepCompact(d.metrics)
+        }
       } else if (m.type === EVENTS.checkpoint) {
         d.checkpoints.push(m.data as unknown as CheckpointRow)
       } else if (m.type === EVENTS.sample) {

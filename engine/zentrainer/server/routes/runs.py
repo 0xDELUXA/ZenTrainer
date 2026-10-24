@@ -8,6 +8,7 @@ from pathlib import Path
 from aiohttp import web
 
 from ... import presets, sharing, state
+from ...runs.thin import thin
 from .. import jobqueue, system
 from ...harness import control
 from ...spec import SpecError, TrainSpec, locked_changes, slugify
@@ -33,15 +34,23 @@ def register(server) -> None:
     @routes.get("/zentrainer/api/runs/{run_id}")
     async def get_run(request):
         """The run's meta, spec and logs. ?since=N: only the metrics from row N on (a monitor
-        polling a long run), with metrics_count the run's total so far."""
+        polling a long run), with metrics_count the run's total so far. Otherwise a long run's
+        metrics come thinned (runs/thin.py: metrics_every steps per row) unless ?full=1."""
         store, run_id = state.store(), request.match_info["run_id"]
         try:
             metrics = store.read(run_id, "metrics")
             since = request.query.get("since")
+            if since and since.isdigit():
+                rows, every = metrics[max(0, int(since)):], 1
+            elif request.query.get("full") == "1":
+                rows, every = metrics, 1
+            else:
+                rows, every = thin(metrics)
             return web.json_response({
                 "run": store.meta(run_id),
                 "spec": store.spec(run_id),
-                "metrics": metrics[max(0, int(since)):] if since and since.isdigit() else metrics,
+                "metrics": rows,
+                "metrics_every": every,
                 "metrics_count": len(metrics),
                 "checkpoints": [_with_size(c) for c in store.read(run_id, "checkpoints")],
                 "samples": store.read(run_id, "samples"),

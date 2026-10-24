@@ -2,6 +2,7 @@
 // Two (or more) runs on one chart: training loss (smoothed, as on a run's page), validation loss,
 // or likeness. Each series keeps its run's own colour and name; values for every series show on
 // hover, at the nearest step each has.
+import { maxOf, minOf } from '@/lib/extent'
 import { computed, ref } from 'vue'
 import type { MetricRow, ValidationRow } from '@/api/engine'
 
@@ -39,13 +40,13 @@ const lines = computed(() =>
   })),
 )
 const all = computed(() => lines.value.flatMap((l) => l.pts))
-const xMax = computed(() => Math.max(1, ...all.value.map((p) => p.step), ...props.series.map((s) => s.rows.at(-1)?.step ?? 0)))
+const xMax = computed(() => Math.max(maxOf(all.value.map((p) => p.step), 1), maxOf(props.series.map((s) => s.rows.at(-1)?.step ?? 0))))
 const yRange = computed(() => {
   if (props.metric === 'like') return [0, 1] as const
   const v = all.value.map((p) => p.v)
   if (!v.length) return [0, 1] as const
-  const lo = Math.min(...v)
-  const hi = Math.max(...v)
+  const lo = minOf(v)
+  const hi = maxOf(v)
   const py = (hi - lo || hi || 1) * 0.08
   return [Math.max(0, lo - py), hi + py] as const
 })

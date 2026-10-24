@@ -3,7 +3,7 @@
 // half over its first, with a stroke back to the start; and a resume from an earlier checkpoint
 // logs those steps again, so the abandoned stretch and its redo overlapped on either axis. Here
 // a redone step replaces the rows from there on, and later sessions' times carry on from where
-// the history they continue stops. Rows are copied, never changed.
+// the history they continue stops. Rows are never changed: a shifted one is a copy.
 
 import type { MetricRow } from '@/api/engine'
 
@@ -16,7 +16,26 @@ export function resumed<T extends MetricRow>(rows: readonly T[]): T[] {
     const raw = r.elapsed ?? 0
     if (raw < rawPrev) offset = out.at(-1)?.elapsed ?? 0 // a new session: its clock restarted
     rawPrev = raw
-    out.push(r.elapsed == null ? { ...r } : { ...r, elapsed: raw + offset })
+    out.push(r.elapsed == null || !offset ? r : { ...r, elapsed: raw + offset })
   }
   return out
+}
+
+// A page left open on a long run gets a row every step: past LIVE_ROWS its older rows are folded
+// two into one (the later row, with both losses' mean), as the engine thins them (runs/thin.py),
+// so it doesn't grow back to every step it ever saw. The latest LIVE_TAIL stay exact.
+const LIVE_ROWS = 6000
+const LIVE_TAIL = 400
+
+export function keepCompact<T extends MetricRow>(rows: T[]): void {
+  if (rows.length <= LIVE_ROWS) return
+  const head = rows.length - LIVE_TAIL
+  const folded: T[] = []
+  for (let i = 0; i < head; i += 2) {
+    const a = rows[i]!
+    const b = rows[i + 1]
+    if (!b || i + 1 >= head) folded.push(a)
+    else folded.push(a.loss != null && b.loss != null ? { ...b, loss: (a.loss + b.loss) / 2 } : b)
+  }
+  rows.splice(0, head, ...folded)
 }

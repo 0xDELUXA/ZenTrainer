@@ -9,6 +9,7 @@
 // it) is in the tooltip, and a line of its own when switched on; resolution stages are marked on
 // the x axis, where the speed changes. Each legend key shows or hides its line; the x axis is
 // steps or the run's time.
+import { maxOf, minOf } from '@/lib/extent'
 import { resumed } from '@/lib/resumed'
 import { computed, ref, watch } from 'vue'
 import type { MetricRow, ValidationRow } from '@/api/engine'
@@ -101,8 +102,8 @@ const yRange = computed(() => {
   let v = [...(shows('ema') ? ema.value : []), ...(shows('val') ? props.val.map((r) => r.val_loss) : [])]
   if (!v.length) v = [...ema.value, ...props.val.map((r) => r.val_loss)]
   if (!v.length) return [0, 1] as const
-  const lo = Math.min(...v)
-  const hi = Math.max(...v)
+  const lo = minOf(v)
+  const hi = maxOf(v)
   const padY = (hi - lo || hi || 1) * 0.08
   return [Math.max(0, lo - padY), hi + padY] as const
 })
@@ -152,9 +153,9 @@ function onMove(ev: PointerEvent) {
 const lrPoints = computed(() => points.value.filter((p) => p.lr != null) as (MetricRow & { loss: number; lr: number })[])
 const lrShown = computed(() => {
   const v = lrPoints.value.map((p) => p.lr)
-  return v.length > 1 && Math.max(...v) > Math.min(...v) * 1.001
+  return v.length > 1 && maxOf(v) > minOf(v) * 1.001
 })
-const lrMax = computed(() => Math.max(...lrPoints.value.map((p) => p.lr), 1e-12))
+const lrMax = computed(() => maxOf(lrPoints.value.map((p) => p.lr), 1e-12))
 const ly = (v: number) => pad.value.t + (1 - v / (lrMax.value * 1.05)) * (H.value - pad.value.t - pad.value.b)
 const lrTicks = computed(() => [0, 0.5, 1].map((f) => f * lrMax.value))
 const lrPath = computed(() => lrPoints.value.map((p, i) => `${i ? 'L' : 'M'}${x(p.step).toFixed(1)},${ly(p.lr).toFixed(1)}`).join(''))
@@ -176,7 +177,7 @@ const speed = computed(() => {
   })
 })
 const hasSpeed = computed(() => speed.value.some((v) => v != null))
-const sMax = computed(() => Math.max(...speed.value.filter((v): v is number => v != null), 1e-6) * 1.1)
+const sMax = computed(() => maxOf(speed.value.filter((v): v is number => v != null), 1e-6) * 1.1)
 const sy = (v: number) => pad.value.t + (1 - v / sMax.value) * (H.value - pad.value.t - pad.value.b)
 const speedPath = computed(() => {
   let d = ''

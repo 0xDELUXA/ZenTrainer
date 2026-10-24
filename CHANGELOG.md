@@ -18,6 +18,13 @@ and Manager show.
 - **Lighter run page:** the noise chart starts folded (it remembers being opened), and its dots are
   drawn on a canvas instead of a page element each, so moving the mouse over it or a step landing
   doesn't rebuild hundreds of them.
+- **Fixed: long runs' pages lagged, then stopped drawing:** a 150k-step run's page fetched all
+  150k metric rows (62 MB), redid its charts over every one of them each step, and past ~130k steps
+  the loss chart's scale hit a JavaScript limit, so the chart and everything below it never drew.
+  A long run's history now comes thinned to ~4,000 rows (each carries its stretch's mean loss: the
+  same curve; the latest steps stay exact; `?full=1` gets every row), a page left open keeps it
+  that way, and the charts no longer hit the limit. On that run: 1.6 MB, drawn in under 2 s, 17 MB
+  of memory instead of 347.
 - **Slider LoRAs:** New run → Model → Add → Slider: a LoRA whose strength moves pictures along one
   attribute (+1 one way, −1 the other, 0 the base model).
   - **From image pairs:** the dataset's pictures and a picture set beside them (`_controls/<set>/`,
