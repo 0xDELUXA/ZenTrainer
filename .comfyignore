@@ -12,6 +12,7 @@ start-windows.bat
 web/
 
 # development
+AGENTS.md
 tests/
 pytest.ini
 examples/
