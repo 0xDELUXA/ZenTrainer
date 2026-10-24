@@ -131,9 +131,43 @@ class OptimizerDef:
     adaptive: bool = False  # steers its own LR: the schedule stays flat
 
 
-def _bnb(name):
-    return lambda p, s: getattr(importlib.import_module("bitsandbytes.optim"), name)(
-        p, lr=s.learning_rate, weight_decay=s.weight_decay)
+# The optional packages are imported when picked, not at load: each is an extra (zt extras optimizers).
+
+def _adamw8bit(p, s):
+    from bitsandbytes.optim import AdamW8bit
+
+    return AdamW8bit(p, lr=s.learning_rate, weight_decay=s.weight_decay)
+
+
+def _lion8bit(p, s):
+    from bitsandbytes.optim import Lion8bit
+
+    return Lion8bit(p, lr=s.learning_rate, weight_decay=s.weight_decay)
+
+
+def _automagic3(p, s):
+    from .automagic3_batched import Automagic3Batched
+
+    return Automagic3Batched(p, lr=s.learning_rate, weight_decay=s.weight_decay, fused=False,
+                             **({"min_lr": s.learning_rate * s.lr_floor} if s.lr_floor > 0 else {}))
+
+
+def _prodigy(p, s):
+    from prodigyopt import Prodigy
+
+    return Prodigy(p, lr=s.learning_rate, weight_decay=s.weight_decay, safeguard_warmup=True, use_bias_correction=True)
+
+
+def _schedule_free(p, s):
+    from schedulefree import AdamWScheduleFree
+
+    return AdamWScheduleFree(p, lr=s.learning_rate, weight_decay=s.weight_decay, warmup_steps=s.warmup_steps)
+
+
+def _came(p, s):
+    from came_pytorch import CAME
+
+    return CAME(p, lr=s.learning_rate, weight_decay=s.weight_decay)
 
 
 OPTIMIZERS: dict[str, OptimizerDef] = {d.id: d for d in [
@@ -149,34 +183,30 @@ OPTIMIZERS: dict[str, OptimizerDef] = {d.id: d for d in [
                  lr_hint="1e-3", note="Plain momentum, no per-weight scaling: needs a much higher LR and patience."),
     OptimizerDef("RMSprop", "RMSprop", lambda p, s: torch.optim.RMSprop(p, lr=s.learning_rate, weight_decay=s.weight_decay),
                  note="Adam's scaling without momentum; rarely better for LoRAs."),
-    OptimizerDef("AdamW8bit", "AdamW 8-bit", _bnb("AdamW8bit"), package="bitsandbytes", pip="bitsandbytes",
+    OptimizerDef("AdamW8bit", "AdamW 8-bit", _adamw8bit, package="bitsandbytes", pip="bitsandbytes",
                  note="AdamW with 8-bit states: about a quarter of the optimizer memory."),
-    OptimizerDef("Lion8bit", "Lion 8-bit", _bnb("Lion8bit"), package="bitsandbytes", pip="bitsandbytes",
+    OptimizerDef("Lion8bit", "Lion 8-bit", _lion8bit, package="bitsandbytes", pip="bitsandbytes",
                  lr_hint="1e-5 – 3e-5", note="Lion with an 8-bit moment: the least memory of the momentum ones."),
     OptimizerDef("Automagic", "Automagic (auto LR)",
                  lambda p, s: Automagic(p, lr=s.learning_rate, weight_decay=s.weight_decay),
                  lr_hint="1e-6 (start)",
                  note="Each weight tunes its own LR (1e-7 to 1e-3). Start at 1e-6, constant schedule."),
     OptimizerDef("Automagic3", "Automagic v3 (auto LR)",
-                 lambda p, s: importlib.import_module(".automagic3_batched", __package__).Automagic3Batched(
-                     p, lr=s.learning_rate, weight_decay=s.weight_decay, fused=False,
-                     **({"min_lr": s.learning_rate * s.lr_floor} if s.lr_floor > 0 else {})),
+                 _automagic3,
                  lr_hint="1e-4 (start)", adaptive=True,
                  note="Ostris's v3: one LR per group that climbs while updates agree and backs off when they "
                       "flip. It moves only on a steady trend, which small batches rarely give, so start near "
                       "a normal LoRA LR (1e-4); the schedule and warmup are ignored."),
     OptimizerDef("Prodigy", "Prodigy (auto LR)",
-                 lambda p, s: importlib.import_module("prodigyopt").Prodigy(
-                     p, lr=s.learning_rate, weight_decay=s.weight_decay, safeguard_warmup=True, use_bias_correction=True),
+                 _prodigy,
                  package="prodigyopt", pip="prodigyopt", lr_hint="1.0",
                  note="Finds its own step size: set LR to 1.0 and leave it."),
     OptimizerDef("AdamWScheduleFree", "AdamW schedule-free",
-                 lambda p, s: importlib.import_module("schedulefree").AdamWScheduleFree(
-                     p, lr=s.learning_rate, weight_decay=s.weight_decay, warmup_steps=s.warmup_steps),
+                 _schedule_free,
                  package="schedulefree", pip="schedulefree", lr_hint="1e-4 – 5e-4",
                  note="No LR schedule needed (use constant).", schedule_free=True),
     OptimizerDef("CAME", "CAME",
-                 lambda p, s: importlib.import_module("came_pytorch").CAME(p, lr=s.learning_rate, weight_decay=s.weight_decay),
+                 _came,
                  package="came_pytorch", pip="came-pytorch", lr_hint="1e-4",
                  note="Adafactor-like memory with AdamW-like stability."),
 ]}
