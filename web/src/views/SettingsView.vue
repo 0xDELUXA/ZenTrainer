@@ -54,6 +54,23 @@ async function saveFolder() {
   }
 }
 
+// Faces: which recognition model face reports and likeness use (applies at the next face check)
+const savingFace = ref(false)
+const faceError = ref('')
+const faceModel = computed(() => storage.value?.face_models?.find((m) => m.id === storage.value?.settings.face_model))
+async function pickFace(id: string) {
+  if (!storage.value || id === storage.value.settings.face_model) return
+  savingFace.value = true
+  faceError.value = ''
+  try {
+    storage.value = await engine.putSettings({ face_model: id })
+  } catch (e) {
+    faceError.value = String((e as Error).message ?? e)
+  } finally {
+    savingFace.value = false
+  }
+}
+
 async function checkUpdates() {
   checking.value = true
   try {
@@ -240,6 +257,40 @@ async function checkUpdates() {
           </button>
         </div>
         <p v-if="SETTINGS[id].description" class="muted hint">{{ SETTINGS[id].description }}</p>
+      </div>
+    </section>
+
+    <!-- an engine from before the face model setting sends no face_models: no section -->
+    <section v-if="storage?.face_models" class="card section">
+      <div>
+        <h2>Faces</h2>
+        <p class="muted">
+          Face reports on datasets and the likeness score on samples use a face recognition model, on the CPU. A run keeps
+          the model it started with; scores from different models don't compare.
+        </p>
+      </div>
+      <p v-if="!storage.faces_available" class="warn">
+        <i class="mdi mdi-puzzle-outline" /> Not installed: add the faces extra (<span class="mono">zt extras faces</span>, or
+        <span class="mono">pip install insightface onnxruntime opencv-python-headless</span> in ComfyUI's environment).
+      </p>
+      <div class="stack">
+        <div class="eyebrow">Model</div>
+        <div class="segmented">
+          <button
+            v-for="m in storage.face_models"
+            :key="m.id"
+            :class="{ on: storage.settings.face_model === m.id }"
+            :disabled="savingFace"
+            @click="pickFace(m.id)"
+          >
+            {{ m.label }}
+          </button>
+        </div>
+        <p v-if="faceModel" class="muted hint">
+          {{ faceModel.note }}<template v-if="!faceModel.downloaded"> Not downloaded yet: it downloads at the next face check.</template>
+        </p>
+        <p class="muted hint">InsightFace's models are for non-commercial research use only.</p>
+        <p v-if="faceError" class="warn">{{ faceError }}</p>
       </div>
     </section>
   </div>

@@ -3,6 +3,14 @@
 What changed in each ZenTrainer release, newest first. Versions are the ones the ComfyUI Registry
 and Manager show.
 
+## Unreleased
+
+### Datasets and captions
+- **A choice of face model** (Settings → Faces): InsightFace's standard one, or the larger
+  antelopev2 (ArcFace R100), which tells similar faces apart better and is about 1.5 times slower.
+  A run keeps the model it started with. antelopev2's download, which unpacks a folder too deep,
+  now loads as it is.
+
 ## 0.2.0 (2026-10-24)
 
 ### Install and run

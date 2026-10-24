@@ -8,8 +8,11 @@ opencv-python-headless): InsightFace on the CPU, so it never competes with train
 - Likeness: how much a sample's face looks like the dataset's, per sample and checkpoint, so the
   best checkpoint of a character LoRA is a number instead of a guess (Fizgig's likeness scoring).
 
-InsightFace's pretrained models (buffalo_l, antelopev2) are for non-commercial research use only;
-they download to ~/.insightface/models on first use (or are already there).
+The recognition model is a setting (face_model): buffalo_l's ArcFace R50, or antelopev2's larger
+R100, which tells similar faces apart better and is slower on the CPU. Scores from the two don't
+compare, so caches are per model and each likeness row says which one scored it. InsightFace's
+pretrained models are for non-commercial research use only; they download to
+~/.insightface/models on first use (or are already there).
 """
 
 from __future__ import annotations
@@ -17,17 +20,24 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import threading
 from pathlib import Path
 
 import numpy as np
 
-PACK = "buffalo_l"  # ArcFace R50 (WebFace600K) + RetinaFace; "antelopev2" is the stronger R100
+# id -> (label, what it is); the first is the default
+MODELS = {
+    "buffalo_l": ("Standard (buffalo_l)", "ArcFace R50 trained on WebFace600K, with RetinaFace: quick on the CPU."),
+    "antelopev2": ("Larger (antelopev2)", "ArcFace R100 trained on Glint360K, with SCRFD: tells similar faces apart "
+                                          "better, about 1.5 times slower on the CPU. A 360 MB download the first time."),
+}
+DEFAULT = "buffalo_l"
 MASKED_OUT = 0.5  # a face whose box averages below this in the picture's mask is masked out
 MAX_FACES = 6  # faces kept per frame (largest first)
 OUTLIER = 0.3  # cosine to the other pictures' average face below this: probably not the same person
 ONE_IDENTITY = 0.35  # the set's median below this: its faces aren't one person (likeness means little)
-_app = None
+_app: tuple[str, object] | None = None  # (model, FaceAnalysis): the one in use, rebuilt when the setting changes
 _lock = threading.RLock()  # detect() holds it while _get() builds the app
 
 
@@ -42,24 +52,73 @@ def available() -> bool:
         return False
 
 
-def _get():
+def model() -> str:
+    """The face model the settings pick."""
+    from .. import paths
+
+    try:
+        name = paths.read_settings().get("face_model")
+    except (ImportError, AttributeError):  # outside ComfyUI (tests, tools)
+        name = None
+    return name if name in MODELS else DEFAULT
+
+
+def _home() -> Path:
+    return Path(os.path.expanduser("~/.insightface"))
+
+
+def downloaded(name: str) -> bool:
+    d = _home() / "models" / name
+    return any(d.glob("*.onnx")) or any((d / name).glob("*.onnx"))
+
+
+def _root(name: str) -> str:
+    """The root FaceAnalysis loads `name` from, downloading it first if needed. antelopev2's zip
+    unpacks one folder too deep (models/antelopev2/antelopev2/*.onnx), where FaceAnalysis can't find
+    it: then a link in ZenTrainer's own folder points at the inner one, and ~/.insightface is left
+    as it is (other custom nodes use it)."""
+    from insightface.utils import storage
+
+    home = _home()
+    storage.ensure_available("models", name, root=str(home))
+    d = home / "models" / name
+    if any(d.glob("*.onnx")) or not any((d / name).glob("*.onnx")):
+        return str(home)
+    import folder_paths
+
+    root = Path(folder_paths.get_user_directory()) / "zentrainer" / "insightface"
+    link = root / "models" / name
+    if not link.exists():
+        link.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            link.symlink_to(d / name, target_is_directory=True)
+        except OSError:  # Windows without developer mode: a junction needs no rights
+            import subprocess
+
+            subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(d / name)], check=True, capture_output=True)
+    return str(root)
+
+
+def _get(name: str):
     global _app
     with _lock:
-        if _app is None:
+        if _app is None or _app[0] != name:
             from insightface.app import FaceAnalysis
 
-            app = FaceAnalysis(name=PACK, allowed_modules=["detection", "recognition"], providers=["CPUExecutionProvider"])
+            app = FaceAnalysis(name=name, root=_root(name), allowed_modules=["detection", "recognition"],
+                               providers=["CPUExecutionProvider"])
             app.prepare(ctx_id=-1, det_size=(640, 640))
-            _app = app
-        return _app
+            _app = (name, app)
+        return _app[1]
 
 
-def detect(rgb: np.ndarray) -> list[dict]:
+def detect(rgb: np.ndarray, name: str | None = None) -> list[dict]:
     """Faces in an (H, W, 3) uint8 RGB picture, largest first: bbox, detector score, the share of
-    the picture's height the face spans, and its unit ArcFace embedding."""
+    the picture's height the face spans, and its unit ArcFace embedding (from `name`, or the
+    model the settings pick)."""
     h = rgb.shape[0]
     with _lock:  # the onnx sessions aren't shared across threads
-        faces = _get().get(np.ascontiguousarray(rgb[..., ::-1]))
+        faces = _get(name or model()).get(np.ascontiguousarray(rgb[..., ::-1]))
     out = [{"bbox": [float(v) for v in f.bbox], "score": float(f.det_score),
             "share": float((f.bbox[3] - f.bbox[1]) / max(h, 1)), "emb": np.asarray(f.normed_embedding, np.float32)}
            for f in faces]
@@ -87,14 +146,14 @@ def _frames(path: Path, n: int) -> list[np.ndarray]:
         return [np.asarray(im)]
 
 
-def frame_faces(path: Path, frames: int = 3) -> list[list[dict]]:
+def frame_faces(path: Path, frames: int = 3, name: str | None = None) -> list[list[dict]]:
     """Per frame, its faces (largest first) with boxes as fractions of the picture, so a mask of
     any size can be laid over them later: [[{"box": [x0, y0, x1, y1], "share", "emb"}, ...], ...]."""
     out = []
     for rgb in _frames(path, frames):
         h, w = rgb.shape[:2]
         out.append([{"box": [f["bbox"][0] / w, f["bbox"][1] / h, f["bbox"][2] / w, f["bbox"][3] / h],
-                     "share": f["share"], "emb": f["emb"].tolist()} for f in detect(rgb)[:MAX_FACES]])
+                     "share": f["share"], "emb": f["emb"].tolist()} for f in detect(rgb, name)[:MAX_FACES]])
     return out
 
 
@@ -145,21 +204,24 @@ def _cache_dir() -> Path:
     return d
 
 
-def dataset_faces(name: str, progress=None) -> dict:
+def dataset_faces(name: str, progress=None, face_model: str | None = None) -> dict:
     """{"items": {rel: {"faces", "masked", "share", "likeness", "outlier"}}, "with_face", "total"};
     each picture's faces are cached by its mtime and size, so a re-check only looks at what changed
     (masks are applied afresh each time: redrawing one needs no detection)."""
-    out, _ = _report(name, progress)
+    out, _ = _report(name, progress, face_model)
     return out
 
 
-def _report(name: str, progress=None) -> tuple[dict, dict[str, np.ndarray]]:
+def _report(name: str, progress=None, face_model: str | None = None) -> tuple[dict, dict[str, np.ndarray]]:
     """The face report, and each picture's main trained face embedding (for the centroid)."""
     from . import folders as datasets
     from ..harness.data import scan
 
+    fm = face_model or model()
     root = datasets.folder(name)
-    cache_file = _cache_dir() / f"{hashlib.sha1(name.encode()).hexdigest()[:16]}.json"
+    key = hashlib.sha1(name.encode()).hexdigest()[:16]
+    # one cache per model, so switching back finds the old one (buffalo_l's keeps its first name)
+    cache_file = _cache_dir() / (f"{key}.json" if fm == DEFAULT else f"{key}.{fm}.json")
     try:
         cache = json.loads(cache_file.read_text())
     except (OSError, ValueError):
@@ -169,10 +231,10 @@ def _report(name: str, progress=None) -> tuple[dict, dict[str, np.ndarray]]:
     for k, it in enumerate(items):
         rel = str(it.path.relative_to(root))
         st = it.path.stat()
-        stamp = f"{PACK}|2|{st.st_mtime_ns}|{st.st_size}"  # 2: every face per frame, boxes as fractions
+        stamp = f"{fm}|2|{st.st_mtime_ns}|{st.st_size}"  # 2: every face per frame, boxes as fractions
         hit = cache.get(rel)
         if not hit or hit.get("stamp") != stamp:
-            hit = {"stamp": stamp, "frames": frame_faces(it.path)}
+            hit = {"stamp": stamp, "frames": frame_faces(it.path, name=fm)}
             cache[rel] = hit
         rows[rel] = _summarize(hit["frames"], _mask_array(it.mask))
         if progress:
@@ -189,7 +251,7 @@ def _report(name: str, progress=None) -> tuple[dict, dict[str, np.ndarray]]:
                     "outlier": like is not None and like < OUTLIER}
     vals = sorted(likes.values())
     median = vals[len(vals) // 2] if vals else None
-    return {"items": out, "with_face": len(embs), "total": len(rows), "pack": PACK,
+    return {"items": out, "with_face": len(embs), "total": len(rows), "pack": fm,
             "identity": round(median, 4) if median is not None else None,
             "one_identity": median is not None and median >= ONE_IDENTITY}, embs
 
@@ -222,30 +284,33 @@ def _centroid(embs: list[np.ndarray]) -> np.ndarray | None:
     return c / (np.linalg.norm(c) + 1e-9)
 
 
-def dataset_centroid(name: str) -> np.ndarray | None:
-    _, embs = _report(name)  # cached: cheap after the first look
+def dataset_centroid(name: str, face_model: str | None = None) -> np.ndarray | None:
+    _, embs = _report(name, face_model=face_model)  # cached: cheap after the first look
     return _centroid(list(embs.values()))
 
 
-def likeness(path: Path, centroid: np.ndarray, frames: int = 4) -> float | None:
+def likeness(path: Path, centroid: np.ndarray, frames: int = 4, face_model: str | None = None) -> float | None:
     """How much a rendered sample's main face looks like the dataset's (cosine, -1..1; same
-    person is typically above 0.5): the best face in each of a few frames, averaged."""
+    person is typically above 0.5): the best face in each of a few frames, averaged. The centroid
+    must come from the same face model."""
     scores = []
     for rgb in _frames(path, frames):
-        fs = detect(rgb)
+        fs = detect(rgb, face_model)
         if fs:
             scores.append(max(float(np.dot(f["emb"], centroid)) for f in fs[:3]))
     return round(float(np.mean(scores)), 4) if scores else None
 
 
 class LikenessWorker:
-    """Scores a run's samples off the training thread (CPU), appending {"step", "index", "score"}
-    rows to the run's "likeness" stream as each finishes."""
+    """Scores a run's samples off the training thread (CPU), appending {"step", "index", "score",
+    "model"} rows to the run's "likeness" stream as each finishes. The face model is the one set
+    when the run started, for the whole run, so its scores compare with each other."""
 
     def __init__(self, store, run_id: str, dataset: str):
         import queue
 
         self.store, self.run_id, self.dataset = store, run_id, dataset
+        self.model = model()
         self.q: queue.Queue = queue.Queue()
         self.centroid = None
         threading.Thread(target=self._run, daemon=True, name="zentrainer-likeness").start()
@@ -260,9 +325,9 @@ class LikenessWorker:
         from .. import paths
 
         try:
-            report = dataset_faces(self.dataset)
+            report = dataset_faces(self.dataset, face_model=self.model)
             if report.get("one_identity"):
-                self.centroid = dataset_centroid(self.dataset)
+                self.centroid = dataset_centroid(self.dataset, self.model)
             else:
                 logging.info("[ZenTrainer] likeness off: the dataset's faces aren't one person (median %s)",
                              report.get("identity"))
@@ -280,8 +345,9 @@ class LikenessWorker:
                 path = paths.resolve_view(row.get("type", "output"), row["subfolder"], row["filename"])
                 if path is None:
                     raise FileNotFoundError(row["filename"])
-                score = likeness(path, self.centroid)
-                out = {"run_id": self.run_id, "step": row["step"], "index": row["index"], "score": score}
+                score = likeness(path, self.centroid, face_model=self.model)
+                out = {"run_id": self.run_id, "step": row["step"], "index": row["index"], "score": score,
+                       "model": self.model}
                 if row.get("manual"):
                     out.update(manual=True, base=bool(row.get("base")))
                 self.store.append(self.run_id, "likeness", out)

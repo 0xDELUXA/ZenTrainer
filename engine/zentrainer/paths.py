@@ -15,7 +15,7 @@ from pathlib import Path
 
 from . import safeio
 
-DEFAULT_SETTINGS = {"folder": ""}
+DEFAULT_SETTINGS = {"folder": "", "face_model": "buffalo_l"}
 
 _UNREAD = object()
 _active = _UNREAD  # the folder this process runs with (None: ComfyUI's folders)
@@ -130,6 +130,12 @@ def save_settings(changes: dict) -> dict:
     cur = read_settings()
     if "folder" in changes:
         cur["folder"] = validate_folder(changes["folder"])
+    if "face_model" in changes:
+        from .datasets import faces
+
+        if changes["face_model"] not in faces.MODELS:
+            raise SettingsError(f"face_model is one of {', '.join(faces.MODELS)}")
+        cur["face_model"] = changes["face_model"]
     f = settings_file()
     f.parent.mkdir(parents=True, exist_ok=True)
     safeio.write_json(f, cur)
@@ -137,12 +143,18 @@ def save_settings(changes: dict) -> dict:
 
 
 def describe() -> dict:
-    """The saved setting, what this process actually uses, and whether a restart is pending."""
+    """The saved settings, what this process actually uses, whether a restart is pending (the
+    folder only: the face model applies at the next face check), and the face models on offer."""
+    from .datasets import faces
+
     saved = read_settings()
     active = folder()
     return {"settings": saved, "active": {"folder": str(active) if active else "", "datasets": str(datasets_root()),
                                           "output": str(output_root()), "loras": str(lora_dir())},
-            "restart_needed": saved["folder"] != (str(active) if active else "")}
+            "restart_needed": saved["folder"] != (str(active) if active else ""),
+            "face_models": [{"id": k, "label": label, "note": note, "downloaded": faces.downloaded(k)}
+                            for k, (label, note) in faces.MODELS.items()],
+            "faces_available": faces.available()}
 
 
 # ---- files by ComfyUI /view address ----------------------------------------------------------------

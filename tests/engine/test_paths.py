@@ -63,15 +63,16 @@ def test_the_folder_is_read_once_until_a_restart(comfy, tmp_path):
 
 
 def test_settings_round_trip_and_validation(comfy, tmp_path):
-    assert paths.read_settings() == {"folder": ""}
-    assert paths.save_settings({"folder": f"  {tmp_path / 'zt'}  "}) == {"folder": str(tmp_path / "zt")}
-    assert paths.read_settings() == {"folder": str(tmp_path / "zt")}
-    assert paths.save_settings({"folder": ""}) == {"folder": ""}
+    face = {"face_model": "buffalo_l"}  # the other setting, at its default
+    assert paths.read_settings() == {"folder": "", **face}
+    assert paths.save_settings({"folder": f"  {tmp_path / 'zt'}  "}) == {"folder": str(tmp_path / "zt"), **face}
+    assert paths.read_settings() == {"folder": str(tmp_path / "zt"), **face}
+    assert paths.save_settings({"folder": ""}) == {"folder": "", **face}
     (tmp_path / "file").write_text("x")
     for bad in ("relative/dir", str(tmp_path / "file"), str(comfy / "output"), str(comfy / "input" / "zt"), str(comfy)):
         with pytest.raises(paths.SettingsError):
             paths.validate_folder(bad)
-    assert paths.read_settings() == {"folder": ""}  # a refused one isn't saved
+    assert paths.read_settings() == {"folder": "", **face}  # a refused one isn't saved
 
 
 def test_view_addresses_resolve_and_refuse_escapes(comfy, tmp_path):
