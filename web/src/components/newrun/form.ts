@@ -16,6 +16,8 @@ import {
   type NoiseProfile,
   type OptimizerInfo,
   type Preset,
+  type ShareFile,
+  type ShareImport,
   type TrainSpec,
 } from '@/api/engine'
 
@@ -221,6 +223,50 @@ export function useRunForm() {
     runPresets.value = [...runPresets.value.filter((p) => p.id !== saved.preset.id), saved.preset as Preset<Partial<TrainSpec>>]
   }
 
+  // ---- sharing: the settings as a file to pass around (engine sharing.py) ---------------------
+  // leaves out this machine's dataset, folders and pictures; an import fills in everything else
+  const imported = ref<ShareImport | null>(null) // what the last import said (warnings, files)
+  const fileName = (doc: ShareFile) => `${(doc.name || 'run').replace(/[^a-zA-Z0-9_-]+/g, '-')}.zentrainer.json`
+  const current = () => structuredClone(toRaw(spec)) as TrainSpec
+  async function exportSettings() {
+    const doc = await engine.exportSpec(current())
+    const url = URL.createObjectURL(new Blob([JSON.stringify(doc, null, 2) + '\n'], { type: 'application/json' }))
+    const a = Object.assign(document.createElement('a'), { href: url, download: fileName(doc) })
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+  /** the settings as text, for pasting into a chat; false when the browser won't allow it */
+  async function copySettings(): Promise<boolean> {
+    const doc = await engine.exportSpec(current())
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(doc, null, 2))
+      return true
+    } catch {
+      error.value = "The browser didn't allow copying (it needs https or localhost): use Export instead."
+      return false
+    }
+  }
+  /** a shared file's text (or a run's spec.json) onto the form */
+  async function importSettings(text: string) {
+    let doc: unknown
+    try {
+      doc = JSON.parse(text)
+    } catch {
+      error.value = "That isn't a ZenTrainer settings file (it isn't JSON)."
+      return
+    }
+    try {
+      const r = await engine.importSpec(doc)
+      merge(spec as unknown as Record<string, unknown>, r.spec as Record<string, unknown>)
+      if (r.name) spec.name = r.name
+      applied.value = []
+      imported.value = r
+      error.value = null
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e)
+    }
+  }
+
   // video models get a frames field per sample (and the run's own)
   const isVideoModel = computed(() => familyId.value === 'minimax-h3' || (spec.samples.frames ?? 1) > 1)
   // start lower: one earlier stage at a lower resolution (the engine takes several; the form edits one)
@@ -279,7 +325,7 @@ export function useRunForm() {
     datasets, optimizers, trainAttention, runPresets, promptSets, pairCount, pairItems,
     controlCounts, chosenInputs, runInputs, toggleInput, channelModel,
     editing, retrying, resuming, resumeStep, error,
-    applied, applyPreset, savePreset, isVideoModel, stage0, dataset, opt, epochs, modelLabel, noise,
+    applied, applyPreset, savePreset, imported, exportSettings, copySettings, importSettings, isVideoModel, stage0, dataset, opt, epochs, modelLabel, noise,
   }
 }
 

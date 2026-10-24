@@ -5,6 +5,13 @@ and Manager show.
 
 ## Unreleased
 
+### Runs
+- **Share run settings:** Export (a `.zentrainer.json` file) or Copy (the same as text, for a chat)
+  on New run, and Export settings on a run's page; Import on New run loads one, or paste its text
+  anywhere on the page. The file leaves out what's only yours (the dataset, where LoRAs are saved, a
+  LoRA to continue from, edit samples' pictures) and says which model files aren't installed here.
+  A file from a newer ZenTrainer loads what this one knows, and says what it left out.
+
 ### Training
 - **Fixed: MOSS Image on a newer ComfyUI** stopped with "attention() got an unexpected keyword
   argument 'mask'": ComfyUI's MOSS attention takes more arguments since its MOSS-Image edit

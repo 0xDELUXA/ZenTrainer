@@ -7,10 +7,10 @@ from pathlib import Path
 
 from aiohttp import web
 
-from ... import presets, state
+from ... import presets, sharing, state
 from .. import jobqueue, system
 from ...harness import control
-from ...spec import SpecError, TrainSpec, locked_changes
+from ...spec import SpecError, TrainSpec, locked_changes, slugify
 from . import common
 from .common import RETRYABLE, _bad, _dequeue, _keep_later, _migrate_states, _queue_session, _remember_client
 
@@ -290,6 +290,35 @@ def register(server) -> None:
         except presets.PresetError as e:
             return _bad(str(e))
         return web.json_response({"preset": row})
+
+    # ---- run settings as a file to share (sharing.py) ----------------------------------------
+    @routes.get("/zentrainer/api/runs/{run_id}/export")
+    async def export_run(request):
+        try:
+            spec = state.store().spec(request.match_info["run_id"])
+        except (FileNotFoundError, ValueError):
+            return _bad("no such run", 404)
+        doc = sharing.export(spec)
+        name = slugify(doc["name"] or "run") or "run"
+        return web.json_response(doc, headers={"Content-Disposition": f'attachment; filename="{name}.zentrainer.json"'})
+
+    @routes.post("/zentrainer/api/share/export")
+    async def export_spec(request):
+        b = await request.json()
+        if not isinstance(b.get("spec"), dict):
+            return _bad("spec required")
+        return web.json_response(sharing.export(b["spec"]))
+
+    @routes.post("/zentrainer/api/share/import")
+    async def import_spec(request):
+        try:
+            b = await request.json()
+        except ValueError:
+            return _bad("not JSON")
+        try:
+            return web.json_response(sharing.read(b.get("doc") if isinstance(b, dict) and "doc" in b else b))
+        except sharing.ShareError as e:
+            return _bad(str(e))
 
     @routes.delete("/zentrainer/api/presets/{kind}/{id}")
     async def delete_preset(request):

@@ -4,7 +4,7 @@
 // you're about to do (and what looks off) next to the Start buttons. Model files, folders,
 // samplers and schedulers come from ComfyUI's object_info; the rest is the harness's. The
 // sections are in components/newrun/ and share the form through form.ts.
-import { provide } from 'vue'
+import { onMounted, onUnmounted, provide, ref } from 'vue'
 import DatasetSection from '@/components/newrun/DatasetSection.vue'
 import { RUN_FORM, useRunForm } from '@/components/newrun/form'
 import MemorySection from '@/components/newrun/MemorySection.vue'
@@ -16,6 +16,33 @@ import TrainingSection from '@/components/newrun/TrainingSection.vue'
 const form = useRunForm()
 provide(RUN_FORM, form)
 const { runPresets, applied, applyPreset, savePreset, editing, retrying, resuming, resumeStep } = form
+const { imported, exportSettings, copySettings, importSettings } = form
+
+// shared settings: a .zentrainer.json from Import, or its text pasted anywhere on the page
+const picker = ref<HTMLInputElement | null>(null)
+const copied = ref(false)
+async function pick(e: Event) {
+  const input = e.target as HTMLInputElement
+  const f = input.files?.[0]
+  input.value = ''
+  if (f) await importSettings(await f.text())
+}
+async function copy() {
+  copied.value = await copySettings()
+  if (copied.value) setTimeout(() => (copied.value = false), 1500)
+}
+function onPaste(e: ClipboardEvent) {
+  const t = e.target as HTMLElement | null
+  if (resuming.value || (t && (t.closest('input, textarea, [contenteditable="true"]')))) return
+  const text = e.clipboardData?.getData('text/plain')?.trim() ?? ''
+  if (text.startsWith('{') && /"zentrainer-run"|"optim"\s*:/.test(text)) {
+    e.preventDefault()
+    void importSettings(text)
+  }
+}
+onMounted(() => window.addEventListener('paste', onPaste))
+onUnmounted(() => window.removeEventListener('paste', onPaste))
+const missing = () => imported.value?.files.filter((f) => f.installed === false) ?? []
 </script>
 
 <template>
@@ -37,6 +64,28 @@ const { runPresets, applied, applyPreset, savePreset, editing, retrying, resumin
       <button class="preset ghost" title="Save the current settings (not the model or dataset) as a preset" @click="savePreset">
         <i class="mdi mdi-content-save-outline" /> Save as preset
       </button>
+      <span class="share">
+        <button class="preset ghost" title="Download these settings as a file to share (without your dataset or folders)" @click="exportSettings">
+          <i class="mdi mdi-export-variant" /> Export
+        </button>
+        <button class="preset ghost" title="Copy these settings as text, to paste into a chat" @click="copy">
+          <i :class="copied ? 'mdi mdi-check' : 'mdi mdi-content-copy'" /> {{ copied ? 'Copied' : 'Copy' }}
+        </button>
+        <button v-if="!resuming" class="preset ghost" title="Load settings someone shared: a .zentrainer.json file (or paste its text anywhere here)" @click="picker?.click()">
+          <i class="mdi mdi-import" /> Import
+        </button>
+        <input ref="picker" type="file" accept=".json,application/json" hidden @change="pick" />
+      </span>
+    </div>
+
+    <div v-if="imported" class="card imported small">
+      <button class="close" title="Dismiss" @click="imported = null"><i class="mdi mdi-close" /></button>
+      <div><i class="mdi mdi-import" /> Loaded <b>{{ imported.name || 'shared settings' }}</b>. Choose {{ imported.local.join(', ') }} here.</div>
+      <div v-if="missing().length" class="warn">
+        <i class="mdi mdi-alert-outline" /> Not installed here:
+        <span v-for="f in missing()" :key="f.field" class="file">{{ f.name }} <span class="muted">({{ f.folder }})</span></span>
+      </div>
+      <div v-for="w in imported.warnings" :key="w" class="warn"><i class="mdi mdi-information-outline" /> {{ w }}</div>
     </div>
 
     <div class="layout">
@@ -87,6 +136,34 @@ const { runPresets, applied, applyPreset, savePreset, editing, retrying, resumin
 }
 .preset.on {
   background: var(--zen-selected-bg, color-mix(in srgb, var(--zen-selected, var(--zen-accent)) 16%, transparent));
+}
+.share {
+  display: contents;
+}
+.imported {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+  padding-right: 32px;
+}
+.imported .close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.6;
+}
+.imported .warn {
+  color: var(--zen-warn);
+}
+.imported .file {
+  margin-left: 8px;
+  font-family: var(--zen-mono);
 }
 .preset.ghost {
   color: var(--zen-muted);

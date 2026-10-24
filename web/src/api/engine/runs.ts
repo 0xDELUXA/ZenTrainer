@@ -16,6 +16,24 @@ export type RunStatus =
   | 'interrupted'
   | 'rejected'
 
+export interface ShareFile {
+  format: 'zentrainer-run'
+  left_out: string[]
+  version: number
+  zentrainer: string
+  name: string
+  spec: Partial<TrainSpec>
+}
+
+export interface ShareImport {
+  spec: Partial<TrainSpec>
+  name: string
+  warnings: string[]
+  /** what the file leaves to choose here (the dataset, where LoRAs are saved...) */
+  local: string[]
+  files: { field: string; folder: string; name: string; installed: boolean | null }[]
+}
+
 export const ACTIVE: RunStatus[] = ['queued', 'loading', 'training', 'paused']
 
 export interface RunMeta {
@@ -130,6 +148,9 @@ export const runPath = (id: string) => `/runs/${encodeURIComponent(id)}`
 export const downloadUrl = (id: string, lora?: string) =>
   `/zentrainer/api${runPath(id)}/download${lora ? `?lora=${encodeURIComponent(lora)}` : ''}`
 
+/** a link that saves the run's settings as a file to share (engine sharing.py) */
+export const exportUrl = (id: string) => `/zentrainer/api${runPath(id)}/export`
+
 export interface SampleProgress {
   run_id: string
   phase: 'requested' | 'sampling' | 'done'
@@ -167,6 +188,11 @@ export const runsApi = {
   presets: <T = unknown>(kind: PresetKind) => call<{ presets: Preset<T>[] }>(`/presets/${kind}`).then((r) => r.presets),
   savePreset: (kind: PresetKind, name: string, data: unknown, description = '') =>
     call<{ preset: Preset }>(`/presets/${kind}`, { method: 'POST', body: JSON.stringify({ name, data, description }) }),
+  /** run settings as a file to share (engine sharing.py): a run's, or the form's */
+  exportRun: (id: string) => call<ShareFile>(`${runPath(id)}/export`),
+  exportSpec: (spec: TrainSpec) => call<ShareFile>('/share/export', { method: 'POST', body: JSON.stringify({ spec }) }),
+  /** a shared file (or a bare spec.json) read for this install: settings to lay over the form */
+  importSpec: (doc: unknown) => call<ShareImport>('/share/import', { method: 'POST', body: JSON.stringify({ doc }) }),
   deletePreset: (kind: PresetKind, id: string) => call(`/presets/${kind}/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   control: (id: string, command: Command, args?: Record<string, unknown>) =>
     call<{ ok: true }>(`${runPath(id)}/control`, { method: 'POST', body: JSON.stringify({ command, args }) }),

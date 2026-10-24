@@ -7,7 +7,7 @@ import { computed, provide, ref, toRef } from 'vue'
 import { useRouter } from 'vue-router'
 import LossChart from '@/components/LossChart.vue'
 import StatusPill from '@/components/StatusPill.vue'
-import { downloadUrl } from '@/api/engine/runs'
+import { downloadUrl, exportUrl } from '@/api/engine/runs'
 import { RUN, useRun } from '@/components/run/context'
 import RunCheckpoints from '@/components/run/RunCheckpoints.vue'
 import RunLoaded from '@/components/run/RunLoaded.vue'
@@ -109,6 +109,7 @@ const modelFile = computed(() => {
           </div>
           <a v-if="finalCk" :href="downloadUrl(id, finalCk.lora_name)" download><ZenButton icon="mdi mdi-download-outline" :title="`Download the final LoRA: ${finalCk.lora_name.split('/').pop()}`">Download</ZenButton></a>
           <ZenButton icon="mdi mdi-content-copy" title="New run with these settings" @click="router.push(`/runs/new?from=${id}`)">Duplicate</ZenButton>
+          <a :href="exportUrl(id)" download><ZenButton icon="mdi mdi-export-variant" title="Download this run's settings as a file to share (without your dataset or folders); Import it on New run">Export settings</ZenButton></a>
         </div>
       </div>
       <div v-if="error" class="card err mono">{{ error }}</div>
