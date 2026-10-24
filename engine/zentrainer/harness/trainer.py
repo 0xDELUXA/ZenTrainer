@@ -683,6 +683,10 @@ class Trainer:
             # weight budget of nothing: every layer crossed PCIe twice a step.)
             ours = [lm for lm in mm.current_loaded_models if lm.model is patcher]
             mm.free_memory(1e30, self.device, keep_loaded=ours)
+            # back from samples, the cache is in the sampler's fragments: weights loaded between
+            # them left too little room for the step that fit before (Krea 2 int8: out of VRAM on
+            # the first step after every sample pass, until the retries ran out)
+            torch.cuda.empty_cache()
             logging.info("[ZenTrainer] keeping %.1f GB of VRAM free for training beside the model", self.headroom / 1024 ** 3)
             mm.load_models_gpu([patcher], memory_required=self.headroom, force_full_load=False)
             self._fit_weights()
@@ -758,6 +762,7 @@ class Trainer:
                     ts = time.perf_counter()
                     self._train_step()
                     self._times = (getattr(self, "_times", []) + [time.perf_counter() - ts])[-12:]
+                    self._backoffs = 0  # the retries count in a row: a long run's sample passes don't use them up
                 except torch.OutOfMemoryError as e:
                     if not self._back_off(e):
                         raise
@@ -831,6 +836,7 @@ class Trainer:
         patcher = self.models.patcher
         have = patcher.loaded_size()
         if have < target - 64 * 1024 ** 2:
+            torch.cuda.empty_cache()  # into clean space, as _tighten
             patcher.partially_load(self.device, target - have)
         elif have > target + 64 * 1024 ** 2:
             patcher.partially_unload(patcher.offload_device, have - target)
@@ -912,6 +918,8 @@ class Trainer:
         self._backoffs = getattr(self, "_backoffs", 0) + 1
         patcher = self.models.patcher
         have = patcher.loaded_size()
+        if have <= 0:
+            return False  # nothing left on the card to move off
         self._resident = self._ceiling = max(0, have - TIGHTEN_MARGIN)
         self._fit_weights()
         self._recompile_if_moved()
