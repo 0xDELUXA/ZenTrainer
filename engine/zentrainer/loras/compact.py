@@ -42,6 +42,19 @@ class Layer:
     unit: int  # parameters per kept direction
     fixed: int  # parameters paid once the layer keeps any direction (LoKr's w1 and alpha)
     weight: float = 1.0  # 1 / |base weight|² when weighed by the base model
+    # parameters of the factor stored whole: past this many, the kept directions are written as
+    # one matrix instead of two thin ones (a LoKr's w2), so a layer never costs more than it did
+    dense: int = 0  # 0: always factored
+
+    def params(self, k: int) -> int:
+        """What the layer costs at rank k."""
+        if not k:
+            return 0
+        return self.fixed + (min(k * self.unit, self.dense) if self.dense else k * self.unit)
+
+    def whole(self, k: int) -> bool:
+        """Whether rank k is written as one matrix (cheaper than two thin ones from here on)."""
+        return bool(self.dense) and k * self.unit >= self.dense
 
 
 @dataclass
@@ -182,7 +195,8 @@ def analyze(path: str | os.PathLike, fmt: str = "same", base: str | os.PathLike 
         s2 = torch.linalg.svdvals(w2)
         shapes[name] = w1.numel() * w2.numel()
         if fmt == "same":
-            layers.append(Layer(name, "lokr", (s2 * s1.square().sum().sqrt()).cpu(), w2.shape[0] + w2.shape[1], w1.numel() + 1))
+            layers.append(Layer(name, "lokr", (s2 * s1.square().sum().sqrt()).cpu(), w2.shape[0] + w2.shape[1], w1.numel() + 1,
+                                dense=w2.numel()))
         else:
             v, _ = _pairs(s1, s2)
             layers.append(Layer(name, "lokr_lora", v.cpu(), w1.shape[0] * w2.shape[0] + w1.shape[1] * w2.shape[1], 1))
@@ -196,24 +210,26 @@ def analyze(path: str | os.PathLike, fmt: str = "same", base: str | os.PathLike 
 
 
 def _rank(an: Analysis) -> None:
-    li, pos, gain, cost = [], [], [], []
+    li, pos, gain, price, cost = [], [], [], [], []
     for i, layer in enumerate(an.layers):
         n = layer.s.numel()
-        g = layer.s.double().square() * layer.weight
         li.append(torch.full((n,), i, dtype=torch.int32))
         pos.append(torch.arange(n, dtype=torch.int32))
-        gain.append(g)
-        c = torch.full((n,), float(layer.unit), dtype=torch.float64)
-        c[0] += layer.fixed
-        cost.append(c)
+        gain.append(layer.s.double().square() * layer.weight)
+        # ranked at a factored direction's price (so a layer's directions stay in order); what
+        # each really adds to the file is less once the layer is cheaper stored whole
+        p = torch.full((n,), float(layer.unit), dtype=torch.float64)
+        p[0] += layer.fixed
+        price.append(p)
+        cost.append(torch.tensor([layer.params(j + 1) - layer.params(j) for j in range(n)], dtype=torch.float64))
     if not li:
         an.li = an.pos = torch.zeros(0, dtype=torch.int32)
         an.gain = an.cost = torch.zeros(0, dtype=torch.float64)
         return
-    li, pos, gain, cost = torch.cat(li), torch.cat(pos), torch.cat(gain), torch.cat(cost)
+    li, pos, gain, price, cost = torch.cat(li), torch.cat(pos), torch.cat(gain), torch.cat(price), torch.cat(cost)
     # energy per parameter, best first; within a layer that's already largest first, so any
     # prefix of the ranking keeps each layer's top directions
-    order = torch.argsort(gain / cost, descending=True, stable=True)
+    order = torch.argsort(gain / price, descending=True, stable=True)
     total = gain.sum().clamp(min=1e-30)
     an.li, an.pos, an.gain, an.cost = li[order], pos[order], gain[order] / total, cost[order]
 
@@ -254,7 +270,7 @@ def curve(an: Analysis, max_rank: int = 0) -> list[tuple[int, float]]:
 
 def summary(an: Analysis, ks: list[int]) -> dict:
     kept = sum(int(k > 0) for k in ks)
-    params = an.other + sum(layer.fixed + k * layer.unit for layer, k in zip(an.layers, ks) if k)
+    params = an.other + sum(layer.params(k) for layer, k in zip(an.layers, ks))
     allt = sum(float(layer.s.double().square().sum() * layer.weight) for layer in an.layers) or 1.0
     share = sum(float(layer.s[:k].double().square().sum() * layer.weight) for layer, k in zip(an.layers, ks) if k)
     nz = [k for k in ks if k]
@@ -297,11 +313,15 @@ def build(path: str | os.PathLike, out: str | os.PathLike, an: Analysis, ks: lis
         w1, w2, tail = _lokr_factors(p, dev)
         if layer.kind == "lokr":
             u, s, v = torch.linalg.svd(w2, full_matrices=False)
-            root = s[:k].sqrt()
             result[f"{name}.lokr_w1"] = w1.cpu()
-            result[f"{name}.lokr_w2_a"] = (u[:, :k] * root).cpu()
-            result[f"{name}.lokr_w2_b"] = (root[:, None] * v[:k]).cpu()
-            result[f"{name}.alpha"] = torch.tensor(float(k))  # alpha / rank = 1: the scale is in w1
+            if layer.whole(k):  # both whole: ComfyUI scales by 1, and the scale is in w1
+                w = (u[:, :k] * s[:k]) @ v[:k]
+                result[f"{name}.lokr_w2"] = w.reshape(w.shape[0], -1, *tail).cpu()
+            else:
+                root = s[:k].sqrt()
+                result[f"{name}.lokr_w2_a"] = (u[:, :k] * root).cpu()
+                result[f"{name}.lokr_w2_b"] = (root[:, None] * v[:k]).cpu()
+                result[f"{name}.alpha"] = torch.tensor(float(k))  # alpha / rank = 1: the scale is in w1
         else:
             u1, s1, v1 = torch.linalg.svd(w1, full_matrices=False)
             u2, s2, v2 = torch.linalg.svd(w2, full_matrices=False)

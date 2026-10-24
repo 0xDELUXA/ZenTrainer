@@ -86,6 +86,25 @@ def test_a_lokr_kept_as_one_is_its_best_cut_of_w2(tmp_path):
     assert torch.allclose(_lokr_delta(o, "m"), best, atol=1e-4)
 
 
+def test_a_lokr_kept_whole_is_never_bigger_than_it_was(tmp_path):
+    g = torch.Generator().manual_seed(6)
+    sd = _lokr(g, 4, 4, 16, 16)  # w2 16x16: past rank 8, two thin factors cost more than it
+    path = _save(tmp_path, sd)
+    an = compact.analyze(path)
+    full = compact.ranks(an, keep=1.0)
+    assert compact.summary(an, full)["params"] <= sum(v.numel() for v in sd.values())
+    sizes = [p for p, _ in compact.curve(an)]
+    assert sizes == sorted(sizes) and sizes[-1] <= sum(v.numel() for v in sd.values())
+    out = tmp_path / "o.safetensors"
+    compact.build(path, out, an, full, dtype="fp32")
+    o = load_file(str(out))
+    assert "m.lokr_w2" in o and "m.lokr_w2_a" not in o
+    assert torch.allclose(_lokr_delta(o, "m"), _lokr_delta(sd, "m"), atol=1e-4)
+    small = tmp_path / "s.safetensors"
+    compact.build(path, small, an, [4], dtype="fp32")
+    assert load_file(str(small))["m.lokr_w2_a"].shape == (16, 4)
+
+
 def test_a_decomposed_lokr_keeps_comfyuis_scale(tmp_path):
     g = torch.Generator().manual_seed(3)
     sd = {"m.lokr_w1": torch.randn(2, 3, generator=g), "m.lokr_w2_a": torch.randn(8, 4, generator=g),

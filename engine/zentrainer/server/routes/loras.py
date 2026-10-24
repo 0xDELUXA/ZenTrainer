@@ -156,6 +156,7 @@ def register(server) -> None:
 
     # ---- compacting a LoRA or LoKr to a budget for the whole file (loras/compact.py) ----------------
     analyses: dict[tuple, object] = {}  # the last few, so moving the target doesn't redo the SVDs
+    LEVELS = (0.9, 0.95, 0.98, 0.99, 0.995, 1.0)  # the shares the page offers, each with its size
     lock = threading.Lock()
 
     def _analysis(path: str, fmt: str, base: str | None):
@@ -196,10 +197,23 @@ def register(server) -> None:
             keep = 0.99
         return path, fmt, base, keep, params, max(0, int(b.get("max_rank") or 0))
 
+    def _precision(path: str) -> str | None:
+        """The file's float precision (bf16, fp16, fp32), by the bytes in each; None if another."""
+        from ...models.tensors import BYTES, read_header
+
+        by: dict[str, int] = {}
+        for t in read_header(path)[1].values():
+            n = BYTES.get(t["dtype"], 0)
+            for d in t["shape"]:
+                n *= d
+            by[t["dtype"]] = by.get(t["dtype"], 0) + n
+        top = max(by, key=by.get, default=None)
+        return {"F32": "fp32", "F16": "fp16", "BF16": "bf16"}.get(top or "")
+
     @routes.post("/zentrainer/api/loras/compact/analyze")
     async def compact_analyze(request):
         """{name, format?: same|lora, base?: {folder, name}, max_rank?, target?: {keep: 0-1} | {params}}:
-        the size-against-share curve, and the ranks a target keeps (layer by layer)."""
+        each offered level's size, and the ranks a target keeps (layer by layer)."""
         import os
 
         from ...loras import compact
@@ -212,8 +226,13 @@ def register(server) -> None:
 
         def answer():
             ks = compact.ranks(an, keep=keep, params=params, max_rank=max_rank)
-            return {"original": {"params": an.original_params, "bytes": os.path.getsize(path)},
-                    "curve": compact.curve(an, max_rank), "plan": compact.summary(an, ks),
+            levels = []
+            for share in LEVELS:
+                st = compact.summary(an, compact.ranks(an, keep=share, max_rank=max_rank))
+                levels.append({"keep": share, "params": st["params"], "kept": st["kept"]})
+            return {"original": {"params": an.original_params, "bytes": os.path.getsize(path), "precision": _precision(path)},
+                    "levels": levels,
+                    "plan": compact.summary(an, ks),
                     "names": [layer.name for layer in an.layers], "kind": sorted({layer.kind for layer in an.layers}),
                     "full_ranks": [layer.s.numel() for layer in an.layers],
                     "unsupported": an.unsupported, "base_matched": an.base_matched}

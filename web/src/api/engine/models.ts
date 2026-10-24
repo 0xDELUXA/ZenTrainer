@@ -72,9 +72,10 @@ export interface CompactPlan {
 }
 
 export interface CompactAnalysis {
-  original: { params: number; bytes: number }
-  /** (parameters, share kept) along the file's ranking */
-  curve: [number, number][]
+  /** precision: the file's float precision by bytes (null when it's something else) */
+  original: { params: number; bytes: number; precision: 'bf16' | 'fp16' | 'fp32' | null }
+  /** the offered shares, each with what it keeps and costs */
+  levels: { keep: number; params: number; kept: number }[]
   plan: CompactPlan
   names: string[]
   kind: ('lora' | 'lokr' | 'lokr_lora')[]
