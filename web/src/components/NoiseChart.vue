@@ -5,7 +5,7 @@
 // steps spread (higher = more of them there); `levels` are a scheduler's exact steps, drawn as
 // ticks; `weights` a loss-weight curve; `points` [σ, loss] of trained samples, as dots with their
 // average.
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 export interface NoiseSeries {
   label: string
@@ -62,6 +62,42 @@ const dots = computed(() => {
   const every = Math.max(1, Math.ceil(pts.length / 1500)) // at most ~1500 dots
   return pts.filter((_, i) => i % every === 0).map(([s, l]) => ({ cx: x(s), cy: yOf(l, lossMax.value) }))
 })
+// the dots on one canvas, not an SVG circle each: as circles, every hover move (and every step)
+// re-rendered and diffed all of them, which lagged the page on slower machines during long runs.
+// Redrawn only when they or the plot's size change.
+const canvas = ref<HTMLCanvasElement | null>(null)
+function drawDots() {
+  const c = canvas.value
+  if (!c) return
+  const w = c.clientWidth
+  const h = c.clientHeight
+  const dpr = window.devicePixelRatio || 1
+  if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) {
+    c.width = Math.round(w * dpr)
+    c.height = Math.round(h * dpr)
+  }
+  const g = c.getContext('2d')
+  if (!g) return
+  g.setTransform(dpr, 0, 0, dpr, 0, 0)
+  g.clearRect(0, 0, w, h)
+  g.fillStyle = getComputedStyle(c).color
+  const sx = w / W
+  const sy = h / H.value
+  const r = 1.6
+  g.beginPath()
+  for (const d of dots.value) {
+    g.moveTo(d.cx * sx + r, d.cy * sy)
+    g.arc(d.cx * sx, d.cy * sy, r, 0, Math.PI * 2)
+  }
+  g.fill()
+}
+let sized: ResizeObserver | undefined
+onMounted(() => {
+  drawDots()
+  if (canvas.value) (sized = new ResizeObserver(drawDots)).observe(canvas.value)
+})
+onBeforeUnmount(() => sized?.disconnect())
+watch(dots, drawDots)
 const lossByBin = computed(() => {
   const sum = new Array<number>(BINS).fill(0)
   const cnt = new Array<number>(BINS).fill(0)
@@ -111,6 +147,7 @@ const readout = computed(() => {
 <template>
   <div class="noise-chart">
     <div class="plot" :style="{ height: `${H}px` }" @pointermove="onMove" @pointerleave="hover = null">
+      <!-- three layers, as one picture: the zones and histograms, the dots, then the lines on top -->
       <svg :viewBox="`0 0 ${W} ${H}`" preserveAspectRatio="none">
         <rect v-for="i in 3" :key="`z${i}`" :x="((i - 1) * W) / 3" :y="0" :width="W / 3" :height="H" :class="`zone z${i - 1}`" />
         <template v-for="(s, i) in series" :key="i">
@@ -121,7 +158,9 @@ const readout = computed(() => {
           <!-- exact levels (a scheduler's steps): ticks along the bottom, the curve shows how they spread -->
           <line v-for="([sig], j) in s.levels ?? []" :key="`t${j}`" :x1="x(sig)" :x2="x(sig)" :y1="base" :y2="base - 12" class="tick" vector-effect="non-scaling-stroke" />
         </template>
-        <circle v-for="(d, i) in dots" :key="`d${i}`" :cx="d.cx" :cy="d.cy" r="1.6" class="dot" />
+      </svg>
+      <canvas ref="canvas" class="dots" aria-hidden="true" />
+      <svg :viewBox="`0 0 ${W} ${H}`" preserveAspectRatio="none">
         <path v-if="lossPath" :d="lossPath" class="loss" vector-effect="non-scaling-stroke" />
         <path v-if="weightPath" :d="weightPath" class="weight" vector-effect="non-scaling-stroke" />
         <line v-if="readout" :x1="x(readout.s)" :x2="x(readout.s)" :y1="TOP" :y2="base" class="cursor" vector-effect="non-scaling-stroke" />
@@ -222,8 +261,13 @@ svg {
   stroke: var(--zen-text);
   stroke-width: 2;
 }
-.dot {
-  fill: color-mix(in srgb, var(--zen-text) 35%, transparent);
+.dots {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  color: color-mix(in srgb, var(--zen-text) 35%, transparent); /* the dots' fill (drawDots reads it) */
 }
 .loss {
   fill: none;

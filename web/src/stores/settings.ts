@@ -64,6 +64,8 @@ export const SETTINGS = {
       { value: 'none', label: 'None', icon: 'mdi mdi-close-circle-outline' },
     ],
   }),
+  // a run page's noise chart (RunNoise): folded unless opened, remembered across runs
+  noiseChartOpen: def<boolean>({ category: 'Training', label: 'Noise chart open', default: false, options: [] }),
   // the loras folder new runs save into ('' = inside this install); chosen in New run
   loraFolder: def<string>({ category: 'Training', label: 'LoRA folder', default: '', options: [] }),
   // starred model families: first in every model list (see favorites.ts)

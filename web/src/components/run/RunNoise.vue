@@ -4,6 +4,7 @@
 // dot and their average per stretch: which noise levels the LoRA finds hard, and whether the
 // timesteps went where they were meant to. Flow models (σ 0..1) only; older runs logged nothing.
 import { computed, ref, watch } from 'vue'
+import { setSetting, settings } from '@/stores/settings'
 import { engine, type NoiseProfile } from '@/api/engine'
 import NoiseChart, { type NoiseSeries } from '@/components/NoiseChart.vue'
 import { draws, FLEX_WEIGHTS, histogram, useSchedule } from '@/lib/timesteps'
@@ -39,7 +40,8 @@ const series = computed((): NoiseSeries[] => {
   if (o && profile.value.known && profile.value.flow) out.push({ label: 'As set', hist: histogram(draws(o, profile.value, 20000, exact.value)), kind: 'line' })
   return out
 })
-const open = ref(true)
+// folded by default (it redraws with every step), and remembered once opened
+const open = computed({ get: () => settings.noiseChartOpen, set: (v: boolean) => setSetting('noiseChartOpen', v) })
 </script>
 
 <template>
