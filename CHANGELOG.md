@@ -3,7 +3,7 @@
 What changed in each ZenTrainer release, newest first. Versions are the ones the ComfyUI Registry
 and Manager show.
 
-## Unreleased
+## 0.3.0 (2026-10-25)
 
 ### Training
 - **Fixed: "illegal memory access" with weights offloaded:** a streamed layer's weights could be
