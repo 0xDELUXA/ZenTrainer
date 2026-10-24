@@ -196,6 +196,13 @@ function onCaptioned(set: string) {
         compact
         @loaded="(s) => (imageFlags = s.current.flags ?? {})"
       />
+      <RouterLink
+        v-if="healthOpen && items.length"
+        :to="{ path: `/datasets/${encodeURIComponent(name)}/analysis`, query: activeSet !== 'default' ? { set: activeSet } : {} }"
+        class="side-note analysis-link"
+      >
+        <i class="mdi mdi-chart-box-outline" /> Full analysis: buckets, captions, duplicates <i class="mdi mdi-arrow-right" />
+      </RouterLink>
       <!-- with faces on, how they read: part of the dataset's health -->
       <p v-if="healthOpen && facesSetting && (facesBusy || faces?.items)" class="side-note faces-line">
         <i class="mdi mdi-face-recognition" />
@@ -435,5 +442,15 @@ function onCaptioned(set: string) {
   border: none !important;
   padding: 0 !important;
   background: none !important;
+}
+.analysis-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--zen-muted);
+  text-decoration: none;
+}
+.analysis-link:hover {
+  color: var(--zen-text);
 }
 </style>

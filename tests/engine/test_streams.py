@@ -517,18 +517,16 @@ def test_sharpest_frame_picks_the_detailed_one(tmp_path):
 def test_image_flags_rules():
     from zentrainer.datasets.stats import image_flags
 
-    ok = {"hash": 0, "bright": 0.5, "contrast": 0.2, "sharp": 10.0, "sat": 0.3, "border": 0.0}
+    # (pairs of near-duplicates are tested with real pictures in test_analysis.py)
+    ok = {"bright": 0.5, "contrast": 0.2, "sharp": 10.0, "sat": 0.3, "border": 0.0}
     looks = {
         "a": ok,
-        "b": {**ok, "hash": 0b1, "bright": 0.08},              # dark, and a near-twin of a (1 bit)
-        "c": {**ok, "hash": 2**63 - 1, "sharp": 1.0},          # blurry against the set's median
-        "d": {**ok, "hash": 2**40 + 2**50 + 2**60 + 2**30 + 2**20 + 2**10 + 7, "border": 0.2, "sat": 0.01},
+        "b": {**ok, "bright": 0.08},              # dark
+        "c": {**ok, "sharp": 1.0},                # blurry against the set's median
+        "d": {**ok, "border": 0.2, "sat": 0.01},  # bars, and no colour in a colourful set
     }
     flags = image_flags(looks, {"a": 1024, "b": 1024, "c": 600, "d": 1024})
-    assert "dark" in flags["b"] and "near-duplicate" in flags["b"] and "near-duplicate" in flags["a"]
-    close = {"x": {**ok, "hash": 0}, "y": {**ok, "hash": 2**10 - 1}, "z": {**ok, "hash": 2**64 - 2**33}}
-    cf = image_flags(close, {})
-    assert cf.get("x") == ["similar"] and cf.get("y") == ["similar"] and "z" not in cf  # 10 bits apart: similar
+    assert flags["b"] == ["dark"] and "a" not in flags
     assert "blurry" in flags["c"] and "small" in flags["c"]
     assert "bars" in flags["d"] and "greyscale" in flags["d"]
 

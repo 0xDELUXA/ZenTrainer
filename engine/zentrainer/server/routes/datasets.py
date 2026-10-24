@@ -89,6 +89,23 @@ def register(server) -> None:
         except FileNotFoundError:
             return _bad("dataset not found", 404)
 
+    @routes.get("/zentrainer/api/datasets/{name}/analysis")
+    async def dataset_analysis(request):
+        """The detail behind the health scores (datasets/analysis.py): buckets at ?resolution= (default
+        1024), caption phrase frequencies, per-picture values and flags, near-duplicate pairs."""
+        from ...datasets import analysis
+
+        res = request.query.get("resolution", "1024")
+        if not res.isdigit() or not 256 <= int(res) <= 4096:
+            return _bad("resolution is a number of pixels, 256 to 4096")
+        try:
+            return web.json_response(await asyncio.to_thread(analysis.analyze, request.match_info["name"],
+                                                             request.query.get("set") or "default", int(res)))
+        except FileNotFoundError:
+            return _bad("dataset not found", 404)
+        except datasets.DatasetError as e:
+            return _bad(str(e))
+
     @routes.get("/zentrainer/api/datasets/{name}/faces")
     async def dataset_faces(request):
         """The dataset's faces (faces extra): per picture, faces found, the main face's size, how

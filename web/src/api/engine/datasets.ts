@@ -10,6 +10,48 @@ export interface DatasetStats {
   history: { at: number; scores: Record<string, number>; metrics: Record<string, unknown> }[]
 }
 
+/** the detail behind a dataset's health (engine datasets/analysis.py) */
+export interface DatasetAnalysis {
+  name: string
+  set: string
+  /** per picture: values for the histograms and its flags; aspect is log2(w/h): 0 square, +1 twice as wide */
+  pictures: {
+    path: string
+    size: [number, number] | null
+    aspect: number | null
+    brightness: number | null
+    contrast: number | null
+    /** against the set's median: 1 is typical, below 0.25 is flagged blurry */
+    sharpness: number | null
+    jpeg_quality: number | null
+    flags: string[]
+  }[]
+  /** where pictures land at a training resolution, and what the crop cuts off */
+  buckets: {
+    resolution: number
+    step: number
+    rows: { size: [number, number]; count: number; pictures: string[] }[]
+    /** every picture's bucket, the share the crop keeps, and its own size */
+    placed: Record<string, { bucket: [number, number]; kept: number; size: [number, number] }>
+    /** pictures losing more than 15% to the crop, worst first; kept is the share that survives */
+    cropped: { path: string; bucket: [number, number]; kept: number; size: [number, number] }[]
+    kept_median: number
+    /** pictures alone in their bucket */
+    lonely: string[]
+  }
+  captions: {
+    captions: number
+    style: 'tags' | 'prose' | null
+    subject?: string
+    phrases: { text: string; count: number; share: number }[]
+    /** in more than half the captions */
+    frequent: { text: string; count: number; share: number }[]
+  }
+  /** bits: of 256 the hashes differ by; corr: the shapes' correlation; colour: average colour difference (0-255) */
+  duplicates: { a: string; b: string; kind: 'near-duplicate'; bits: number; corr: number; colour: number; mirrored: boolean }[]
+  flag_counts: Record<string, number>
+}
+
 /** a dataset's own settings (engine datasets.get_settings) */
 export interface DatasetSettings {
   /** face report on open, faces in the stats, sample likeness in runs */
@@ -196,6 +238,8 @@ export const datasetsApi = {
     call<{ clips: number; moved: string[] }>(`${dsPath(name)}/split`, { method: 'POST', body: JSON.stringify(body) }),
   datasetStats: (name: string, set = 'default') =>
     call<DatasetStats>(`/datasets/${encodeURIComponent(name)}/stats?set=${encodeURIComponent(set)}`),
+  datasetAnalysis: (name: string, set = 'default', resolution = 1024) =>
+    call<DatasetAnalysis>(`/datasets/${encodeURIComponent(name)}/analysis?${new URLSearchParams({ set, resolution: String(resolution) })}`),
   datasetMuted: (name: string, set: string, paths: string[], muted: boolean) =>
     call<{ muted: Record<string, string[]> }>(`/datasets/${encodeURIComponent(name)}/muted`, {
       method: 'PUT',

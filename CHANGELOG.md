@@ -6,6 +6,14 @@ and Manager show.
 ## Unreleased
 
 ### Datasets and captions
+- **Dataset analysis** (Health → Full analysis): the pictures worth a look, grouped by issue; how
+  training buckets and crops them at a resolution you pick, with every crop shown; which phrases
+  most captions repeat (things the LoRA will lean towards); the spread of brightness, contrast,
+  sharpness, size and shape; and near-duplicate pairs side by side.
+- **Health finds copies properly:** near-duplicates are re-saved, resized, lightly edited or
+  mirrored copies, and different pictures that only share a composition no longer count. Bars
+  are real letterboxing, not a plain sky. New checks for transparency and heavy JPEG compression,
+  and sizes follow a photo's rotation as training does. Health scores move once as a result.
 - **A choice of face model** (Settings → Faces): InsightFace's standard one, or the larger
   antelopev2 (ArcFace R100), which tells similar faces apart better and is about 1.5 times slower.
   A run keeps the model it started with. antelopev2's download, which unpacks a folder too deep,

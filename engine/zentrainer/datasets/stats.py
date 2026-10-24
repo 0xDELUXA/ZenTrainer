@@ -7,8 +7,9 @@ sizes, captions), the new one is appended to its history, so the panel can show 
     captions      share captioned (the default set), and per caption set
     consistency   how even the captions are: length spread, identical captions, very short ones
     quality       share of pictures with no image issue: training-ready size, sharp (against the set's
-                  own median), sensibly exposed, no letterbox bars (per-picture flags for the view)
-    uniqueness    share of pictures that aren't near-duplicates of another (64-bit difference hash)
+                  own median), sensibly exposed, no letterbox bars, no transparency, not heavily
+                  JPEG-compressed (per-picture flags for the view)
+    uniqueness    share of pictures without a near-duplicate of themselves (pairs())
     faces/balance with faces on (faces extra): how much the faces agree (each against the others)
                   times the share of pictures without a face issue;
                   without one, how evenly the pictures spread over aspect ratios
@@ -28,9 +29,15 @@ from pathlib import Path
 from .. import safeio
 
 TARGET_SIDE = 768  # a picture's short side at or above this is training-ready at the usual sizes
-NEAR_DUP = 6  # bits of 64 a difference hash may differ by and still count as the same picture
-SIMILAR = 14  # closer than this: the same shot or a close variation (unrelated pictures sit near 32)
-SOFT = 16  # the uniqueness score starts to dip below this distance to the nearest other picture
+# Two pictures are near-duplicates when all three agree: their 256-bit difference hashes (unrelated
+# pictures sit near 128 bits apart), the correlation of their 16x16 greyscale shapes, and their average
+# colour (0-255). One alone pairs any two foggy pictures, or a street with a forest; together they
+# catch re-saved, resized, lightly edited and mirrored copies and nothing else. "The same shot taken
+# again" needs more than this (landscapes share a composition): that's for image embeddings.
+NEAR_DUP = (24, 0.95, 15)
+TRANSPARENT = 0.01  # share of a picture's pixels see-through for it to count as transparent
+JPEG_LOW = 60  # estimated JPEG quality below this: compression artifacts a LoRA can learn
+LOOK_VERSION = 4  # 2: transparency and JPEG quality; 3: the pair signature (_signature); 4: bars need an edge
 
 
 def _store_dir() -> Path:
@@ -45,9 +52,43 @@ def _key(name: str) -> str:
     return hashlib.sha1(name.encode()).hexdigest()[:16]
 
 
+def size(path: Path) -> tuple[int, int] | None:
+    """A picture's (or clip's) width and height as training sees them: EXIF rotation applied."""
+    from PIL import Image
+
+    from ..harness.data import video
+
+    try:
+        if video.is_video(path):
+            p = video.probe(path)
+            return (p.width, p.height) if p else None
+        with Image.open(path) as im:
+            w, h = im.size
+            if im.getexif().get(0x0112) in (5, 6, 7, 8):  # orientation: turned a quarter
+                w, h = h, w
+            return w, h
+    except Exception:
+        return None
+
+
+def jpeg_quality(im) -> int | None:
+    """A JPEG's quality (1-100) estimated from its luminance quantization table against the
+    standard one (IJG's scaling), or None for anything else."""
+    tables = getattr(im, "quantization", None)
+    if not tables or 0 not in tables:
+        return None
+    std = (16, 11, 10, 16, 24, 40, 51, 61, 12, 12, 14, 19, 26, 58, 60, 55, 14, 13, 16, 24, 40, 57, 69, 56,
+           14, 17, 22, 29, 51, 87, 80, 62, 18, 22, 37, 56, 68, 109, 103, 77, 24, 35, 55, 64, 81, 104, 113, 92,
+           49, 64, 78, 87, 103, 121, 120, 101, 72, 92, 95, 98, 112, 100, 103, 99)
+    scale = 100 * sum(tables[0]) / sum(std)
+    q = (200 - scale) / 2 if scale <= 100 else 5000 / scale
+    return max(1, min(100, round(q)))
+
+
 def _look(path: Path) -> dict | None:
     """One pass over a picture (a clip's middle frame), at 256 px: its 64-bit difference hash
-    (near-identical pictures land a few bits apart) and its image statistics."""
+    (near-identical pictures land a few bits apart), its image statistics, how much of it is
+    see-through (training drops alpha: what's under it shows) and its JPEG quality."""
     import numpy as np
     from PIL import Image
 
@@ -61,41 +102,123 @@ def _look(path: Path) -> dict | None:
             scale = 256 / max(p.width, p.height)
             px = video.read(path, [p.frames // 2], (max(16, round(p.width * scale)), max(16, round(p.height * scale))))[0]
             im = Image.fromarray((px.numpy() * 255).astype("uint8"))
+            alpha, jpeg_q = 0.0, None
         else:
             im = Image.open(path)
+            jpeg_q = jpeg_quality(im)
             im.draft("RGB", (512, 512))  # JPEGs decode small
+            if im.mode in ("RGBA", "LA", "PA") or (im.mode == "P" and "transparency" in im.info):
+                im = im.convert("RGBA")
+                im.thumbnail((256, 256))
+                alpha = float((np.asarray(im)[..., 3] < 250).mean())
+            else:
+                im = im.convert("RGB")
+                im.thumbnail((256, 256))
+                alpha = 0.0
             im = im.convert("RGB")
-            im.thumbnail((256, 256))
-        g = im.convert("L").resize((9, 8), Image.Resampling.BILINEAR)
-        hp = list(g.getdata())
-        bits = 0
-        for r in range(8):
-            for c in range(8):
-                bits = (bits << 1) | (hp[r * 9 + c] > hp[r * 9 + c + 1])
         rgb = np.asarray(im, dtype=np.float32) / 255.0
         luma = rgb @ np.array([0.299, 0.587, 0.114], np.float32)
         lap = -4 * luma[1:-1, 1:-1] + luma[:-2, 1:-1] + luma[2:, 1:-1] + luma[1:-1, :-2] + luma[1:-1, 2:]
         mx, mn = rgb.max(-1), rgb.min(-1)
         sat = np.where(mx > 0, (mx - mn) / np.maximum(mx, 1e-6), 0)
-        return {"hash": bits, "bright": round(float(luma.mean()), 4), "contrast": round(float(luma.std()), 4),
+        return {**_signature(im), "bright": round(float(luma.mean()), 4), "contrast": round(float(luma.std()), 4),
                 "sharp": round(float(lap.var()) * 1000, 4), "sat": round(float(sat.mean()), 4),
-                "border": round(_border(luma), 3)}
+                "border": round(_border(luma), 3), "alpha": round(alpha, 4), "jpeg_q": jpeg_q}
     except Exception:
         return None
 
 
-def _border(luma) -> float:
-    """The share of the picture taken by flat bars along its edges (letterboxing, frames)."""
+def _dhash(im) -> str:
+    """A 256-bit difference hash (16 rows of 16 left-right brightness steps), as hex."""
+    import numpy as np
+    from PIL import Image
+
+    g = np.asarray(im.convert("L").resize((17, 16), Image.Resampling.BILINEAR), np.int16)
+    return np.packbits(g[:, 1:] > g[:, :-1]).tobytes().hex()
+
+
+def _signature(im) -> dict:
+    """What pairs() compares: the picture's difference hash and its mirror's (a flipped copy is
+    still a copy), its 16x16 greyscale shape (zero mean, unit length, stored as int8) and its
+    average colour."""
+    import base64
+
+    import numpy as np
+    from PIL import Image, ImageOps
+
+    g = np.asarray(im.convert("L").resize((16, 16), Image.Resampling.BILINEAR), np.float32).flatten()
+    g -= g.mean()
+    g /= np.linalg.norm(g) + 1e-6
+    colour = np.asarray(im.convert("RGB").resize((8, 8), Image.Resampling.BILINEAR), np.float32).mean((0, 1))
+    return {"dhash": _dhash(im), "dhash_m": _dhash(ImageOps.mirror(im)),
+            "shape": base64.b64encode(np.round(g * 127).astype(np.int8).tobytes()).decode(),
+            "colour": [round(float(c), 1) for c in colour]}
+
+
+def pairs(looks: dict[str, dict | None]) -> list[dict]:
+    """Every pair of pictures that are near-duplicates of each other (mirrored or not), closest
+    first: {"a", "b", "kind", "bits", "corr", "colour", "mirrored"}. The shapes' correlation, one
+    matrix product per block, shortlists; the hash and colour decide."""
+    import base64
+
     import numpy as np
 
+    keys = [p for p, lk in looks.items() if lk and "shape" in lk]
+    if len(keys) < 2:
+        return []
+    shape = np.stack([np.frombuffer(base64.b64decode(looks[p]["shape"]), np.int8) for p in keys]).astype(np.float32)
+    shape /= np.linalg.norm(shape, axis=1, keepdims=True) + 1e-6
+    mirror = shape.reshape(-1, 16, 16)[:, :, ::-1].reshape(len(keys), -1)
+    hashes = np.stack([np.frombuffer(bytes.fromhex(looks[p]["dhash"]), np.uint8) for p in keys])
+    hashes_m = np.stack([np.frombuffer(bytes.fromhex(looks[p]["dhash_m"]), np.uint8) for p in keys])
+    colour = np.array([looks[p]["colour"] for p in keys], np.float32)
+    found: dict[tuple[int, int], dict] = {}
+    for start in range(0, len(keys), 512):
+        block = shape[start:start + 512]
+        for mirrored, against, other in ((False, shape, hashes), (True, mirror, hashes_m)):
+            for r, j in np.argwhere(block @ against.T >= NEAR_DUP[1]):
+                i = start + int(r)
+                j = int(j)
+                if j <= i:
+                    continue
+                bits = int(np.unpackbits(hashes[i] ^ other[j]).sum())
+                diff = float(np.abs(colour[i] - colour[j]).mean())
+                corr = float(block[r] @ against[j])
+                near = bits <= NEAR_DUP[0] and corr >= NEAR_DUP[1] and diff <= NEAR_DUP[2]
+                if near and ((i, j) not in found or bits < found[(i, j)]["bits"]):
+                    found[(i, j)] = {"a": keys[i], "b": keys[j], "kind": "near-duplicate", "bits": bits,
+                                     "corr": round(corr, 3), "colour": round(diff, 1), "mirrored": mirrored}
+    return sorted(found.values(), key=lambda q: q["bits"])
+
+
+def pair_kinds(found: list[dict]) -> dict[str, str]:
+    """Each paired picture's kind of pair ("near-duplicate")."""
+    return {p: q["kind"] for q in found for p in (q["a"], q["b"])}
+
+
+def _border(luma) -> float:
+    """The share of the picture taken by bars along its edges (letterboxing, frames). A bar is an
+    even band of one tone that ends in a hard edge where the picture starts: a plain sky or wall
+    fades into the scene and isn't one."""
     h, w = luma.shape
-    flat = lambda a: float(a.std()) < 0.02  # noqa: E731
-    top = next((i for i in range(h // 3) if not flat(luma[i])), h // 3)
-    bottom = next((i for i in range(h // 3) if not flat(luma[h - 1 - i])), h // 3)
-    left = next((i for i in range(w // 3) if not flat(luma[:, i])), w // 3)
-    right = next((i for i in range(w // 3) if not flat(luma[:, w - 1 - i])), w // 3)
+
+    def bar(lines) -> int:
+        """How many of these lines, from the edge in, are a bar: flat lines of the edge's own tone
+        (a gradient drifts away from it), up to where the picture starts."""
+        tone = float(lines[0].mean())
+        n = 0
+        while n < len(lines) // 3 and float(lines[n].std()) < 0.02 and abs(float(lines[n].mean()) - tone) < 0.03:
+            n += 1
+        if n == 0 or n >= len(lines) // 3:
+            return 0
+        # where the picture starts, its pixels differ from the bar's tone (each, not on average: a
+        # dark scene against a black bar still has texture); haze out of a sky doesn't
+        return n if float(abs(lines[n] - tone).mean()) > 0.08 else 0
+
+    top, bottom = bar(luma), bar(luma[::-1])
+    left, right = bar(luma.T), bar(luma.T[::-1])
     kept = max(0, h - top - bottom) * max(0, w - left - right)
-    return 1 - kept / max(1, h * w) if np.isfinite(kept) else 0.0
+    return 1 - kept / max(1, h * w)
 
 
 def _looks(name: str, items: list) -> dict[str, dict | None]:
@@ -108,7 +231,7 @@ def _looks(name: str, items: list) -> dict[str, dict | None]:
     out, keep = {}, {}
     for it in items:
         st_ = it.path.stat()
-        stamp = f"{st_.st_mtime_ns}|{st_.st_size}"
+        stamp = f"{LOOK_VERSION}|{st_.st_mtime_ns}|{st_.st_size}"
         hit = cache.get(str(it.path))
         if not hit or hit[0] != stamp:
             hit = [stamp, _look(it.path)]
@@ -118,30 +241,14 @@ def _looks(name: str, items: list) -> dict[str, dict | None]:
     return out
 
 
-def _nearest(looks: dict[str, dict | None]) -> dict[str, int]:
-    """Each picture's distance (differing hash bits) to its closest other picture."""
-    vals = [(p, lk["hash"]) for p, lk in looks.items() if lk]
-    best = {p: 64 for p, _ in vals}
-    for i in range(len(vals)):
-        for j in range(i + 1, len(vals)):
-            d = bin(vals[i][1] ^ vals[j][1]).count("1")
-            best[vals[i][0]] = min(best[vals[i][0]], d)
-            best[vals[j][0]] = min(best[vals[j][0]], d)
-    return best
-
-
-def _near_duplicates(looks: dict[str, dict | None], within: int = NEAR_DUP) -> set[str]:
-    """The pictures with another this close (a near-identical twin by default)."""
-    return {p for p, d in _nearest(looks).items() if d <= within}
-
-
-def image_flags(looks: dict[str, dict | None], sides: dict[str, int]) -> dict[str, list[str]]:
+def image_flags(looks: dict[str, dict | None], sides: dict[str, int], found: list[dict] | None = None) -> dict[str, list[str]]:
     """Why each picture might need a look: dark, blown out, flat, blurry (against the set's own
-    median sharpness: what's sharp depends on the content), bars, greyscale, small, near-duplicate."""
+    median sharpness: what's sharp depends on the content), bars, greyscale, transparent, compressed,
+    small, near-duplicate (`found`: pairs(looks), when it's already worked out)."""
     vals = [lk for lk in looks.values() if lk]
     sharp_med = st.median(lk["sharp"] for lk in vals) if vals else 0
     sat_med = st.median(lk["sat"] for lk in vals) if vals else 0
-    near = _nearest(looks)
+    kinds = pair_kinds(pairs(looks) if found is None else found)
     out = {}
     for p, lk in looks.items():
         f = []
@@ -158,12 +265,14 @@ def image_flags(looks: dict[str, dict | None], sides: dict[str, int]) -> dict[st
                 f.append("bars")
             if lk["sat"] < 0.03 and sat_med > 0.08:
                 f.append("greyscale")
+            if lk.get("alpha", 0) > TRANSPARENT:
+                f.append("transparent")
+            if lk.get("jpeg_q") is not None and lk["jpeg_q"] < JPEG_LOW:
+                f.append("compressed")
         if sides.get(p, TARGET_SIDE) < TARGET_SIDE:
             f.append("small")
-        if near.get(p, 64) <= NEAR_DUP:
-            f.append("near-duplicate")
-        elif near.get(p, 64) <= SIMILAR:
-            f.append("similar")
+        if p in kinds:
+            f.append(kinds[p])
         if f:
             out[p] = f
     return out
@@ -172,8 +281,6 @@ def image_flags(looks: dict[str, dict | None], sides: dict[str, int]) -> dict[st
 def compute(name: str, set_name: str = "default") -> dict:
     """The dataset's metrics and 0-1 scores, now, for one caption set: its captions, and without
     the pictures muted in it."""
-    from PIL import Image
-
     from . import folders as datasets, faces
     from ..harness.data import video
     from ..harness.data import muted, scan
@@ -189,28 +296,18 @@ def compute(name: str, set_name: str = "default") -> dict:
 
     sides, aspects, side_of = [], [], {}
     for it in items:
-        try:
-            if video.is_video(it.path):
-                p = video.probe(it.path)
-                w, h = (p.width, p.height) if p else (0, 0)
-            else:
-                with Image.open(it.path) as im:
-                    w, h = im.size
-        except Exception:
-            continue
+        w, h = size(it.path) or (0, 0)
         if w and h:
             sides.append(min(w, h))
             aspects.append(round(w / h, 1))
             side_of[str(it.path)] = min(w, h)
     dup_caps = sum(c - 1 for c in Counter(captioned).values() if c > 1)
     looks = _looks(name, items)
-    nearest = _nearest(looks)
-    near = sum(d <= NEAR_DUP for d in nearest.values())
-    similar = sum(NEAR_DUP < d <= SIMILAR for d in nearest.values())
-    # each picture pays for how close its nearest other picture is: nothing past SOFT bits apart,
-    # everything when identical
-    closeness = [max(0.0, (SOFT - d) / SOFT) for d in nearest.values()]
-    flags = image_flags(looks, side_of)
+    found = pairs(looks)
+    kinds = pair_kinds(found)
+    near = len(kinds)
+    closeness = [1.0] * near  # each picture with a near-duplicate counts against uniqueness
+    flags = image_flags(looks, side_of, found)
     lv = [lk for lk in looks.values() if lk]
     bright = sorted(lk["bright"] for lk in lv)
     count = lambda tag: sum(tag in f for f in flags.values())  # noqa: E731
@@ -228,7 +325,6 @@ def compute(name: str, set_name: str = "default") -> dict:
         "below_target": sum(s < TARGET_SIDE for s in sides),
         "aspect_top_share": round(max(Counter(aspects).values()) / len(aspects), 3) if aspects else 0.0,
         "near_duplicates": near,
-        "similar": similar,
         "brightness_median": round(st.median(bright), 3) if bright else 0,
         "brightness_spread": round(bright[int(len(bright) * 0.9)] - bright[int(len(bright) * 0.1)], 3) if len(bright) > 2 else 0,
         "too_dark": count("dark"),
@@ -237,8 +333,10 @@ def compute(name: str, set_name: str = "default") -> dict:
         "blurry": count("blurry"),
         "bars": count("bars"),
         "greyscale": count("greyscale"),
+        "transparent": count("transparent"),
+        "compressed": count("compressed"),
         "saturation_median": round(st.median(lk["sat"] for lk in lv), 3) if lv else 0,
-        "image_issues": sum(1 for f in flags.values() if set(f) - {"near-duplicate", "similar"}),
+        "image_issues": sum(1 for f in flags.values() if set(f) - {"near-duplicate"}),
         "muted": len(off),
         "masked": sum(1 for it in items if it.mask),
         "pairs": sum(1 for it in items if it.control_sets),
