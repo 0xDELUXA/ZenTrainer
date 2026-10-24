@@ -382,7 +382,7 @@ class Trainer:
         self.train_dtype = _DTYPES[s.memory.training_dtype]
 
         encoder_id = repr((s.model.kind, s.model.ckpt_name, s.model.clip_name, s.model.clip_type, s.model.vae_name))
-        root = paths.datasets_root() / s.dataset.folder
+        root = paths.find_dataset(s.dataset.folder)  # where it is now, or where an earlier setting kept it
         cache = Path(folder_paths.get_user_directory()) / "zentrainer" / "cache"
         self.encoder_id, self.cache_dir = encoder_id, cache
         if s.dataset.video_audio and self.models.audio_vae is None:

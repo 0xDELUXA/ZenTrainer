@@ -81,11 +81,15 @@ export interface Health {
 
 /** ZenTrainer's own settings (engine paths.py): saved ones, and the folders this process uses */
 export interface EngineSettings {
-  /** folder: the ZenTrainer folder ("" = ComfyUI's input/output); face_model: the face recognition model */
-  settings: { folder: string; face_model: string }
+  /** folder: the ZenTrainer folder ("" = ComfyUI's input/output); datasets: where datasets live ("" = the
+   *  folder's datasets/ or ComfyUI's input; relative = inside input, e.g. "datasets"; or an absolute path);
+   *  face_model: the face recognition model */
+  settings: { folder: string; datasets: string; face_model: string }
   active: { folder: string; datasets: string; output: string; loras: string }
-  /** the saved folder differs from the one in use: it applies after a ComfyUI restart */
+  /** the saved folders differ from the ones in use: they apply after a ComfyUI restart */
   restart_needed: boolean
+  /** datasets the saved datasets folder won't show: still where they were, to move by hand */
+  datasets_elsewhere: string[]
   /** the face recognition models on offer (engine datasets/faces.py MODELS) */
   face_models: { id: string; label: string; note: string; downloaded: boolean }[]
   /** InsightFace is installed (the faces extra) */

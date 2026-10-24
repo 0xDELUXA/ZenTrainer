@@ -91,7 +91,7 @@ def disks() -> list[dict]:
 
     custom = paths.folder()  # the ZenTrainer folder's disk, if set, rather than ComfyUI's output/input
     places = [("Outputs", str(paths.output_root()) if custom else folder_paths.get_output_directory()),
-              ("Datasets", str(paths.datasets_root()) if custom else folder_paths.get_input_directory()),
+              ("Datasets", str(paths.datasets_root())),
               ("Run state", folder_paths.get_user_directory())]
     try:
         from ..models.downloads import target_dir

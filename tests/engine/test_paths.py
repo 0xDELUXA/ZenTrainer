@@ -1,5 +1,6 @@
 """paths: the ZenTrainer folder setting moves datasets and results out of ComfyUI's input/output,
-and an empty one leaves every path exactly where it was."""
+the datasets setting gives datasets a folder of their own, and empty ones leave every path
+exactly where it was."""
 
 import sys
 import types
@@ -63,7 +64,7 @@ def test_the_folder_is_read_once_until_a_restart(comfy, tmp_path):
 
 
 def test_settings_round_trip_and_validation(comfy, tmp_path):
-    face = {"face_model": "buffalo_l"}  # the other setting, at its default
+    face = {"face_model": "buffalo_l", "datasets": ""}  # the other settings, at their defaults
     assert paths.read_settings() == {"folder": "", **face}
     assert paths.save_settings({"folder": f"  {tmp_path / 'zt'}  "}) == {"folder": str(tmp_path / "zt"), **face}
     assert paths.read_settings() == {"folder": str(tmp_path / "zt"), **face}
@@ -110,3 +111,31 @@ def test_view_addresses_follow_the_folder(comfy, tmp_path):
     from zentrainer.datasets import folders
 
     assert folders.folder("cats") == (d / "datasets" / "cats").resolve()
+
+
+def test_datasets_get_a_folder_of_their_own_and_old_ones_stay_findable(comfy, tmp_path):
+    (comfy / "input" / "cats").mkdir(parents=True)  # a dataset from before, straight in input/
+    (comfy / "input" / "cats" / "a.png").write_bytes(b"")
+    (comfy / "input" / "clipspace").mkdir()  # ComfyUI's own folder, no pictures: not a dataset
+    paths.ensure()  # at start: the settings this process runs with are read
+    assert paths.save_settings({"datasets": " datasets/ "})["datasets"] == "datasets"
+    assert paths.datasets_root() == comfy / "input"  # read once: in use from the next start
+    info = paths.describe()
+    assert info["restart_needed"] and info["datasets_elsewhere"] == [str(comfy / "input" / "cats")]
+    paths.reset()
+    assert paths.datasets_root() == comfy / "input" / "datasets" and (comfy / "input" / "datasets").is_dir()
+    from zentrainer.datasets import folders
+
+    assert folders.root() == (comfy / "input" / "datasets").resolve()  # the list shows only the new folder
+    assert paths.find_dataset("cats") == comfy / "input" / "cats"  # but a run of "cats" still finds it
+    (comfy / "input" / "datasets" / "dogs").mkdir()
+    assert paths.find_dataset("dogs") == comfy / "input" / "datasets" / "dogs"
+    assert paths.find_dataset("gone") == comfy / "input" / "datasets" / "gone"
+    _set_ds = paths.save_settings({"datasets": str(tmp_path / "data")})["datasets"]
+    paths.reset()
+    assert _set_ds == str(tmp_path / "data") and paths.datasets_root() == tmp_path / "data"
+    (tmp_path / "file").write_text("x")
+    for bad in ("../outside", str(tmp_path / "file")):
+        with pytest.raises(paths.SettingsError):
+            paths.validate_datasets(bad)
+    assert paths.validate_datasets(str(comfy / "input")) == ""  # ComfyUI's input itself: the default

@@ -26,6 +26,9 @@ and Manager show.
   nothing.
 
 ### Datasets and captions
+- **A datasets folder of their own** (Settings → Storage): input/datasets/, so datasets stop
+  sharing ComfyUI's input folder with everything else uploaded there, or any folder. Nothing is
+  moved: Settings lists the datasets still in the old place, and runs still find them there.
 - **Caption length, cut-offs and re-rolls:** a Length choice when captioning (the style's own, 600,
   1200, or no limit); captions that ran out of room are flagged, listed on the job ("N cut off",
   to review them or re-caption them with no limit), and marked in the try-on; and Wording: Vary

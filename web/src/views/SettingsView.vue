@@ -3,7 +3,7 @@
 // Previews are drawn from each pack's own tokens, so every ZenKit pack and user
 // drop-in gets one without shipping banner images.
 import { ZenButton, ZenInput } from '@nynxz/zenkit-ui'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { engine, type ComfyVersion, type EngineSettings } from '@/api/engine'
 import { SETTINGS, setSetting, settings, type SettingId } from '@/stores/settings'
 import { currentModes, currentTheme, packCards, setMode, setTheme } from '@/lib/theme'
@@ -40,6 +40,31 @@ onMounted(async () => {
   storage.value = await engine.settings().catch(() => null)
   folderDraft.value = storage.value?.settings.folder ?? ''
 })
+// Datasets folder: where datasets are listed and made. "" = as the folder above decides; "datasets"
+// = input/datasets/, apart from everything else uploaded to ComfyUI's input; or an absolute path
+const dsChoice = ref<'default' | 'input' | 'custom'>('default')
+const dsCustom = ref('')
+const savingDs = ref(false)
+const dsNote = ref('')
+const dsError = ref('')
+function showDatasets(v: string) {
+  dsChoice.value = !v ? 'default' : v === 'datasets' ? 'input' : 'custom'
+  dsCustom.value = dsChoice.value === 'custom' ? v : ''
+}
+watch(storage, (s) => s && showDatasets(s.settings.datasets ?? ''), { immediate: true })
+const dsValue = computed(() => (dsChoice.value === 'default' ? '' : dsChoice.value === 'input' ? 'datasets' : dsCustom.value.trim()))
+async function saveDatasets() {
+  savingDs.value = true
+  dsError.value = dsNote.value = ''
+  try {
+    storage.value = await engine.putSettings({ datasets: dsValue.value })
+    dsNote.value = storage.value.message || 'Saved'
+  } catch (e) {
+    dsError.value = String((e as Error).message ?? e)
+  } finally {
+    savingDs.value = false
+  }
+}
 async function saveFolder() {
   savingFolder.value = true
   folderError.value = folderNote.value = ''
@@ -140,6 +165,27 @@ async function checkUpdates() {
         <p v-if="folderError" class="warn">{{ folderError }}</p>
         <p v-else-if="storage.restart_needed" class="warn"><i class="mdi mdi-restart" /> Saved: restart ComfyUI (System → Restart ComfyUI) to use it. Until then the folders below stay in use.</p>
         <p v-else-if="folderNote" class="ok">{{ folderNote }}</p>
+      </div>
+      <div class="stack">
+        <div class="eyebrow">Datasets folder</div>
+        <div class="seg">
+          <button :class="{ on: dsChoice === 'default' }" title="Datasets where the ZenTrainer folder puts them, or straight in ComfyUI's input folder" @click="dsChoice = 'default'">As above</button>
+          <button :class="{ on: dsChoice === 'input' }" title="In input/datasets/: apart from everything else uploaded to ComfyUI's input folder" @click="dsChoice = 'input'">input/datasets</button>
+          <button :class="{ on: dsChoice === 'custom' }" title="Any folder, e.g. on a bigger drive" @click="dsChoice = 'custom'">Custom</button>
+        </div>
+        <div class="row-actions">
+          <ZenInput v-if="dsChoice === 'custom'" v-model="dsCustom" class="grow mono" placeholder="An absolute path, or one inside ComfyUI's input folder" @keydown.enter="saveDatasets" />
+          <span v-else class="grow" />
+          <ZenButton size="sm" icon="mdi mdi-content-save-outline" :disabled="savingDs || dsValue === (storage.settings.datasets ?? '') || (dsChoice === 'custom' && !dsValue)" @click="saveDatasets">Save</ZenButton>
+        </div>
+        <p class="muted hint">Only where ZenTrainer looks: nothing is moved. Runs still find datasets where they were. Takes effect after restarting ComfyUI.</p>
+        <p v-if="dsError" class="warn">{{ dsError }}</p>
+        <p v-else-if="dsNote && !storage.restart_needed" class="ok">{{ dsNote }}</p>
+        <div v-if="storage.datasets_elsewhere?.length" class="warn small-t">
+          <i class="mdi mdi-folder-move-outline" /> {{ storage.datasets_elsewhere.length }} dataset{{ storage.datasets_elsewhere.length === 1 ? '' : 's' }}
+          won't be listed there until moved into it (training runs still find them):
+          <ul class="mono"><li v-for="d in storage.datasets_elsewhere.slice(0, 8)" :key="d">{{ d }}</li><li v-if="storage.datasets_elsewhere.length > 8">…</li></ul>
+        </div>
       </div>
       <div class="stack">
         <div class="eyebrow">In use now</div>
@@ -297,6 +343,30 @@ async function checkUpdates() {
 </template>
 
 <style scoped>
+/* the datasets folder choice: the run form's segmented buttons (newrun/form.css) */
+.seg {
+  display: inline-flex;
+  align-self: flex-start;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--r-lg);
+  border: 1px solid color-mix(in srgb, var(--zen-border) 70%, transparent);
+}
+.seg button {
+  border: none;
+  background: none;
+  color: var(--zen-muted);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+.seg button.on {
+  background: var(--zen-selected-bg, var(--zen-surface-2));
+  color: var(--zen-selected-text, var(--zen-text));
+}
 .narrow {
   max-width: 880px;
 }

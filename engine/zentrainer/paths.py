@@ -2,9 +2,12 @@
 
 By default in ComfyUI's own folders: datasets in its input dir, LoRAs / samples / merges under
 output/zentrainer/. The "ZenTrainer folder" setting moves both out of them, to
-<folder>/datasets/<dataset> and <folder>/output/<loras|samples|...>. It's read once per process,
-so a change takes effect when ComfyUI restarts, never under a training run. Caches and run state
-stay in ComfyUI's user dir either way.
+<folder>/datasets/<dataset> and <folder>/output/<loras|samples|...>. The "datasets" setting puts
+datasets somewhere of their own instead: a folder inside ComfyUI's input (a relative path, e.g.
+"datasets" for input/datasets/, so they stop sharing input/ with everything else uploaded), or
+any absolute path. Both are read once per process, so a change takes effect when ComfyUI
+restarts, never under a training run; nothing is moved. Caches and run state stay in ComfyUI's
+user dir either way.
 """
 
 from __future__ import annotations
@@ -15,10 +18,11 @@ from pathlib import Path
 
 from . import safeio
 
-DEFAULT_SETTINGS = {"folder": "", "face_model": "buffalo_l"}
+DEFAULT_SETTINGS = {"folder": "", "datasets": "", "face_model": "buffalo_l"}
 
 _UNREAD = object()
 _active = _UNREAD  # the folder this process runs with (None: ComfyUI's folders)
+_active_datasets = _UNREAD  # the datasets folder it runs with (None: the folder's, or ComfyUI's input)
 
 
 class SettingsError(ValueError):
@@ -53,16 +57,63 @@ def folder() -> Path | None:
 
 
 def reset() -> None:
-    """Forget the folder read at start (tests)."""
-    global _active
-    _active = _UNREAD
+    """Forget the folders read at start (tests)."""
+    global _active, _active_datasets
+    _active = _active_datasets = _UNREAD
+
+
+def _datasets_path(raw: str) -> Path | None:
+    """The "datasets" setting as a folder: relative = inside ComfyUI's input, absolute = itself."""
+    import folder_paths
+
+    raw = str(raw or "").strip()
+    if not raw:
+        return None
+    p = Path(os.path.expanduser(raw))
+    return p if p.is_absolute() else Path(folder_paths.get_input_directory()) / p
+
+
+def datasets_folder() -> Path | None:
+    """The datasets folder this process uses, if the setting names one."""
+    global _active_datasets
+    if _active_datasets is _UNREAD:
+        try:
+            _active_datasets = _datasets_path(read_settings()["datasets"])
+        except (ImportError, AttributeError):  # outside ComfyUI (tests, tools)
+            return None
+    return _active_datasets
 
 
 def datasets_root() -> Path:
     import folder_paths
 
+    if (own := datasets_folder()) is not None:
+        return own
     d = folder()
     return d / "datasets" if d else Path(folder_paths.get_input_directory())
+
+
+def dataset_roots() -> list[Path]:
+    """Where a dataset can be, the one in use first: runs and samples from before a datasets or
+    ZenTrainer folder was set still find their dataset where it was. Listing uses datasets_root()
+    only."""
+    import folder_paths
+
+    out = [datasets_root()]
+    d = folder()
+    for r in ([d / "datasets"] if d else []) + [Path(folder_paths.get_input_directory())]:
+        if all(os.path.abspath(r) != os.path.abspath(o) for o in out):
+            out.append(r)
+    return out
+
+
+def find_dataset(name: str) -> Path:
+    """A dataset folder by name: in the datasets folder in use, else where an earlier setting kept
+    it (datasets_root() / name, missing, when it's nowhere)."""
+    for r in dataset_roots():
+        if (r / name).is_dir():
+            return r / name
+    return datasets_root() / name
 
 
 def legacy_output_root() -> Path:
@@ -91,7 +142,8 @@ def lora_dir() -> Path:
 
 def ensure() -> None:
     """At startup: make the folder's dirs, so a first run or upload has somewhere to go."""
-    if folder():
+    own, ds = folder(), datasets_folder()  # both read now: what this process uses until a restart
+    if own or ds:
         for p in (datasets_root(), lora_dir()):
             p.mkdir(parents=True, exist_ok=True)
 
@@ -126,10 +178,61 @@ def validate_folder(raw: str) -> str:
     return str(p)
 
 
+def validate_datasets(raw: str) -> str:
+    """The datasets setting as it will be saved: "" (the default), a folder inside ComfyUI's input
+    given relative to it (e.g. "datasets"), or an absolute path. SettingsError if it can't work."""
+    import folder_paths
+
+    raw = str(raw or "").strip()
+    if not raw:
+        return ""
+    absolute = os.path.isabs(os.path.expanduser(raw))
+    if not absolute:
+        raw = raw.replace("\\", "/").strip("/")
+    p = _datasets_path(raw)
+    inp = Path(folder_paths.get_input_directory()).resolve()
+    if not absolute:
+        if inp not in p.resolve().parents:
+            raise SettingsError("a relative datasets folder has to be inside ComfyUI's input folder, e.g. datasets")
+    elif p.resolve() == inp:
+        return ""  # ComfyUI's input itself: the default
+    if p.exists() and not p.is_dir():
+        raise SettingsError(f"{p} exists and isn't a folder")
+    try:
+        p.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryFile(dir=p):
+            pass
+    except OSError as e:
+        raise SettingsError(f"can't write to {p}: {e.strerror or e}") from None
+    return str(Path(os.path.normpath(os.path.expanduser(raw)))) if absolute else raw
+
+
+def _datasets_left(new: Path) -> list[str]:
+    """Datasets (folders with pictures or clips at the top) in the places in use before, not in `new`:
+    what a user switching folders would have to move themselves."""
+    from .harness.data import MEDIA_EXTS
+
+    out = []
+    for r in dataset_roots():
+        if os.path.abspath(r) == os.path.abspath(new) or not r.is_dir():
+            continue
+        for d in sorted(r.iterdir()):
+            if d.is_dir() and not d.name.startswith((".", "_")) and os.path.abspath(d) != os.path.abspath(new) \
+                    and not (new / d.name).exists():
+                try:
+                    if any(f.suffix.lower() in MEDIA_EXTS for f in d.iterdir()):
+                        out.append(str(d))
+                except OSError:
+                    pass
+    return out
+
+
 def save_settings(changes: dict) -> dict:
     cur = read_settings()
     if "folder" in changes:
         cur["folder"] = validate_folder(changes["folder"])
+    if "datasets" in changes:
+        cur["datasets"] = validate_datasets(changes["datasets"])
     if "face_model" in changes:
         from .datasets import faces
 
@@ -149,9 +252,14 @@ def describe() -> dict:
 
     saved = read_settings()
     active = folder()
+    active_ds = datasets_folder()
+    wanted = _datasets_path(saved["datasets"])
     return {"settings": saved, "active": {"folder": str(active) if active else "", "datasets": str(datasets_root()),
                                           "output": str(output_root()), "loras": str(lora_dir())},
-            "restart_needed": saved["folder"] != (str(active) if active else ""),
+            "restart_needed": saved["folder"] != (str(active) if active else "")
+                              or (os.path.abspath(wanted) if wanted else "") != (os.path.abspath(active_ds) if active_ds else ""),
+            # datasets the saved datasets folder won't list, still where they were (moved by hand)
+            "datasets_elsewhere": _datasets_left(wanted) if wanted else [],
             "face_models": [{"id": k, "label": label, "note": note, "downloaded": faces.downloaded(k)}
                             for k, (label, note) in faces.MODELS.items()],
             "faces_available": faces.available()}
@@ -180,7 +288,7 @@ def resolve_view(kind: str, subfolder: str, filename: str) -> Path | None:
         raise ValueError(f"bad file name {filename!r}")
     sub = (subfolder or "").replace("\\", "/").strip("/")
     if kind == "input":
-        cands = [(datasets_root(), sub), (Path(folder_paths.get_input_directory()), sub)]
+        cands = [(r, sub) for r in dataset_roots()]
     elif kind == "output":
         cands = []
         if sub == "zentrainer" or sub.startswith("zentrainer/"):

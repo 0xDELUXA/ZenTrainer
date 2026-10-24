@@ -105,8 +105,9 @@ def register(server) -> None:
 
     @routes.put("/zentrainer/api/settings")
     async def put_settings(request):
-        """{"folder": absolute path, or "" for ComfyUI's input/output}: saved now, used from the next
-        ComfyUI start (paths don't change under a run that's training)."""
+        """{"folder": absolute path, or "" for ComfyUI's input/output; "datasets": "" (as the folder
+        decides), a folder inside ComfyUI's input ("datasets"), or an absolute path}: saved now, used
+        from the next ComfyUI start (paths don't change under a run that's training)."""
         body = await request.json()
         if not isinstance(body, dict):
             return _bad("expected an object")
