@@ -127,6 +127,8 @@ export interface TrainSpec {
     w8a8_backward?: boolean
     /** torch.compile the main blocks; unset/null = auto (long runs, with Triton, no offloading) */
     compile_blocks?: boolean | null
+    /** Krea 2 / MOSS: the q/k norms and rope as one op that trains (experimental, engine default off) */
+    fused_qk_rope?: boolean
     /** int8 bases: frozen layers run the int8 kernel forward (engine default on) */
     int8_forward?: boolean
     tread_steps?: number
