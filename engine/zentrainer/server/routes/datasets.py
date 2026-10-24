@@ -207,14 +207,24 @@ def register(server) -> None:
             if existing:
                 return _bad(f"this would rewrite {existing} existing caption{'s' if existing != 1 else ''} in the "
                             "default set", 409, replaces=existing)
+        length = b.get("max_length")
         job = captioner.create(**{f: getattr(job, f) for f in ("dataset", "set_name", "clip_name", "clip_type", "prompt",
                                                                "mode", "paths", "subject", "preview")},
-                               max_length=int(b.get("max_length") or (style.max_length if not b.get("prompt")
-                                                                      else 2000 if fmt == "fibo_json" else 300)),
+                               # 0 = no limit; unset = the style's own
+                               max_length=_length(length) if length is not None else (style.max_length if not b.get("prompt")
+                                                                                       else 2000 if fmt == "fibo_json" else 300),
+                               seed=int(b["seed"]) if b.get("seed") is not None else None,
                                format=fmt,
                                loras=[{"name": str(lo.get("name")), "strength": float(lo.get("strength", 1.0))}
                                       for lo in (b.get("loras") or []) if lo.get("name")])
         return await _submit_caption(job, f"caption {name}", b.get("client_id"))
+
+    def _length(v) -> int:
+        """A caption's token limit from a request: 0 (no limit) or 16 to captioner.NO_LIMIT."""
+        from ...datasets import captioner
+
+        n = int(v)
+        return 0 if n <= 0 else max(16, min(n, captioner.NO_LIMIT))
 
     async def _submit_caption(job, title: str, client_id):
         """Queue a caption job as a one-node ComfyUI prompt, so it takes its turn on the GPU."""
@@ -253,7 +263,8 @@ def register(server) -> None:
             return _bad("rewrite as fibo_json, or give an instruction (prompt) for plain text")
         job = captioner.create(dataset="", set_name="", clip_name=str(b["clip_name"]), clip_type=str(b.get("clip_type") or "auto"),
                                prompt=str(b.get("prompt") or ""), preview=len(prompts), rewrite=prompts, format=fmt,
-                               max_length=int(b.get("max_length") or (2000 if fmt == "fibo_json" else 400)))
+                               max_length=_length(b["max_length"]) if b.get("max_length") is not None else (2000 if fmt == "fibo_json" else 400),
+                               seed=int(b["seed"]) if b.get("seed") is not None else None)
         return await _submit_caption(job, "rewrite prompts", b.get("client_id"))
 
     @routes.post("/zentrainer/api/datasets/{name}/segment")

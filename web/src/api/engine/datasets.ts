@@ -170,7 +170,11 @@ export interface CaptionJob {
   written?: string[]
   /** how many existing captions it replaced (undo puts them back) */
   replaced?: number
-  results?: { path: string; text: string; prompt?: string }[]
+  results?: { path: string; text: string; prompt?: string; cut?: boolean }[]
+  /** paths whose caption reached the length limit: cut off mid-way */
+  cut?: string[]
+  /** tokens an answer may take (0: no limit) */
+  max_length?: number
   /** the job's log (job endpoint only) */
   log?: { t: number; level: 'info' | 'warn' | 'error'; msg: string }[]
   /** path -> the caption it wrote (job endpoint only) */
@@ -193,6 +197,10 @@ export interface CaptionRequest {
   subject?: string
   preview?: number
   replace_default?: boolean
+  /** tokens a caption may take; 0 = no limit; unset = the style's own */
+  max_length?: number
+  /** set: sampled with this seed, so another seed words it differently; unset: the same answer every time */
+  seed?: number
 }
 
 /** "text": the answer as written; "fibo_json": a Fibo 2.0 structured caption, checked and compact */

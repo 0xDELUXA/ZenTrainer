@@ -118,7 +118,15 @@ async function fetchLora(file?: string) {
 const jobs = ref<CaptionJob[]>([])
 const error = ref<string | null>(null)
 const PREFS = 'zentrainer.caption'
-const form = reactive({ clip_name: '', style: 'nl', prompt: '', format: 'text' as CaptionFormat, set: 'nl', mode: 'missing' as CaptionMode })
+// length: '' = the style's own limit, 0 = no limit; vary: sample with a new seed each run (re-rolls)
+const form = reactive({ clip_name: '', style: 'nl', prompt: '', format: 'text' as CaptionFormat, set: 'nl', mode: 'missing' as CaptionMode, length: '' as '' | number, vary: false })
+const LENGTHS: { v: '' | number; label: string; tip: string }[] = [
+  { v: '', label: 'Style', tip: "The style's own limit (300 tokens for prose, 2000 for structured JSON)" },
+  { v: 600, label: '600', tip: 'Up to 600 tokens' },
+  { v: 1200, label: '1200', tip: 'Up to 1200 tokens' },
+  { v: 0, label: 'No limit', tip: 'As long as the model wants (stopped at 4096 tokens, in case it never ends)' },
+]
+const seed = () => Math.floor(Math.random() * 2 ** 31)
 try {
   const { subject: _s, ...saved } = JSON.parse(localStorage.getItem(PREFS) ?? '{}') // subject: now the dataset's
   Object.assign(form, saved, { mode: 'missing' })
@@ -284,8 +292,31 @@ function body(extra: Record<string, unknown> = {}) {
     subject: subject.value.trim() || undefined,
     loras: loras.value.filter((l) => l.name),
     ...(editable.value ? { prompt: form.prompt, format: form.format } : { style: form.style }),
+    ...(form.length !== '' ? { max_length: form.length } : {}),
+    ...(form.vary ? { seed: seed() } : {}),
     ...extra,
   }
+}
+/** The job's cut-off captions again, with no length limit, into the same set. */
+async function recaptionCut(j: CaptionJob) {
+  const n = j.cut?.length ?? 0
+  if (!n) return
+  if (j.set_name === 'default' && !confirm(`Re-caption the ${n} cut-off caption${n === 1 ? '' : 's'} in the default set, with no length limit?\n\nUndo puts the cut ones back.`))
+    return
+  busy.value = true
+  error.value = null
+  try {
+    const { job } = await engine.startCaption(props.dataset, body({ mode: 'selected', paths: j.cut, set: j.set_name, max_length: 0, replace_default: j.set_name === 'default' }))
+    jobs.value = [job, ...jobs.value]
+  } catch (e) {
+    error.value = e instanceof EngineError ? e.message : String(e)
+  } finally {
+    busy.value = false
+  }
+}
+/** Show only the images whose caption was cut off (as Review shows what a job wrote). */
+function reviewCut(j: CaptionJob) {
+  emit('review', { ...j, written: j.cut ?? [] })
 }
 async function start(previewN = 0) {
   if (!previewN && form.set === 'default' && replaces.value) {
@@ -472,6 +503,20 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
       </label>
     </div>
 
+    <div class="row">
+      <div class="f"><span class="eyebrow">Length</span>
+        <div class="seg">
+          <button v-for="l in LENGTHS" :key="String(l.v)" :class="{ on: form.length === l.v }" :title="l.tip" @click="form.length = l.v">{{ l.label }}</button>
+        </div>
+      </div>
+      <div class="f"><span class="eyebrow">Wording</span>
+        <div class="seg">
+          <button :class="{ on: !form.vary }" title="The model's single most likely caption: the same every time" @click="form.vary = false">Same each run</button>
+          <button :class="{ on: form.vary }" title="Sampled with a new seed each run, so captioning an image again words it differently (re-roll a caption: select it, caption Selected)" @click="form.vary = true">Vary</button>
+        </div>
+      </div>
+    </div>
+
     <div class="foot">
       <span class="small" :class="form.set === 'default' && replaces ? 'warn' : 'muted'">
         <i v-if="form.set === 'default' && replaces" class="mdi mdi-alert-outline" />
@@ -500,6 +545,7 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
           <img :src="thumb(r.path)" alt="" />
           <pre v-if="asJson(r.text)" class="small json">{{ pretty(r.text) }}</pre>
           <p v-else class="small">{{ r.text }}</p>
+          <p v-if="r.cut" class="small warn"><i class="mdi mdi-content-cut" /> cut off: raise the length</p>
         </div>
         <div v-for="n in Math.max(0, (preview.total || 3) - (preview.results?.length ?? 0))" :key="`w${n}`" class="pv waiting">
           <div class="ph"><i class="mdi mdi-creation-outline" /></div>
@@ -518,6 +564,7 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
       </div>
       <div class="bar"><div :style="{ width: `${active.total ? (active.done / active.total) * 100 : 0}%` }" /></div>
       <div v-if="active.text" class="small latest" :title="pretty(active.text)"><span class="mono muted">{{ active.file }}</span> {{ gist(active.text) }}</div>
+      <div v-if="active.cut?.length" class="small warn"><i class="mdi mdi-content-cut" /> {{ active.cut.length }} cut off so far: {{ active.cut.slice(-3).join(', ') }}{{ active.cut.length > 3 ? '…' : '' }}</div>
     </div>
 
     <!-- what earlier jobs did -->
@@ -528,6 +575,10 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
         <span class="small"><b>{{ j.set_name }}</b> · {{ j.done }} written<template v-if="j.replaced"> ({{ j.replaced }} replaced)</template></span>
         <span class="muted small ellipsis" :title="j.message">{{ j.status === 'done' ? ago(j.finished ?? j.created) : j.message || j.status }}</span>
         <span class="spacer" />
+        <template v-if="j.cut?.length && j.status !== 'undone'">
+          <button class="mini warn" :title="`Show only the ${j.cut.length} image(s) whose caption hit the length limit: ${j.cut.join(', ')}`" @click="reviewCut(j)"><i class="mdi mdi-content-cut" /> {{ j.cut.length }} cut off</button>
+          <button class="mini" :disabled="busy || !!active" title="Caption the cut-off ones again with no length limit, into the same set" @click="recaptionCut(j)">Re-caption them</button>
+        </template>
         <button v-if="j.done && j.status !== 'undone'" class="mini" title="Show only the images this job captioned" @click="review(j)">Review</button>
         <button v-if="j.done && j.status !== 'undone'" class="mini" title="Put back what this job changed" @click="act(j, 'undo')">Undo</button>
       </div>

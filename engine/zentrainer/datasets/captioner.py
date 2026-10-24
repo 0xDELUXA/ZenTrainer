@@ -47,6 +47,9 @@ STYLES = {
     "fibo_json": Style("Fibo structured JSON", structured.caption_instruction(), "fibo_json", 2000),
 }
 JSON_TRIES = 3  # answers a structured caption gets (greedy, then sampled) before the image is skipped
+# max_length 0 = no limit: the answer runs until the model ends it. Still capped, so a model that
+# never stops (repeating itself) can't run forever
+NO_LIMIT = 4096
 
 CAPTION = "zentrainer.caption"  # {job_id, dataset, set, status, done, total, file, text, message, ...}
 MODES = ("missing", "all", "selected")  # which images: no caption in the set yet / every one / `paths`
@@ -67,7 +70,10 @@ class CaptionJob:
     paths: list[str] = field(default_factory=list)  # dataset-relative; mode "selected"
     subject: str = ""  # what to call the main subject (a trigger word, a name)
     preview: int = 0  # > 0: caption this many images, write nothing
-    max_length: int = 300
+    max_length: int = 300  # tokens an answer may take; 0 = no limit (NO_LIMIT)
+    # None: the model's single most likely answer (the same every time). A number: sampled with
+    # that seed, so another number words it differently (re-rolling a caption)
+    seed: int | None = None
     # LoRAs on the captioning model (abliterated / uncensored / prompt-style extractions):
     # [{"name": file in loras/, "strength": 1.0}]. Captioning only; training never uses them.
     loras: list = field(default_factory=list)
@@ -83,7 +89,8 @@ class CaptionJob:
     prompt_id: str = ""
     written: dict[str, str] = field(default_factory=dict)  # path -> the caption this job wrote
     previous: dict[str, str] = field(default_factory=dict)  # path -> the caption it replaced
-    results: list[dict] = field(default_factory=list)  # preview: [{path, text}]
+    results: list[dict] = field(default_factory=list)  # preview: [{path, text, cut}]
+    cut: list[str] = field(default_factory=list)  # paths whose answer reached max_length: cut off mid-way
     log: list[dict] = field(default_factory=list)  # [{t, level, msg}]: the job's own log
     created: float = field(default_factory=time.time)
     finished: float | None = None
@@ -341,16 +348,21 @@ def _dataset_root(job: CaptionJob) -> Path:
     return datasets.folder(job.dataset)
 
 
-def _answer(clip, tokens, job: CaptionJob) -> str:
-    """The model's answer for these tokens, in the job's format. A structured caption that isn't
-    valid JSON gets more tries (sampled, so they differ); ValueError when none is."""
+def _answer(clip, tokens, job: CaptionJob) -> tuple[str, bool]:
+    """The model's answer for these tokens, in the job's format, and whether it was cut off: it
+    used every token it was allowed (an answer that ends itself stops on an end token first). A
+    structured caption that isn't valid JSON gets more tries (sampled, so they differ); ValueError
+    when none is."""
+    limit = job.max_length or NO_LIMIT
     if job.format != "fibo_json":
-        return clean(clip.decode(clip.generate(tokens, do_sample=False, max_length=job.max_length)))
+        ids = clip.generate(tokens, do_sample=job.seed is not None, temperature=0.7, seed=job.seed or 0, max_length=limit)
+        return clean(clip.decode(ids)), len(ids) >= limit
     err = None
     for i in range(JSON_TRIES):
-        ids = clip.generate(tokens, do_sample=i > 0, temperature=0.7, seed=i, max_length=job.max_length)
+        ids = clip.generate(tokens, do_sample=i > 0 or job.seed is not None, temperature=0.7, seed=(job.seed or 0) + i,
+                            max_length=limit)
         try:
-            return structured.compact(structured.parse(clean(clip.decode(ids))))
+            return structured.compact(structured.parse(clean(clip.decode(ids)))), False
         except ValueError as e:
             err = e
             log(job, f"answer {i + 1} wasn't a structured caption ({e}); trying again" if i + 1 < JSON_TRIES else
@@ -383,7 +395,9 @@ def _run_rewrite(job: CaptionJob) -> None:
             break
         ask = structured.generate_instruction(p) if job.format == "fibo_json" else f"{job.prompt}\n\n{p}"
         try:
-            out = _answer(clip, clip.tokenize(ask, min_length=1), job)
+            out, cut = _answer(clip, clip.tokenize(ask, min_length=1), job)
+            if cut:
+                log(job, f"{p[:80]}: cut off at {job.max_length or NO_LIMIT} tokens", "warn")
         except ValueError as e:
             out = ""
             log(job, f"{p[:80]}: {e}", "warn")
@@ -451,15 +465,18 @@ def run(job: CaptionJob) -> None:
                     tokens = clip.tokenize(instruction(job, is_video), image=image, min_length=1)
                 rel = str(it.path.relative_to(root))
                 try:
-                    text = _answer(clip, tokens, job)
+                    text, cut = _answer(clip, tokens, job)
                 except ValueError as e:  # no usable structured caption: this image keeps what it had
                     log(job, f"{rel}: skipped, {e}", "warn")
                     update(job, done=job.done + 1, file=it.path.name, text="", message="")
                     pbar.update_absolute(job.done)
                     mm.throw_exception_if_processing_interrupted()
                     continue
+                if cut:
+                    job.cut.append(rel)
+                    log(job, f"{rel}: cut off at {job.max_length or NO_LIMIT} tokens (raise the length, or re-caption the cut ones)", "warn")
                 if job.preview:
-                    job.results.append({"path": rel, "text": text})
+                    job.results.append({"path": rel, "text": text, "cut": cut})
                 else:
                     target = caption_path(it.path, job.set_name)
                     if target.is_file() and rel not in job.previous:
@@ -471,7 +488,8 @@ def run(job: CaptionJob) -> None:
                 pbar.update_absolute(job.done)  # also raises on ComfyUI interrupt
                 mm.throw_exception_if_processing_interrupted()
         if job.status == "running":
-            log(job, f"done: {len(job.written)} written, {len(job.previous)} of them replaced" if not job.preview else "done (try-on: nothing saved)")
+            log(job, (f"done: {len(job.written)} written, {len(job.previous)} of them replaced"
+                      + (f", {len(job.cut)} cut off" if job.cut else "")) if not job.preview else "done (try-on: nothing saved)")
             update(job, status="done", finished=time.time())
     except BaseException as e:
         stopped = type(e).__name__ == "InterruptProcessingException"

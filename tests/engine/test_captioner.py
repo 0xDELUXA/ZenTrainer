@@ -1,4 +1,5 @@
-"""Caption jobs: which images they take, and that undo puts back exactly what they changed."""
+"""Caption jobs: which images they take, that undo puts back exactly what they changed, and how
+answers are generated (length limits, cut-off answers, re-rolling with a seed)."""
 
 from pathlib import Path
 
@@ -112,3 +113,35 @@ def test_clean_all_states_keeps_resumable_runs(tmp_path, monkeypatch):
     assert (freed, runs) == (100, 1)
     assert not (states / "done1").exists()
     assert (states / "stopped1" / "s.pt").exists()  # it can still resume
+
+
+class _Clip:
+    """A stand-in captioning model: an answer of `n` tokens, then (when it ends itself) an end token."""
+
+    def __init__(self, n, ends=True):
+        self.n, self.ends, self.calls = n, ends, []
+
+    def generate(self, tokens, max_length, **kw):
+        self.calls.append(dict(max_length=max_length, **kw))
+        ids = [1] * min(self.n, max_length)
+        return ids + [0] if self.ends and len(ids) < max_length else ids
+
+    def decode(self, ids):
+        return " ".join("w" for i in ids if i)
+
+
+def test_an_answer_that_uses_every_token_is_cut_off(ds):
+    assert captioner._answer(_Clip(50), None, job(max_length=300)) == (" ".join(["w"] * 50), False)
+    text, cut = captioner._answer(_Clip(400, ends=False), None, job(max_length=300))
+    assert cut and len(text.split()) == 300
+    clip = _Clip(5000, ends=False)
+    assert captioner._answer(clip, None, job(max_length=0))[1]  # "no limit" still stops at the cap
+    assert clip.calls[-1]["max_length"] == captioner.NO_LIMIT
+
+
+def test_a_seed_samples_and_no_seed_is_the_same_every_time(ds):
+    clip = _Clip(10)
+    captioner._answer(clip, None, job())
+    captioner._answer(clip, None, job(seed=7))
+    assert clip.calls[0]["do_sample"] is False
+    assert clip.calls[1]["do_sample"] is True and clip.calls[1]["seed"] == 7

@@ -26,6 +26,10 @@ and Manager show.
   nothing.
 
 ### Datasets and captions
+- **Caption length, cut-offs and re-rolls:** a Length choice when captioning (the style's own, 600,
+  1200, or no limit); captions that ran out of room are flagged, listed on the job ("N cut off",
+  to review them or re-caption them with no limit), and marked in the try-on; and Wording: Vary
+  samples each run with a new seed, so captioning an image again words it differently.
 - **Dataset analysis** (Health → Full analysis): the pictures worth a look, grouped by issue; how
   training buckets and crops them at a resolution you pick, with every crop shown; which phrases
   most captions repeat (things the LoRA will lean towards); the spread of brightness, contrast,
