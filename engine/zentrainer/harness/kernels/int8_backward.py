@@ -35,6 +35,7 @@ _mode = ""  # "", "fused" or "w8a8"
 stats: collections.Counter = collections.Counter()  # which path each backward took (see profile)
 _patched = False
 _warned = False
+_flagged: list = []  # (layer, its _full_precision_mm before weight_only)
 
 
 def enable(mode: str | bool) -> None:
@@ -227,6 +228,22 @@ def install(model) -> int:
     return n
 
 
+def weight_only(model) -> int:
+    """memory.int8_forward off: the model's int8 layers dequantize to bf16 for every matmul. ComfyUI
+    otherwise quantizes the input and multiplies in int8 whenever a layer trains (its
+    QuantLinearFunc), so without this "off" would change nothing. Undone by uninstall."""
+    n = 0
+    for m in model.modules():
+        if _int8_layer(m):
+            _flagged.append((m, m._full_precision_mm))
+            m._full_precision_mm = True
+            n += 1
+    return n
+
+
 def uninstall() -> None:
     while _installed:
         _installed.pop().__dict__.pop("forward", None)
+    while _flagged:
+        m, was = _flagged.pop()
+        m._full_precision_mm = was

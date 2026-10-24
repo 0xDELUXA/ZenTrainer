@@ -358,10 +358,14 @@ class Trainer:
         self._offload_skip()
         from .kernels import int8_backward
 
-        # weight-only int8 layers that need a gradient: int8 forward instead of a dequantized bf16 one
-        n8 = int8_backward.install(patcher.model) if s.memory.int8_forward else 0
-        if n8:
-            logging.info("[ZenTrainer] int8 training path on %d layers", n8)
+        # int8 layers that train: the int8 forward (activations quantized), or with int8_forward off
+        # a dequantized bf16 one
+        if s.memory.int8_forward:
+            n8 = int8_backward.install(patcher.model)
+            if n8:
+                logging.info("[ZenTrainer] int8 training path on %d layers", n8)
+        elif n8 := int8_backward.weight_only(patcher.model):
+            logging.info("[ZenTrainer] int8 weights dequantized to bf16 for every matmul on %d layers", n8)
         self.device = patcher.load_device
         self.train_dtype = _DTYPES[s.memory.training_dtype]
 

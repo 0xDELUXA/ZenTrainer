@@ -5,6 +5,11 @@ and Manager show.
 
 ## Unreleased
 
+### Training
+- **"int8 forward" off now does what it says:** int8 models dequantize to bf16 for every matmul.
+  ComfyUI had started multiplying in int8 whenever a layer trains, so turning it off changed
+  nothing.
+
 ### Datasets and captions
 - **Dataset analysis** (Health → Full analysis): the pictures worth a look, grouped by issue; how
   training buckets and crops them at a resolution you pick, with every crop shown; which phrases
