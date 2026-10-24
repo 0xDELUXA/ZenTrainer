@@ -231,6 +231,8 @@ def register(server) -> None:
         run_id = request.match_info["run_id"]
         body = await request.json()
         ctl = control.get(run_id)
+        if ctl is None and run_id in jobqueue.get().parked:  # paused, having let go of ComfyUI
+            return await _unpark(run_id, body)
         if ctl is None:
             if body.get("command") == "stop":  # waiting in our queue, or dispatched but not started
                 if jobqueue.get().remove(run_id):
@@ -246,6 +248,26 @@ def register(server) -> None:
             from ... import events
             events.emit(events.SAMPLE_PROGRESS, {"run_id": run_id, "phase": "requested"})
         return web.json_response({"ok": True})
+
+    async def _unpark(run_id: str, body: dict):
+        """A parked run (paused, ComfyUI let go): resume puts it back first in the queue to continue
+        from its stop's state; stop leaves it stopped. Either way the queue moves again."""
+        store, q = state.store(), jobqueue.get()
+        cmd = body.get("command")
+        if cmd not in ("resume", "stop"):
+            return _bad("this run is paused and has let go of ComfyUI: resume or stop it", 409)
+        q.parked.discard(run_id)
+        store.update(run_id, parked=None)
+        if cmd == "stop":
+            store.update(run_id, status="stopped", message="stopped while paused")
+            return web.json_response({"ok": True})
+        ckpt = common.latest_resumable(store, run_id)
+        if ckpt is None:  # its state was cleaned up while it waited: starting over would drop its history
+            store.update(run_id, status="stopped", message="its saved training state is gone; Duplicate it to train again")
+            return _bad("this run's saved training state is gone (cleaned up?): it can't continue", 409)
+        common.queue_resume(store, run_id, ckpt, at=0)
+        _remember_client(body.get("client_id"))
+        return web.json_response({"ok": True, "run": store.meta(run_id)})
 
     def _preset_root() -> Path:
         import folder_paths
@@ -357,7 +379,22 @@ def register(server) -> None:
                 return
             common.queue_resume(store, run_id, ckpt, at=1)
 
-        _app["zentrainer_queue"] = asyncio.create_task(jobqueue.worker(dispatch, swapped))
+        async def parked(run_id: str):
+            # paused and let go of ComfyUI for a workflow (Trainer._park): paused, holding the queue,
+            # to continue from the state its stop saved when it's resumed
+            store = state.store()
+            store.update(run_id, park=None)
+            if store.meta(run_id)["status"] != "stopped":
+                return  # it finished or failed on its own first
+            ckpt = common.latest_resumable(store, run_id)
+            if ckpt is None:
+                store.update(run_id, message="paused for a ComfyUI workflow, but it saved no training state to resume from")
+                return
+            store.update(run_id, status="paused", parked=True,
+                         message=f"paused at step {ckpt['step']}, and let go of ComfyUI for a workflow: Resume continues from there")
+            jobqueue.get().parked.add(run_id)
+
+        _app["zentrainer_queue"] = asyncio.create_task(jobqueue.worker(dispatch, swapped, parked))
         _app["zentrainer_system"] = asyncio.create_task(system.sampler())
 
     server.app.on_startup.append(_start_worker)

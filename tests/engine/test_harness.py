@@ -237,6 +237,66 @@ def test_queue_order_pause_and_persistence(tmp_path):
     assert Queue(tmp_path / "queue.json").snapshot()["order"] == ["a"]  # survives a restart
 
 
+def test_a_parked_run_holds_the_queue_until_it_is_resumed(tmp_path, monkeypatch):
+    # a paused run that let go of ComfyUI for a workflow (Trainer._park) stops with park set: the
+    # worker hands it to `parked`, and starts nothing else while any run is parked
+    import asyncio
+
+    from zentrainer.harness import control
+    from zentrainer.server import jobqueue
+
+    class Store:
+        metas = {"a": {"status": "stopped", "park": True}}
+
+        def meta(self, run_id):
+            return self.metas[run_id]
+
+    q = jobqueue.Queue(tmp_path / "queue.json")
+    q.add("b")
+    q.current = "a"
+    monkeypatch.setattr(jobqueue, "get", lambda: q)
+    monkeypatch.setattr(jobqueue.state, "store", lambda: Store())
+    monkeypatch.setattr(control, "get", lambda run_id: None)
+    monkeypatch.setattr(control, "active", lambda: False)
+    dispatched, parked = [], []
+
+    async def dispatch(run_id):
+        dispatched.append(run_id)
+
+    async def on_parked(run_id):
+        parked.append(run_id)
+        q.parked.add(run_id)
+
+    async def run(seconds):
+        task = asyncio.ensure_future(jobqueue.worker(dispatch, None, on_parked, interval=0.01))
+        await asyncio.sleep(seconds)
+        task.cancel()
+
+    asyncio.run(run(0.1))
+    assert parked == ["a"] and q.current is None and dispatched == []  # held: b waits
+    q.parked.discard("a")  # resumed (or stopped)
+    asyncio.run(run(0.1))
+    assert dispatched == ["b"]
+
+
+def test_parking_only_when_another_comfyui_prompt_waits(monkeypatch):
+    import sys
+    import types
+
+    from zentrainer.harness import trainer
+
+    remaining = [1]
+    fake = types.ModuleType("server")
+    fake.PromptServer = types.SimpleNamespace(instance=types.SimpleNamespace(
+        prompt_queue=types.SimpleNamespace(get_tasks_remaining=lambda: remaining[0])))
+    monkeypatch.setitem(sys.modules, "server", fake)
+    assert not trainer._comfy_waiting()  # only the run itself
+    remaining[0] = 2
+    assert trainer._comfy_waiting()  # a workflow queued behind it
+    monkeypatch.setitem(sys.modules, "server", types.ModuleType("server"))  # no queue to ask
+    assert not trainer._comfy_waiting()
+
+
 def test_forward_only_attention_trains_with_pytorch(monkeypatch):
     # comfy_kitchen_int8 (like sage) has no backward and refuses autocast's fp32 q/k beside a bf16 v:
     # a run set to it (from before it was hidden in the form) trains with pytorch instead

@@ -75,6 +75,7 @@ const headline = computed(() => {
 const detailLine = computed(() => {
   const s = status.value
   if (s === 'loading') return d.value?.run.message || 'Loading the model and your photos'
+  if (s === 'paused') return d.value?.run.message || ''
   if (sampling.value?.s_total) return `${sampling.value.s_step ?? 0} of ${sampling.value.s_total}`
   if (s === 'training' && left.value != null) return `${eta(left.value)} left`
   if (failed.value) return d.value?.run.message ?? ''

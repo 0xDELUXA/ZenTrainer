@@ -24,6 +24,10 @@ class Queue:
     def __init__(self, path: Path):
         self.path = path
         self.current: str | None = None  # dispatched to ComfyUI, not yet finished
+        # runs paused that let go of ComfyUI for a workflow (Trainer._park): nothing else starts
+        # until they're resumed or stopped, so the GPU they freed goes to that workflow. In memory:
+        # after a restart a parked run is interrupted, to resume as any other
+        self.parked: set[str] = set()
 
     def _read(self) -> dict:
         try:
@@ -117,10 +121,11 @@ def get() -> Queue:
     return _queue
 
 
-async def worker(dispatch, swapped=None, interval: float = 1.5) -> None:
-    """Dispatch the next queued run whenever nothing is active. `dispatch(run_id)` is
+async def worker(dispatch, swapped=None, parked=None, interval: float = 1.5) -> None:
+    """Dispatch the next queued run whenever nothing is active (or parked). `dispatch(run_id)` is
     the coroutine that submits the session job to ComfyUI; `swapped(run_id)` requeues a run
-    stopped by a swap, once it has stopped."""
+    stopped by a swap, and `parked(run_id)` keeps one that paused for a ComfyUI workflow paused,
+    once it has stopped."""
     from ..harness import control
 
     q = get()
@@ -135,8 +140,10 @@ async def worker(dispatch, swapped=None, interval: float = 1.5) -> None:
                 if meta["status"] in TERMINAL and control.get(q.current) is None:
                     if meta.get("swap_resume") and swapped is not None:
                         await swapped(q.current)
+                    elif meta.get("park") and parked is not None:
+                        await parked(q.current)
                     q.current = None
-            if q.current is None and not control.active():
+            if q.current is None and not control.active() and not q.parked:
                 run_id = q.pop_next()
                 if run_id is not None:
                     q.current = run_id

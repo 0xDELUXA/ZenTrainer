@@ -27,6 +27,8 @@ export interface RunMeta {
   updated: number
   final_step: number | null
   message?: string
+  /** paused, and let go of ComfyUI for a workflow: Resume continues from its saved state */
+  parked?: boolean
   resume_from?: string | null
   /** when this go was handed to ComfyUI (a resume starts a new go); unset on runs from before it was recorded */
   started?: number | null

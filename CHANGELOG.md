@@ -6,6 +6,10 @@ and Manager show.
 ## Unreleased
 
 ### Training
+- **Pausing lets ComfyUI work:** a paused run that sees a workflow queued in ComfyUI saves its
+  state and lets go of ComfyUI (its queue and the GPU), and stays paused; Resume continues from
+  there (a model reload). Nothing else in ZenTrainer's queue starts meanwhile. Needs resume states
+  (Output → Resume states, on by default).
 - **Faster by default on int8 models:** the int8 backward (W8A8) is now on, so the frozen layers'
   gradients run on int8 tensor cores too: about 16% faster on Krea 2 int8 at 1024. It rounds the
   gradient to int8 (stochastically, so unbiased); turn it off in Memory to train with a bf16

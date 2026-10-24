@@ -112,7 +112,7 @@ const modelFile = computed(() => {
         </div>
       </div>
       <div v-if="error" class="card err mono">{{ error }}</div>
-      <div v-if="detail.run.message && !running" class="card muted mono msg">{{ detail.run.message }}</div>
+      <div v-if="detail.run.message && (!running || detail.run.parked)" class="card muted mono msg">{{ detail.run.message }}</div>
 
       <RunProgress />
 

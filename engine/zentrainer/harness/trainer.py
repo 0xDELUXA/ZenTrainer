@@ -118,6 +118,16 @@ def state_for(checkpoint: dict, run_id: str) -> str | None:
     return None
 
 
+def _comfy_waiting() -> bool:
+    """Another ComfyUI prompt is queued behind the one running (this run's): someone wants the GPU."""
+    try:
+        import server
+
+        return server.PromptServer.instance.prompt_queue.get_tasks_remaining() > 1
+    except Exception:  # outside ComfyUI, or its queue changed shape: never park on a guess
+        return False
+
+
 class Stop(Exception):
     def __init__(self, status: str):
         self.status = status
@@ -1105,8 +1115,26 @@ class Trainer:
             self._status("paused")
             while not self.control.wait_resumed(0.5):
                 mm.throw_exception_if_processing_interrupted()
+                if _comfy_waiting():
+                    self._park()
             self._apply(self.control.drain())  # whatever arrived while paused (set_lr, stop, ...)
             self._status("training")
+
+    def _park(self) -> None:
+        """Paused, and another ComfyUI prompt is waiting behind this run: let go of ComfyUI (its
+        queue and the GPU) rather than hold them. The run stops as a stop does, saving its state,
+        and the queue keeps it paused to continue from there (server/jobqueue.py, routes/runs.py
+        parked). Without resume states it can't continue, so it stays paused and says so."""
+        if self.spec.output.keep_states == "none":
+            if not getattr(self, "_park_told", False):
+                self._park_told = True
+                self._status("paused", message="a ComfyUI workflow is waiting, but this run keeps no resume states "
+                                               "(Output → Resume states), so pausing can't free ComfyUI: stop it, or resume")
+            return
+        if self.store:
+            self.store.update(self.run_id, park=True)
+        logging.info("[ZenTrainer] paused and a ComfyUI prompt is waiting: saving and letting go of ComfyUI")
+        raise Stop("stopped")
 
     def _partial(self, name: str, what: str, kept: int, left_out: list) -> None:
         """Say so when a frozen adapter fits only part of this model (it was made for another build
