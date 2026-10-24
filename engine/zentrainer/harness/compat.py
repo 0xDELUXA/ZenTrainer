@@ -153,9 +153,13 @@ def _moss() -> None:
         w = getattr(norm, "weight", None)
         return isinstance(w, torch.Tensor) and not w.requires_grad and not getattr(norm, "weight_function", None)
 
-    def attention(q, k, v, q_norm, k_norm, pe, heads, comfy_attention, transformer_options):
-        if not (fused_qk_rope and mm.in_training) or not (plain(q_norm) and plain(k_norm)):
-            return sampling_attention(q, k, v, q_norm, k_norm, pe, heads, comfy_attention, transformer_options)
+    # Newer ComfyUI passes more (ref_kv, kv_out, mask: MOSS-Image edit, #17296 #17320), positionally
+    # or by name; they go through untouched, and the fused path takes only calls that use none.
+    def attention(q, k, v, q_norm, k_norm, pe, heads, comfy_attention, transformer_options, *more, **named):
+        if not (fused_qk_rope and mm.in_training) or not (plain(q_norm) and plain(k_norm)) \
+                or any(x is not None for x in (*more, *named.values())):
+            return sampling_attention(q, k, v, q_norm, k_norm, pe, heads, comfy_attention, transformer_options,
+                                      *more, **named)
         from .kernels.qk_norm_rope import qk_norm_rope
 
         B, N, _ = q.shape

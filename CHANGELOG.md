@@ -3,6 +3,13 @@
 What changed in each ZenTrainer release, newest first. Versions are the ones the ComfyUI Registry
 and Manager show.
 
+## Unreleased
+
+### Training
+- **Fixed: MOSS Image on a newer ComfyUI** stopped with "attention() got an unexpected keyword
+  argument 'mask'": ComfyUI's MOSS attention takes more arguments since its MOSS-Image edit
+  support, and ZenTrainer's fused q/k wrapper didn't pass them on.
+
 ## 0.3.0 (2026-10-25)
 
 ### Training
