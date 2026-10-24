@@ -6,3 +6,7 @@ web/dist/
 # managed ComfyUI (scripts/zt): pinned by comfy.lock, never committed
 comfyui/
 .zentrainer/
+# zt's own environment (uv run --project cli)
+cli/.venv/
+# the node pack itself has no dependencies to lock (cli/ has its own uv.lock)
+/uv.lock

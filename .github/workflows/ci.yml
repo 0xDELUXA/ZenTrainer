@@ -12,9 +12,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
       # The harness tests need no ComfyUI and no GPU; the CPU torch wheel keeps this quick.
+      # tests/cli runs zt (cli/) against throwaway git repositories.
       - run: >
           uv run --no-project --index https://download.pytorch.org/whl/cpu
           --with pytest --with torch --with pillow --with numpy --with av --with safetensors
+          --with rich --with questionary --with textual
           python -m pytest -q tests
 
   web:

@@ -32,12 +32,17 @@ def register(server) -> None:
 
     @routes.get("/zentrainer/api/runs/{run_id}")
     async def get_run(request):
+        """The run's meta, spec and logs. ?since=N: only the metrics from row N on (a monitor
+        polling a long run), with metrics_count the run's total so far."""
         store, run_id = state.store(), request.match_info["run_id"]
         try:
+            metrics = store.read(run_id, "metrics")
+            since = request.query.get("since")
             return web.json_response({
                 "run": store.meta(run_id),
                 "spec": store.spec(run_id),
-                "metrics": store.read(run_id, "metrics"),
+                "metrics": metrics[max(0, int(since)):] if since and since.isdigit() else metrics,
+                "metrics_count": len(metrics),
                 "checkpoints": [_with_size(c) for c in store.read(run_id, "checkpoints")],
                 "samples": store.read(run_id, "samples"),
                 "validation": store.read(run_id, "validation"),
