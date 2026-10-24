@@ -2,6 +2,7 @@
 No ComfyUI needed."""
 
 import math
+import re
 from pathlib import Path
 
 import pytest
@@ -344,7 +345,11 @@ def test_optimizer_catalog_builds_what_is_available():
             with pytest.raises(RuntimeError, match=row["pip"]):
                 optim.build(p, OptimSpec(optimizer=row["id"]))
             continue
-        opt, sched = optim.build([torch.nn.Parameter(torch.ones(4))], OptimSpec(optimizer=row["id"], learning_rate=1e-3))
+        # at the LR its catalog row recommends: an adaptive one (Prodigy: 1.0) steps by lr x its own
+        # estimate (1e-6 at first), so a normal LoRA LR moves a weight of 1 by less than fp32 can show
+        lr = float(re.match(r"[0-9.]+(?:e-?[0-9]+)?", row["lr_hint"]).group())
+        opt, sched = optim.build([torch.nn.Parameter(torch.ones(4))], OptimSpec(optimizer=row["id"], learning_rate=lr))
+        optim.set_mode(opt, training=True)  # as a run does (schedule-free ones refuse to step otherwise)
         q = opt.param_groups[0]["params"][0]
         q.grad = torch.ones_like(q)
         opt.step()
