@@ -177,7 +177,8 @@ onUnmounted(() => {
       @click="emit('toggle')"
     />
     <RouterLink to="/jobs" class="row brand" :title="training ? 'Training…' : undefined" @click="lotus?.bloom(); emit('navigate')">
-      <span class="ic"><ZenLotus ref="lotus" class="lotus" :breathing="training" /></span>
+      <!-- no breathing while training: a constant animation kept the page repainting for the whole run (the click still blooms) -->
+      <span class="ic"><ZenLotus ref="lotus" class="lotus" :breathing="false" /></span>
       <span class="lbl">ZenTrainer</span>
     </RouterLink>
 
