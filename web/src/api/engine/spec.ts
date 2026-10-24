@@ -170,6 +170,23 @@ export interface TrainSpec {
   validation: { every: number; images: number; timesteps: number; seed: number }
   /** where checkpoints go and which resume states are kept */
   output: { lora_dir: string | null; keep_states: 'latest' | 'all' | 'none'; save_dtype: 'bf16' | 'fp16' | 'fp32' }
+  /** a slider LoRA (engine harness/slider.py): its strength moves pictures from `negative` (-1)
+   *  to `positive` (+1), 0 the base model. "text": made from the prompts; the dataset's pictures
+   *  are only where the noise starts, so their captions aren't used */
+  slider: {
+    kind: '' | 'pairs' | 'text'
+    /** pairs: the control set holding each picture's partner, and which end the dataset's own are */
+    pair_set: string
+    dataset_end: 'positive' | 'negative'
+    positive: string
+    negative: string
+    neutral: string
+    /** prompts the slider should leave alone */
+    anchors: string[]
+    guidance: number
+    anchor_weight: number
+    directions: 'both' | 'positive'
+  }
 }
 
 export interface Preset<T = unknown> {
@@ -276,5 +293,6 @@ export function defaultSpec(): TrainSpec {
     },
     validation: { every: 100, images: 4, timesteps: 4, seed: 1234 },
     output: { lora_dir: null, keep_states: 'latest', save_dtype: 'bf16' },
+    slider: { kind: '', pair_set: '', dataset_end: 'positive', positive: '', negative: '', neutral: '', anchors: [], guidance: 3, anchor_weight: 1, directions: 'both' },
   }
 }

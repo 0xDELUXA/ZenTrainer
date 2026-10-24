@@ -6,6 +6,17 @@ and Manager show.
 ## Unreleased
 
 ### Runs
+- **Slider LoRAs:** New run → Model → Add → Slider: a LoRA whose strength moves pictures along one
+  attribute (+1 one way, −1 the other, 0 the base model).
+  - **From image pairs:** the dataset's pictures and a picture set beside them (`_controls/<set>/`,
+    the same file names) that differ only in what the slider moves (warm and cool light, smiling
+    and not). Each step trains both from the same noise, at +1 and −1, with the model's own loss:
+    right for flow models (Krea 2, Flux, MOSS) by construction. Pictures without a partner are left
+    out. A step costs about two normal ones.
+  - **From prompts:** two prompts, as AI Toolkit's concept sliders, with optional anchors for what
+    should stay the same; the dataset's pictures are only where the noise starts. About three.
+  - Samples render each prompt at −1, −0.5, 0, +0.5 and +1 side by side, and the saved LoRA records
+    what each end does (zentrainer.slider).
 - **Share run settings:** Export (a `.zentrainer.json` file) or Copy (the same as text, for a chat)
   on New run, and Export settings on a run's page; Import on New run loads one, or paste its text
   anywhere on the page. The file leaves out what's only yours (the dataset, where LoRAs are saved, a

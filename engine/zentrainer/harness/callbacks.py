@@ -7,6 +7,7 @@ not a change to the loop.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -20,6 +21,8 @@ from .. import events, paths
 from . import optim
 from .data.streams import first_stream
 
+# a slider's samples: each prompt at these strengths, one strip (spec.slider; harness/slider.py)
+SLIDER_SWEEP = (-1.0, -0.5, 0.0, 0.5, 1.0)
 SAMPLE_HEADROOM = 6 * 1024 ** 3  # extra VRAM kept free while an offloaded model samples (see render)
 
 if TYPE_CHECKING:
@@ -135,7 +138,7 @@ class Samples(Callback):
 
     def _like(self, t, row: dict) -> None:
         """Hand a landed sample to the likeness worker (faces extra), started on first use."""
-        if not t.spec.samples.likeness or not t.store:
+        if not t.spec.samples.likeness or not t.store or row.get("sweep"):  # a slider's strip: five faces
             return
         if getattr(self, "_liker", None) is None:
             from ..datasets import faces
@@ -195,6 +198,32 @@ class Samples(Callback):
         except OSError:
             pass
 
+    @contextlib.contextmanager
+    def _at_strength(self, t, model, strength: float):
+        """The sampling model with the LoRA at `strength`: the training patcher's own adapters set to
+        it, or the alternate model's LoRA patches rescaled in place. A patched copy per strength
+        cost ComfyUI's dynamic loading 12.9 GB of RAM each on Krea 2 (it ran a 128 GB machine out);
+        rescaled patches with a new patches_uuid are the same model, refreshed. A base LoRA's
+        patches keep their own strength."""
+        if not t.spec.samples.model_name:
+            with t.network.at_strength(strength):
+                yield model
+            return
+        import uuid
+
+        ours, base = self._own_patches, t.spec.samples.lora_strength
+
+        def scale(k: float) -> None:
+            for key, lst in model.patches.items():
+                model.patches[key] = [(base * k,) + p[1:] if id(p[1]) in ours else p for p in lst]
+            model.patches_uuid = uuid.uuid4()
+
+        scale(strength)
+        try:
+            yield model
+        finally:
+            scale(1.0)
+
     def _sampling_model(self, t):
         """The training patcher itself, or the alternate model with the current LoRA."""
         s = t.spec.samples
@@ -220,6 +249,7 @@ class Samples(Callback):
         if wide is not None:  # the widened input layer: the same wrappers on this model (see wide_input.py)
             weights = {k: v for k, v in weights.items() if not k.endswith(".set_weight")}
         patched, _ = comfy.sd.load_lora_for_models(self._alt, None, weights, s.lora_strength, 0)
+        self._own_patches = {id(p[1]) for lst in patched.patches.values() for p in lst}  # the trained LoRA's (a sweep rescales them)
         if wide is not None:
             patched.add_weight_wrapper(f"{t.network.wide_name}.weight", wide.weight)
             if wide.bias_delta is not None:
@@ -455,13 +485,24 @@ class Samples(Callback):
                     def cb(step, x0, _x, total, _i=i):
                         progress(_i, step + 1, total, x0)
 
-                    # as in training: bypass adapters keep their own (fp32) weights beside the
-                    # model's bf16 activations, and only autocast reconciles the two
-                    with torch.autocast(t.device.type, dtype=t.train_dtype, enabled=t.train_dtype != torch.float32):
-                        out = comfy.sample.sample(model, noise, s.steps, s.cfg, s.sampler, s.scheduler,
-                                                  pos, neg, latent, seed=it.seed, disable_pbar=True, callback=cb)
-                    img = vae.decode(first_stream(out))
-                    img = img.reshape(-1, *img.shape[-3:])  # (frames, H, W, 3)
+                    def draw(m):
+                        # as in training: bypass adapters keep their own (fp32) weights beside the
+                        # model's bf16 activations, and only autocast reconciles the two
+                        with torch.autocast(t.device.type, dtype=t.train_dtype, enabled=t.train_dtype != torch.float32):
+                            o = comfy.sample.sample(m, noise, s.steps, s.cfg, s.sampler, s.scheduler,
+                                                    pos, neg, latent, seed=it.seed, disable_pbar=True, callback=cb)
+                        img = vae.decode(first_stream(o))
+                        return o, img.reshape(-1, *img.shape[-3:])
+
+                    sweep = SLIDER_SWEEP if t.spec.slider.kind and manual is None and t.step > 0 and not t_lat else None
+                    if sweep:  # a slider: the same sample at each strength, side by side
+                        shots = []
+                        for st in sweep:
+                            with self._at_strength(t, model, st) as m:
+                                shots.append(draw(m)[1][0])
+                        strip = _strip(shots, sweep)
+                    else:
+                        out, img = draw(model)  # (frames, H, W, 3)
                     if t_lat:
                         from .data import video
 
@@ -469,8 +510,8 @@ class Samples(Callback):
                         video.write(Path(out_dir) / name, img, s.fps, _sound(t, out))
                     else:
                         name = f"manual_{manual:03d}_{'base' if base else f'step{t.step:06d}'}.png" if manual is not None else f"step{t.step:06d}_{i:02d}.png"
-                        Image.fromarray((img[0].clamp(0, 1).cpu().numpy() * 255).astype("uint8")).save(
-                            os.path.join(out_dir, name))
+                        pic = strip if sweep else Image.fromarray((img[0].clamp(0, 1).cpu().numpy() * 255).astype("uint8"))
+                        pic.save(os.path.join(out_dir, name))
                     if t.step == 0 and manual is None:
                         self._baseline_keep(t, i, Path(out_dir) / name)
                     row = {
@@ -478,6 +519,8 @@ class Samples(Callback):
                         "filename": name, "subfolder": f"zentrainer/samples/{t.run_id}", "type": "output",
                         "model": s.model_name or None,
                     }
+                    if sweep:
+                        row["sweep"] = list(sweep)
                     if manual is not None:
                         row.update(manual=True, index=manual, width=self.items[i].width, height=self.items[i].height,
                                    seed=self.items[i].seed, frames=self.items[i].frames, base=base)
@@ -752,6 +795,11 @@ def write_metadata(spec_dict: dict, step: int) -> dict[str, str]:
     if net.get("base_lora"):  # trained on top of it: it belongs beside this LoRA wherever it's used
         meta["zentrainer.base_lora"] = net["base_lora"]
         meta["zentrainer.base_strength"] = str(net.get("base_strength", 1.0))
+    sl = spec_dict.get("slider") or {}
+    if sl.get("kind"):  # a slider: what each end does, for whatever loads it to label them
+        meta["zentrainer.slider"] = json.dumps({"kind": sl["kind"], "positive": sl.get("positive", ""),
+                                                "negative": sl.get("negative", ""), "neutral": sl.get("neutral", ""),
+                                                "range": [-1.0 if sl.get("directions", "both") == "both" else 0.0, 1.0]})
     return meta
 
 
@@ -791,3 +839,25 @@ def mm_empty() -> None:
     import comfy.model_management as mm
 
     mm.soft_empty_cache()
+
+
+def _strip(shots: list, strengths) -> "Image.Image":
+    """Pictures (H, W, 3 in 0-1) side by side, each under its strength: a slider's sample."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    pics = [Image.fromarray((x.clamp(0, 1).cpu().numpy() * 255).astype("uint8")) for x in shots]
+    w, h = pics[0].size
+    band, gap = max(24, h // 16), max(4, w // 128)
+    out = Image.new("RGB", (len(pics) * w + (len(pics) - 1) * gap, h + band), (18, 18, 20))
+    draw = ImageDraw.Draw(out)
+    try:
+        font = ImageFont.load_default(size=int(band * 0.6))
+    except TypeError:  # Pillow < 10.1
+        font = ImageFont.load_default()
+    for k, (pic, st) in enumerate(zip(pics, strengths)):
+        x = k * (w + gap)
+        out.paste(pic, (x, band))
+        label = "0" if st == 0 else f"{st:+g}"  # ASCII: the default font has no U+2212
+        tw = draw.textlength(label, font=font)
+        draw.text((x + (w - tw) / 2, band * 0.18), label, fill=(235, 235, 240), font=font)
+    return out

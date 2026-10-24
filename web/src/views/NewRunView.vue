@@ -11,6 +11,7 @@ import MemorySection from '@/components/newrun/MemorySection.vue'
 import ModelSection from '@/components/newrun/ModelSection.vue'
 import RunSummary from '@/components/newrun/RunSummary.vue'
 import SamplesSection from '@/components/newrun/SamplesSection.vue'
+import SliderSection from '@/components/newrun/SliderSection.vue'
 import TrainingSection from '@/components/newrun/TrainingSection.vue'
 
 const form = useRunForm()
@@ -96,6 +97,8 @@ const missing = () => imported.value?.files.filter((f) => f.installed === false)
         </div>
         <ModelSection />
         <DatasetSection />
+        <!-- after the dataset: an image slider's other end is one of its picture sets -->
+        <SliderSection />
         <TrainingSection />
         <SamplesSection />
         <MemorySection />

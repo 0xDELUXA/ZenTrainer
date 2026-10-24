@@ -332,6 +332,29 @@ class OutputSpec:
 
 
 @dataclass
+class SliderSpec:
+    """A slider LoRA (harness/slider.py): one whose strength moves an image along one attribute, +1
+    towards `positive`, -1 towards `negative`, 0 the base model.
+    "pairs": from picture pairs that differ only in it: the dataset's images are one end, a control
+    set of the same names (_controls/<pair_set>/) the other; captions are the pair's.
+    "text": a concept slider, its targets made from the base model's own predictions for the
+    prompts (no captions needed: the dataset's pictures are only where the noise starts)."""
+
+    kind: str = ""  # "" (a normal LoRA) | "pairs" | "text"
+    # pairs: the control set holding each image's partner, and which end the dataset's own are
+    pair_set: str = ""
+    dataset_end: str = "positive"  # "positive" (the dataset's images are +1) | "negative"
+    positive: str = ""  # what +1 adds, e.g. "a person, old, wrinkled skin, grey hair"
+    negative: str = ""  # what -1 adds, e.g. "a person, young, smooth skin"
+    neutral: str = ""  # what the LoRA trains on, without either: e.g. "a person"
+    # prompts whose images the slider should leave alone (at +1 and -1, pulled to the base model)
+    anchors: list[str] = field(default_factory=list)
+    guidance: float = 3.0  # how far each end is pushed past the base model's own difference
+    anchor_weight: float = 1.0
+    directions: str = "both"  # "both" | "positive" (only +1 is trained)
+
+
+@dataclass
 class TrainSpec:
     name: str = "untitled"
     seed: int = 0
@@ -345,6 +368,7 @@ class TrainSpec:
     samples: SampleSpec = field(default_factory=SampleSpec)
     validation: ValidationSpec = field(default_factory=ValidationSpec)
     output: OutputSpec = field(default_factory=OutputSpec)
+    slider: SliderSpec = field(default_factory=SliderSpec)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -408,6 +432,23 @@ class TrainSpec:
         if not 1.0 <= self.objective.bias_power <= 10.0:
             raise SpecError("objective.bias_power is how hard the bias leans, 1 (not at all) to 10 (3 = AI Toolkit's)")
         _choice("memory.training_dtype", self.memory.training_dtype, ("bf16", "fp16", "fp32"))
+        sl = self.slider
+        _choice("slider.kind", sl.kind, ("", "pairs", "text"))
+        _choice("slider.directions", sl.directions, ("both", "positive"))
+        _choice("slider.dataset_end", sl.dataset_end, ("positive", "negative"))
+        if sl.kind == "pairs":
+            if not CONTROL_SET_NAME.match(sl.pair_set or ""):
+                raise SpecError("an image slider needs the set holding each picture's partner: slider.pair_set "
+                                "(a folder under the dataset's _controls/)")
+            if self.dataset.edit:
+                raise SpecError("an image slider pairs pictures itself: turn edit training off (dataset.edit)")
+        if sl.kind == "text":
+            if not (sl.positive.strip() and sl.negative.strip()):
+                raise SpecError("a text slider needs both ends: slider.positive and slider.negative")
+            if not 0 < sl.guidance <= 20:
+                raise SpecError("slider.guidance is above 0 (3 is usual)")
+            if sl.anchor_weight < 0:
+                raise SpecError("slider.anchor_weight can't be negative")
         _choice("samples.slg_mode", self.samples.slg_mode, ("off", "uncond", "standard"))
         _choice("output.keep_states", self.output.keep_states, ("latest", "all", "none"))
         _choice("output.save_dtype", self.output.save_dtype, ("bf16", "fp16", "fp32"))

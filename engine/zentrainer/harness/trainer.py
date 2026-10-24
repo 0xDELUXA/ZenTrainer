@@ -403,9 +403,14 @@ class Trainer:
         self.h3 = is_h3(patcher.model)
         if s.dataset.keyframes and not self.h3:
             raise ValueError("keyframes (image-to-video training) are for MiniMax H3's fl2va model")
-        self.dataset = data.build(s.dataset, _Lazy(lambda: self.models.clip), self.models.vae, root, cache, encoder_id,
-                                  progress=lambda i, n, msg: self._status("loading", message=f"{msg} ({i}/{n})"),
+        self.dataset = data.build(self._data_spec(s.dataset), _Lazy(lambda: self.models.clip), self.models.vae, root, cache,
+                                  encoder_id, progress=lambda i, n, msg: self._status("loading", message=f"{msg} ({i}/{n})"),
                                   audio_vae=self.models.audio_vae, h3=self.h3)
+        if s.slider.kind == "pairs":
+            self._keep_pairs(self.dataset)
+        if s.slider.kind == "text":  # its prompts, encoded while the text encoder is here (and cached like captions)
+            self._slider_text = self._encode_texts(self._slider_prompts())
+            self._slider_conds: dict = {}
         self.edit_method = None
         self.concat_inputs = 0  # channel inputs: how many input latents ride beside the noisy one
         if s.dataset.edit and s.dataset.edit_method == "concat":
@@ -475,9 +480,11 @@ class Trainer:
         self._stages = []
         for st in s.dataset.stages:
             res = int(st["resolution"])
-            ds = data.build(replace(s.dataset, resolution=res, stages=[]), _Lazy(lambda: self.models.clip), self.models.vae,
-                            root, cache, encoder_id, audio_vae=self.models.audio_vae, h3=self.h3,
+            ds = data.build(self._data_spec(replace(s.dataset, resolution=res, stages=[])), _Lazy(lambda: self.models.clip),
+                            self.models.vae, root, cache, encoder_id, audio_vae=self.models.audio_vae, h3=self.h3,
                             progress=lambda i, n, msg, r=res: self._status("loading", message=f"{msg} at {r} px ({i}/{n})"))
+            if s.slider.kind == "pairs":
+                self._keep_pairs(ds)
             self._stages.append((float(st["until"]), res, ds, data.Batches(ds, s.optim.batch_size, s.seed + res)))
         self._final_stage = (s.dataset.resolution, self.dataset, self.batches)
         self._res_seen = 0
@@ -543,7 +550,8 @@ class Trainer:
                          s.network.base_lora, s.network.base_strength, len(base))
         self.network = Network(patcher, s.network, self.device, bypass=bypass, init_weights=init, assist=assist,
                                preview=preview, preview_strength=s.samples.turbo_strength,
-                               base=base, base_strength=s.network.base_strength, wide_inputs=self.concat_inputs)
+                               base=base, base_strength=s.network.base_strength, wide_inputs=self.concat_inputs,
+                               scalable=bool(s.slider.kind))
         self.optimizer, self.scheduler = optim.build(
             self.network.param_groups(s.optim.learning_rate, s.optim.lora_plus), s.optim)
         from .ema import EMA
@@ -983,6 +991,14 @@ class Trainer:
             sigma = sigmas_for(ms, percents, self._shift, self._schedule).to(self.device)
             x_t = self.objective.noisy(ms, sigma, noise, x0)
             lap("data")
+            if s.slider.kind == "pairs":  # each picture at its own end, from the same noise
+                total_loss += self._pair_loss(idx, x0, conds, weight, noise, sigma, x_t, percents, acc)
+                lap("backward")
+                continue
+            if s.slider.kind:  # its own losses and backward passes (one per direction)
+                total_loss += self._slider_loss(x0, shapes, x_t, sigma, acc)
+                lap("backward")
+                continue
 
             # the input needs grad only for ComfyUI's per-layer offload checkpoint (see memory.py);
             # otherwise it stays grad-free so the backward ends at the first trained layer
@@ -1019,6 +1035,114 @@ class Trainer:
         # the step's one wait for the GPU: its loss, grad norm and noise chart, read together
         loss_sum, grad_norm = self.objective.settle(total_loss, torch.as_tensor(norm))
         self.last_loss, self.last_grad_norm = loss_sum / acc, grad_norm
+
+    # ---- sliders (harness/slider.py) ----------------------------------------------------------------
+
+    def _data_spec(self, ds):
+        """The dataset as data.build should make it: for an image slider, each picture's partner
+        (slider.pair_set) encoded beside it at its own size, as channel inputs are (pixel for pixel),
+        though the run itself isn't an edit run."""
+        sl = self.spec.slider
+        if sl.kind != "pairs":
+            return ds
+        from dataclasses import replace
+
+        return replace(ds, edit=True, edit_method="concat", control_sets=[sl.pair_set], edit_grounded=False)
+
+    def _keep_pairs(self, ds) -> None:
+        """An image slider trains on pairs only: pictures without a partner leave the batches."""
+        paired = [sm.has_refs if isinstance(sm, data.DiskSample) else bool(sm.refs and sm.refs[0] is not None)
+                  for sm in ds.samples]
+        if not any(paired):
+            raise ValueError(f"no picture in {self.spec.dataset.folder} has a partner in _controls/{self.spec.slider.pair_set}/ "
+                             "(same file names): an image slider trains on pairs")
+        alone = len(paired) - sum(paired)
+        if alone:
+            logging.warning("[ZenTrainer] image slider: %d of %d pictures have no partner in _controls/%s/ and are left out",
+                            alone, len(paired), self.spec.slider.pair_set)
+        ds.buckets = {k: kept for k, v in ds.buckets.items() if (kept := [i for i in v if paired[i]])}
+
+    def _pair_loss(self, idx, x0, conds, weight, noise, sigma, x_t, percents, acc: int) -> torch.Tensor:
+        """An image slider's micro-batch: the dataset's pictures and their partners from the same
+        noise at the same noise level, the LoRA at +1 towards one end and -1 towards the other, each
+        the objective's own loss (a backward each, inside its strength). Returns the loss, detached,
+        averaged over the two."""
+        if self.streams.multi:
+            raise ValueError("image sliders are for still-image models for now (this one trains several streams)")
+        model = self.models.patcher.model
+        partner = torch.stack([self.dataset.samples[i].refs[0] for i in idx]).to(self.device, torch.float32)
+        x0_other = model.process_latent_in(partner)
+        x_other = self.objective.noisy(self.denoiser.model_sampling, sigma, noise, x0_other)
+        own = 1.0 if self.spec.slider.dataset_end == "positive" else -1.0
+        total = torch.zeros((), device=self.device)
+        for strength, xt, target in ((own, x_t, x0), (-own, x_other, x0_other)):
+            with self.network.at_strength(strength):
+                with torch.autocast(self.device.type, dtype=self.train_dtype, enabled=self.train_dtype != torch.float32):
+                    pred = self.denoiser(xt.requires_grad_(getattr(self, "_input_grad", True)), sigma, conds, None)
+                loss = self.objective.train_loss(xt.detach(), target, pred, sigma, weight, percents).mean()
+                scaled = loss / (acc * 2)
+                (self.scaler.scale(scaled) if self.scaler else scaled).backward()
+            total += loss.detach().float() / 2
+        return total
+
+    def _slider_prompts(self) -> dict[str, str]:
+        sl = self.spec.slider
+        out = {"positive": sl.positive, "neutral": sl.neutral, "negative": sl.negative}
+        out.update({f"anchor{k}": a for k, a in enumerate(a for a in sl.anchors if a.strip())})
+        return out
+
+    def _encode_texts(self, prompts: dict[str, str]) -> dict:
+        """Prompts' text encodings, through the captions' text cache."""
+        texts = data.TextCache(self.cache_dir, self.encoder_id)
+        out = {}
+        with torch.no_grad():
+            for name, text in prompts.items():
+                cond = texts.get(text)
+                if cond is None:
+                    clip = self.models.clip
+                    cond = data._to_cpu(clip.encode_from_tokens_scheduled(clip.tokenize(text)))
+                    texts.put(text, cond)
+                out[name] = cond
+        return out
+
+    def _slider_cond(self, name: str, x0: torch.Tensor, shapes) -> dict:
+        key = (name, tuple(x0.shape[1:]))
+        if key not in self._slider_conds:
+            with torch.no_grad():
+                self._slider_conds[key] = self.denoiser.prepare(self._slider_text[name], x0[:1], self.device, shapes)
+        return self._slider_conds[key]
+
+    def _slider_loss(self, x0: torch.Tensor, shapes, x_t: torch.Tensor, sigma: torch.Tensor, acc: int) -> torch.Tensor:
+        """A text slider's micro-batch: the base model's predictions (strength 0, no grad) make the
+        targets; then the LoRA trains at +1 (and -1) on the neutral prompt, a backward each, inside
+        its strength (gradient checkpointing recomputes the forward during the backward). Returns
+        the loss, detached, averaged over the directions."""
+        from . import slider
+
+        sl, n = self.spec.slider, x0.shape[0]
+        autocast = lambda: torch.autocast(self.device.type, dtype=self.train_dtype,  # noqa: E731
+                                          enabled=self.train_dtype != torch.float32)
+        cond = {k: [self._slider_cond(k, x0, shapes)] * n for k in self._slider_text}
+        anchors = [k for k in cond if k.startswith("anchor")]
+        with torch.no_grad(), self.network.at_strength(0.0), autocast():
+            base = {k: self.denoiser(x_t, sigma, cond[k], None).float() for k in cond}
+        plus, minus = slider.text_targets(self.spec.objective.target, x_t, sigma, base["positive"], base["neutral"],
+                                          base["negative"], sl.guidance)
+        directions = [(1.0, plus), (-1.0, minus)] if sl.directions == "both" else [(1.0, plus)]
+        total = torch.zeros((), device=self.device)
+        for strength, target in directions:
+            with self.network.at_strength(strength):
+                with autocast():
+                    pred = self.denoiser(x_t.requires_grad_(getattr(self, "_input_grad", True)), sigma, cond["neutral"], None)
+                loss = self.objective.loss(x_t.detach(), target, pred, sigma).mean()
+                for a in anchors:  # what the slider should leave alone, at either end
+                    with autocast():
+                        held = self.denoiser(x_t, sigma, cond[a], None)
+                    loss = loss + sl.anchor_weight * self.objective.loss(x_t.detach(), base[a], held, sigma).mean() / len(anchors)
+                scaled = loss / (acc * len(directions))
+                (self.scaler.scale(scaled) if self.scaler else scaled).backward()
+            total += loss.detach().float() / len(directions)
+        return total
 
     def _tread(self, idx: list[int]) -> dict | None:
         """TREAD's block replacements for this step: only on a video clip, only for models whose
@@ -1071,7 +1195,8 @@ class Trainer:
         picture, so those are kept per sample. `keep`: which channel inputs this step keeps (None:
         all)."""
         sample = self.dataset.samples[i]
-        own = sample.refs or sample.cond is not None or self.concat_inputs
+        pairs = self.spec.slider.kind == "pairs"  # an image slider's partner is the other end, not an input
+        own = (sample.refs and not pairs) or sample.cond is not None or self.concat_inputs
         key = (cap, tuple(sample.latent.shape), i if own else None, keep)
         # a disk dataset's pairs (thousands, each its own): made each step, never all kept on the GPU
         passing = own and isinstance(sample, data.DiskSample)
@@ -1084,7 +1209,7 @@ class Trainer:
                 from .data.edit import with_concat
 
                 cond = with_concat(cond, self._concat(sample, keep))
-            elif sample.refs:
+            elif sample.refs and not pairs:
                 from .data.edit import with_refs
 
                 cond = with_refs(cond, sample.refs, self.edit_method)

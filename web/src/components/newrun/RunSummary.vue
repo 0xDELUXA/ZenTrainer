@@ -13,14 +13,17 @@ const submitting = ref(false)
 
 const warnings = computed(() => {
   const w: string[] = []
-  if (!spec.dataset.trigger) w.push('No trigger word: the likeness has nothing specific to attach to.')
+  const slider = !!spec.slider?.kind
+  if (spec.slider?.kind === 'text' && !(spec.slider.positive.trim() && spec.slider.negative.trim())) w.push('A slider needs both ends: Positive and Negative.')
+  if (spec.slider?.kind === 'pairs' && !spec.slider.pair_set) w.push("An image slider needs its pairs: pick the other end's picture set.")
+  if (!slider && !spec.dataset.trigger) w.push('No trigger word: the likeness has nothing specific to attach to.')
   const masked = dataset.value?.masked ?? 0
   if (masked && !spec.dataset.masked_loss)
     w.push(`${masked} picture${masked === 1 ? ' has a mask' : 's have masks'}, but Masked training is off: the parts the masks leave out train too.`)
   if (!spec.samples.prompts.length) w.push('No sample prompts: you will only see the loss curves.')
   else if (!spec.samples.every) w.push('Samples are off (Every 0): only Sample now renders them, so checkpoints get no samples or likeness. Set Every to the save interval.')
   else if (spec.save_every && spec.save_every % spec.samples.every) w.push(`Samples every ${spec.samples.every} don't land on the saves every ${spec.save_every}: checkpoints get no samples or likeness to compare.`)
-  else if (spec.dataset.trigger && !spec.samples.prompts.map(promptText).some((p) => p.includes('[trigger]') || p.includes(spec.dataset.trigger)))
+  else if (!slider && spec.dataset.trigger && !spec.samples.prompts.map(promptText).some((p) => p.includes('[trigger]') || p.includes(spec.dataset.trigger)))
     w.push("Sample prompts don't use [trigger].")
   if (opt.value?.id === 'Prodigy' && spec.optim.learning_rate < 0.5) w.push('Prodigy sets its own step size: use LR 1.0.')
   if (opt.value && opt.value.id !== 'Prodigy' && spec.optim.learning_rate >= 0.01) w.push('That LR is very high for this optimizer.')
@@ -78,7 +81,9 @@ async function start(position: 'next' | 'end' = 'next') {
   <dt>Model</dt><dd class="ellipsis" :title="modelLabel ?? ''">{{ modelLabel || '–' }}</dd>
   <dt>Dataset</dt><dd>{{ spec.dataset.folder || '–' }}<span v-if="dataset" class="muted"> · {{ dataset.images }} imgs</span></dd>
   <dt>Captions</dt><dd>{{ spec.dataset.caption_mix.length ? spec.dataset.caption_mix.join(' + ') : spec.dataset.caption_set }}</dd>
-  <dt>Trigger</dt><dd>{{ spec.dataset.trigger || '–' }}</dd>
+  <template v-if="spec.slider?.kind === 'text'"><dt>Slider</dt><dd class="ellipsis" :title="`${spec.slider.negative} ⟷ ${spec.slider.positive}`">{{ spec.slider.negative || '…' }} ⟷ {{ spec.slider.positive || '…' }}</dd></template>
+  <template v-else-if="spec.slider?.kind === 'pairs'"><dt>Slider</dt><dd>image pairs<span v-if="spec.slider.pair_set" class="muted"> · {{ spec.slider.pair_set }}</span></dd></template>
+  <template v-else><dt>Trigger</dt><dd>{{ spec.dataset.trigger || '–' }}</dd></template>
   <dt>Steps</dt><dd class="mono">{{ spec.optim.steps }}<span v-if="epochs != null" class="muted"> · {{ epochs.toFixed(1) }} ep</span></dd>
   <dt>Optimizer</dt><dd>{{ opt?.label ?? spec.optim.optimizer }} <span class="mono muted">{{ spec.optim.learning_rate }}</span></dd>
   <dt>Network</dt><dd class="mono">{{ spec.network.algorithm }} r{{ spec.network.rank }}</dd>

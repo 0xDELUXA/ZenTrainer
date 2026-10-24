@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 1 Model: the family picker, its hand-picked recipe (applied when the family is picked, re-appliable
 // after edits), and the file-by-file pick for a custom model.
-import { ZenCombo, ZenField } from '@nynxz/zenkit-ui'
+import { ZenCombo, ZenField, ZenMenuItem, ZenPopover } from '@nynxz/zenkit-ui'
 import { computed, ref } from 'vue'
 import type { ModelProfile } from '@/api/engine'
 import FamilyPicker from '@/components/FamilyPicker.vue'
@@ -35,7 +35,26 @@ const profileOpen = ref(false)
 
 <template>
 <section class="card sec" :class="{ locked: resuming }">
-  <h2><span class="num">1</span> Model</h2>
+  <div class="head-row">
+    <h2><span class="num">1</span> Model</h2>
+    <span class="grow" />
+    <!-- extras a run can add (a slider for now), so they don't sit in the form when unused -->
+    <ZenPopover v-if="!resuming" placement="bottom-end">
+      <template #trigger="{ toggle }">
+        <button class="add small" title="Add something to this run" @click="toggle"><i class="mdi mdi-plus" /> Add</button>
+      </template>
+      <template #default="{ close }">
+        <ZenMenuItem icon="mdi mdi-image-multiple-outline" :disabled="spec.slider.kind === 'pairs'" @select="spec.slider.kind = 'pairs'; close()">
+          Slider from image pairs
+          <template #hint>photo pairs that differ in one thing</template>
+        </ZenMenuItem>
+        <ZenMenuItem icon="mdi mdi-text-short" :disabled="spec.slider.kind === 'text'" @select="spec.slider.kind = 'text'; close()">
+          Slider from prompts
+          <template #hint>two prompts, no pairs needed</template>
+        </ZenMenuItem>
+      </template>
+    </ZenPopover>
+  </div>
   <FamilyPicker
     v-model="spec.model"
     @missing="modelMissing = $event"
@@ -98,6 +117,29 @@ const profileOpen = ref(false)
 
 <style scoped src="./form.css"></style>
 <style scoped>
+.head-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.head-row h2 {
+  margin: 0;
+}
+.head-row .grow {
+  flex: 1;
+}
+.add {
+  background: none;
+  border: 1px dashed var(--zen-border);
+  border-radius: var(--zen-radius);
+  color: var(--zen-muted);
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.add:hover {
+  color: var(--zen-accent);
+  border-color: var(--zen-accent);
+}
 .custom-model {
   display: flex;
   flex-direction: column;
