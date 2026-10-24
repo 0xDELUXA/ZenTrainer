@@ -1,0 +1,53 @@
+name: web-dist
+
+# The built app for git clones without Node: every push to main that changes web/ builds it and
+# replaces the web-dist branch with one commit holding the build, plus SOURCE naming the last
+# commit that changed web/ (scripts/zt's ensure_web fetches it when it matches the checkout).
+on:
+  push:
+    branches: [main]
+    paths: ['web/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: web-dist
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Build the app
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+          test -f dist/index.html
+
+      - name: Replace the web-dist branch with this build
+        run: |
+          source=$(git log -1 --format=%H -- web)
+          out=$(mktemp -d)
+          cp -r web/dist/. "$out"
+          echo "$source" > "$out/SOURCE"
+          cd "$out"
+          git init -q -b web-dist
+          git add -A
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "web/dist built from $source"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" HEAD:refs/heads/web-dist
