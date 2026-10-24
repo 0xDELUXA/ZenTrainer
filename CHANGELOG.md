@@ -11,6 +11,10 @@ and Manager show.
   used. Custom sigmas, high to low, in place of a scheduler: for tries and for the run's samples
   (Samples → Scheduler → Custom sigmas).
 - The Manual tab no longer has a gap beside it; its rendering dot sits on its corner.
+- **Fixed: a resumed run's loss chart** drew its second half over its first on the time axis (each
+  session's clock starts at 0), with lines back to the start; and a resume from an earlier
+  checkpoint drew the abandoned stretch and its redo on top of each other. The chart now shows one
+  history: time carries on across resumes, and redone steps replace the abandoned ones.
 - **Lighter run page:** the noise chart starts folded (it remembers being opened), and its dots are
   drawn on a canvas instead of a page element each, so moving the mouse over it or a step landing
   doesn't rebuild hundreds of them.

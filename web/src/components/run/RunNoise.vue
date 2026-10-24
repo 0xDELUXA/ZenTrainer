@@ -4,6 +4,7 @@
 // dot and their average per stretch: which noise levels the LoRA finds hard, and whether the
 // timesteps went where they were meant to. Flow models (σ 0..1) only; older runs logged nothing.
 import { computed, ref, watch } from 'vue'
+import { resumed } from '@/lib/resumed'
 import { setSetting, settings } from '@/stores/settings'
 import { engine, type NoiseProfile } from '@/api/engine'
 import NoiseChart, { type NoiseSeries } from '@/components/NoiseChart.vue'
@@ -13,7 +14,7 @@ import { useRunContext } from './context'
 const { detail } = useRunContext()
 
 const points = computed((): [number, number][] =>
-  (detail.value?.metrics ?? []).flatMap((r) => (r.drawn ?? []).map(([, s, l]) => [s, l] as [number, number])),
+  resumed(detail.value?.metrics ?? []).flatMap((r) => (r.drawn ?? []).map(([, s, l]) => [s, l] as [number, number])), // an abandoned stretch's samples left out
 )
 const flow = computed(() => points.value.length > 0 && points.value.every(([s]) => s <= 1.0001))
 

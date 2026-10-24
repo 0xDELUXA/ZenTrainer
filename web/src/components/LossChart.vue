@@ -9,6 +9,7 @@
 // it) is in the tooltip, and a line of its own when switched on; resolution stages are marked on
 // the x axis, where the speed changes. Each legend key shows or hides its line; the x axis is
 // steps or the run's time.
+import { resumed } from '@/lib/resumed'
 import { computed, ref, watch } from 'vue'
 import type { MetricRow, ValidationRow } from '@/api/engine'
 
@@ -60,7 +61,8 @@ const W = 720
 const H = computed(() => props.height)
 const pad = computed(() => ({ l: 44, r: lrShown.value && shows('lr') ? 46 : 12, t: 10, b: 24 }))
 
-const points = computed(() => props.rows.filter((r) => r.loss != null) as (MetricRow & { loss: number })[])
+// one continuous history across resumes (lib/resumed.ts), then the steps with a loss
+const points = computed(() => resumed(props.rows).filter((r) => r.loss != null) as (MetricRow & { loss: number })[])
 
 const ema = computed(() => {
   const out: number[] = []
