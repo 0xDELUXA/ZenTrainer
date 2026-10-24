@@ -110,14 +110,19 @@ class _Pinned:
 
 
 class _BiasDiff(torch.nn.Module):
-    """Additive delta for 1-D weights (norms) and biases."""
+    """Additive delta for 1-D weights (norms) and biases; scaled by the switch's strength when it
+    has one (a scalable network)."""
 
-    def __init__(self, shape, dtype):
+    def __init__(self, shape, dtype, switch=None):
         super().__init__()
         self.diff = torch.nn.Parameter(torch.zeros(shape, dtype=dtype))
+        self.switch = switch
 
     def forward(self, b):
-        return (b.to(self.diff) + self.diff).to(b.dtype)
+        st = self.switch.strength if self.switch is not None else 1.0
+        if st == 0.0:
+            return b
+        return (b.to(self.diff) + (self.diff if st == 1.0 else st * self.diff)).to(b.dtype)
 
     __call__ = forward
 
@@ -149,7 +154,10 @@ class _Assisted(torch.nn.Module):
             w = self.assist(w)
         elif not self.switch.on and self.preview is not None:
             w = w + self.preview_strength * (self.preview(w) - w)
-        return self.trained(w) if self.trained is not None else w
+        st = self.switch.strength
+        if self.trained is None or st == 0.0:
+            return w
+        return self.trained(w) if st == 1.0 else w + st * (self.trained(w) - w)
 
     def _share(self) -> None:  # bypass sets layer info on the adapter it holds: pass it on
         for child in (self.trained, self.assist, self.preview, self.base):
@@ -160,7 +168,12 @@ class _Assisted(torch.nn.Module):
 
     def h(self, x, base_out):
         self._share()
-        out = self.trained.h(x, base_out) if self.trained is not None else 0
+        st = self.switch.strength
+        out = 0
+        if self.trained is not None and st != 0.0:
+            out = self.trained.h(x, base_out)
+            if st != 1.0:
+                out = st * out
         if self.base is not None:
             out = out + self.base_strength * self.base.h(x, base_out)
         if self.switch.on and self.assist is not None:
@@ -174,7 +187,12 @@ class _Assisted(torch.nn.Module):
 
 
 class _Switch:
+    """Shared by every layer of a network: `on` = training (assist adapters on, previews off);
+    `strength` = how much of the trained adapter applies (a slider trains at +1 and -1, and its
+    teacher pass is the base model at 0). Only layers wrapped in _Assisted see it."""
+
     on = True
+    strength = 1.0
 
 
 class _Sliced(torch.nn.Module):
@@ -294,7 +312,9 @@ class Network:
     def __init__(self, patcher, spec: NetworkSpec, device: torch.device, *, bypass: bool = False,
                  init_weights: dict | None = None, assist: dict | None = None,
                  preview: dict | None = None, preview_strength: float = 1.0,
-                 base: dict | None = None, base_strength: float = 1.0, wide_inputs: int = 0):
+                 base: dict | None = None, base_strength: float = 1.0, wide_inputs: int = 0, scalable: bool = False):
+        """`scalable`: every layer goes through _Assisted, so `strength` reaches the whole trained
+        adapter (sliders); otherwise only layers with an assist, preview or base adapter are wrapped."""
         from comfy.weight_adapter import BypassInjectionManager, adapter_maps, adapters
 
         self.spec = spec
@@ -310,6 +330,7 @@ class Network:
         self.assisted = len(assist)
         self.previewed = len(preview)
         self._switch = _Switch()
+        self.scalable = scalable
 
         alpha = float(spec.alpha if spec.alpha is not None else spec.rank)
 
@@ -338,7 +359,7 @@ class Network:
                 self._own(name, adapter)
                 frozen, fast, under = assist.pop(key, None), preview.pop(key, None), base.pop(key, None)
                 attached = (_Assisted(adapter, frozen, self._switch, fast, preview_strength, under, base_strength)
-                            if frozen is not None or fast is not None or under is not None else adapter)
+                            if scalable or frozen is not None or fast is not None or under is not None else adapter)
                 if self._bypass is not None:
                     self._bypass.add_adapter(key, attached, strength=1.0)
                 else:
@@ -396,7 +417,7 @@ class Network:
             self.params[f"{name}.{pname}"] = p
 
     def _own_delta(self, patcher, key: str, param_name: str, shape, device) -> None:
-        mod = _BiasDiff(shape, self.dtype).to(device).train()
+        mod = _BiasDiff(shape, self.dtype, self._switch if self.scalable else None).to(device).train()
         self.modules.append(mod)
         self.params[param_name] = mod.diff
         patcher.add_weight_wrapper(key, _Pinned(mod))
@@ -421,6 +442,25 @@ class Network:
     @assist.setter
     def assist(self, on: bool) -> None:
         self._switch.on = on
+
+    @property
+    def strength(self) -> float:
+        """How much of the trained adapter applies (scalable networks): 1 as trained, 0 the base
+        model, -1 the opposite direction."""
+        return self._switch.strength
+
+    @strength.setter
+    def strength(self, s: float) -> None:
+        self._switch.strength = float(s)
+
+    @contextlib.contextmanager
+    def at_strength(self, s: float):
+        before = self._switch.strength
+        self._switch.strength = float(s)
+        try:
+            yield
+        finally:
+            self._switch.strength = before
 
     @contextlib.contextmanager
     def disabled(self):
