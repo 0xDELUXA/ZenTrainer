@@ -119,7 +119,14 @@ const jobs = ref<CaptionJob[]>([])
 const error = ref<string | null>(null)
 const PREFS = 'zentrainer.caption'
 // length: '' = the style's own limit, 0 = no limit; vary: sample with a new seed each run (re-rolls)
-const form = reactive({ clip_name: '', style: 'nl', prompt: '', format: 'text' as CaptionFormat, set: 'nl', mode: 'missing' as CaptionMode, length: '' as '' | number, vary: false })
+// advanced: a fixed seed (null: none), sampling settings and a custom length, for when the defaults
+// don't suit a model (one that loops until it's cut off wants a repetition penalty)
+const form = reactive({
+  clip_name: '', style: 'nl', prompt: '', format: 'text' as CaptionFormat, set: 'nl', mode: 'missing' as CaptionMode, length: '' as '' | number, vary: false,
+  advanced: false, fixedSeed: null as number | null, temperature: 0.7, top_p: 0.95, top_k: 50, repetition_penalty: 1.0, customLength: null as number | null,
+})
+/** Whether this run samples (so temperature, top-p and top-k apply): Vary, or a fixed seed. */
+const sampled = computed(() => form.vary || (form.advanced && form.fixedSeed != null))
 const LENGTHS: { v: '' | number; label: string; tip: string }[] = [
   { v: '', label: 'Style', tip: "The style's own limit (300 tokens for prose, 2000 for structured JSON)" },
   { v: 600, label: '600', tip: 'Up to 600 tokens' },
@@ -292,8 +299,9 @@ function body(extra: Record<string, unknown> = {}) {
     subject: subject.value.trim() || undefined,
     loras: loras.value.filter((l) => l.name),
     ...(editable.value ? { prompt: form.prompt, format: form.format } : { style: form.style }),
-    ...(form.length !== '' ? { max_length: form.length } : {}),
-    ...(form.vary ? { seed: seed() } : {}),
+    ...(form.advanced && form.customLength ? { max_length: form.customLength } : form.length !== '' ? { max_length: form.length } : {}),
+    ...(form.advanced && form.fixedSeed != null ? { seed: form.fixedSeed } : form.vary ? { seed: seed() } : {}),
+    ...(form.advanced ? { temperature: form.temperature, top_p: form.top_p, top_k: form.top_k, repetition_penalty: form.repetition_penalty } : {}),
     ...extra,
   }
 }
@@ -515,6 +523,40 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
           <button :class="{ on: form.vary }" title="Sampled with a new seed each run, so captioning an image again words it differently (re-roll a caption: select it, caption Selected)" @click="form.vary = true">Vary</button>
         </div>
       </div>
+      <button class="mini adv-toggle" :class="{ on: form.advanced }" title="Seed, sampling and length settings" @click="form.advanced = !form.advanced">
+        <i :class="form.advanced ? 'mdi mdi-chevron-up' : 'mdi mdi-tune-variant'" /> Advanced
+      </button>
+    </div>
+
+    <div v-if="form.advanced" class="row adv">
+      <div class="f"><span class="eyebrow">Seed</span>
+        <div class="seed-row">
+          <ZenNumber :model-value="form.fixedSeed ?? 0" :min="0" :max="2147483647" :step="1" :precision="0" size="sm" title="Sample with this seed: the same seed gives the same caption again, another seed another wording" @update:model-value="form.fixedSeed = $event" />
+          <button class="mini" title="A new random seed" @click="form.fixedSeed = seed()"><i class="mdi mdi-dice-5-outline" /></button>
+          <button class="mini" :disabled="form.fixedSeed == null" title="No fixed seed: Wording decides (the same each run, or a new seed each run)" @click="form.fixedSeed = null"><i class="mdi mdi-close" /></button>
+        </div>
+        <span class="small muted">{{ form.fixedSeed == null ? (form.vary ? 'a new one each run' : 'none: the most likely caption') : 'fixed: repeatable' }}</span>
+      </div>
+      <label class="f" :class="{ off: !sampled }" :title="sampled ? 'Lower: more literal and predictable. Higher: more varied' : 'Only when sampling (Vary, or a fixed seed)'">
+        <span class="eyebrow">Temperature</span>
+        <ZenNumber v-model="form.temperature" :min="0.05" :max="2" :step="0.05" :precision="2" size="sm" :disabled="!sampled" />
+      </label>
+      <label class="f" :class="{ off: !sampled }" :title="sampled ? 'Sample only from the likeliest words that make up this share of the odds' : 'Only when sampling (Vary, or a fixed seed)'">
+        <span class="eyebrow">Top-p</span>
+        <ZenNumber v-model="form.top_p" :min="0.05" :max="1" :step="0.05" :precision="2" size="sm" :disabled="!sampled" />
+      </label>
+      <label class="f" :class="{ off: !sampled }" :title="sampled ? 'Sample only from this many of the likeliest words (0: no limit)' : 'Only when sampling (Vary, or a fixed seed)'">
+        <span class="eyebrow">Top-k</span>
+        <ZenNumber v-model="form.top_k" :min="0" :max="500" :step="5" :precision="0" size="sm" :disabled="!sampled" />
+      </label>
+      <label class="f" title="Above 1 discourages repeating words. For a model that loops (and a red scarf, and a red scarf…) until it's cut off: try 1.05–1.15">
+        <span class="eyebrow">Repetition penalty</span>
+        <ZenNumber v-model="form.repetition_penalty" :min="1" :max="2" :step="0.01" :precision="2" size="sm" />
+      </label>
+      <label class="f" title="Tokens a caption may take, instead of the Length choice (up to 4096; empty: use Length)">
+        <span class="eyebrow">Max tokens</span>
+        <ZenNumber :model-value="form.customLength ?? 0" :min="0" :max="4096" :step="50" :precision="0" size="sm" @update:model-value="form.customLength = $event || null" />
+      </label>
     </div>
 
     <div class="foot">
@@ -587,6 +629,25 @@ const thumb = (path: string) => thumbUrl(props.dataset, path, 256)
 </template>
 
 <style scoped>
+.adv-toggle {
+  align-self: flex-end;
+  margin-left: auto;
+  white-space: nowrap;
+}
+.adv-toggle.on {
+  color: var(--zen-selected, var(--zen-accent));
+}
+.adv {
+  flex-wrap: wrap;
+}
+.adv .f.off {
+  opacity: 0.5;
+}
+.seed-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
 .style-row {
   display: flex;
   gap: 6px;

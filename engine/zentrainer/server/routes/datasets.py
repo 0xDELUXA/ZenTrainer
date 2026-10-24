@@ -214,10 +214,20 @@ def register(server) -> None:
                                max_length=_length(length) if length is not None else (style.max_length if not b.get("prompt")
                                                                                        else 2000 if fmt == "fibo_json" else 300),
                                seed=int(b["seed"]) if b.get("seed") is not None else None,
+                               **_sampling(b),
                                format=fmt,
                                loras=[{"name": str(lo.get("name")), "strength": float(lo.get("strength", 1.0))}
                                       for lo in (b.get("loras") or []) if lo.get("name")])
         return await _submit_caption(job, f"caption {name}", b.get("client_id"))
+
+    def _sampling(b: dict) -> dict:
+        """A caption request's sampling settings, clamped to what makes sense (unset: the job's defaults)."""
+        out = {}
+        for key, cast, lo, hi in (("temperature", float, 0.05, 2.0), ("top_p", float, 0.05, 1.0), ("top_k", int, 0, 500),
+                                  ("repetition_penalty", float, 1.0, 2.0)):
+            if b.get(key) is not None:
+                out[key] = min(max(cast(b[key]), lo), hi)
+        return out
 
     def _length(v) -> int:
         """A caption's token limit from a request: 0 (no limit) or 16 to captioner.NO_LIMIT."""
@@ -264,7 +274,7 @@ def register(server) -> None:
         job = captioner.create(dataset="", set_name="", clip_name=str(b["clip_name"]), clip_type=str(b.get("clip_type") or "auto"),
                                prompt=str(b.get("prompt") or ""), preview=len(prompts), rewrite=prompts, format=fmt,
                                max_length=_length(b["max_length"]) if b.get("max_length") is not None else (2000 if fmt == "fibo_json" else 400),
-                               seed=int(b["seed"]) if b.get("seed") is not None else None)
+                               seed=int(b["seed"]) if b.get("seed") is not None else None, **_sampling(b))
         return await _submit_caption(job, "rewrite prompts", b.get("client_id"))
 
     @routes.post("/zentrainer/api/datasets/{name}/segment")

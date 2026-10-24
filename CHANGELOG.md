@@ -29,7 +29,9 @@ and Manager show.
 - **Caption length, cut-offs and re-rolls:** a Length choice when captioning (the style's own, 600,
   1200, or no limit); captions that ran out of room are flagged, listed on the job ("N cut off",
   to review them or re-caption them with no limit), and marked in the try-on; and Wording: Vary
-  samples each run with a new seed, so captioning an image again words it differently.
+  samples each run with a new seed, so captioning an image again words it differently. Advanced
+  adds a fixed seed (repeatable re-rolls), temperature, top-p, top-k, a repetition penalty (for a
+  model that loops until it's cut off) and a custom length; a job's log says what it used.
 - **Dataset analysis** (Health → Full analysis): the pictures worth a look, grouped by issue; how
   training buckets and crops them at a resolution you pick, with every crop shown; which phrases
   most captions repeat (things the LoRA will lean towards); the spread of brightness, contrast,

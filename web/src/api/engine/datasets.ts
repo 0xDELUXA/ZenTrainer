@@ -201,6 +201,12 @@ export interface CaptionRequest {
   max_length?: number
   /** set: sampled with this seed, so another seed words it differently; unset: the same answer every time */
   seed?: number
+  /** sampling (with a seed) */
+  temperature?: number
+  top_p?: number
+  top_k?: number
+  /** > 1 discourages repeats (with or without sampling) */
+  repetition_penalty?: number
 }
 
 /** "text": the answer as written; "fibo_json": a Fibo 2.0 structured caption, checked and compact */

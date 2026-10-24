@@ -74,6 +74,13 @@ class CaptionJob:
     # None: the model's single most likely answer (the same every time). A number: sampled with
     # that seed, so another number words it differently (re-rolling a caption)
     seed: int | None = None
+    # sampling (with a seed): ComfyUI's generate defaults, but a cooler temperature
+    temperature: float = 0.7
+    top_p: float = 0.95
+    top_k: int = 50
+    # > 1 discourages repeating tokens: a model looping ("and a red scarf, and a red scarf") runs
+    # until it's cut off. Applies with or without sampling
+    repetition_penalty: float = 1.0
     # LoRAs on the captioning model (abliterated / uncensored / prompt-style extractions):
     # [{"name": file in loras/, "strength": 1.0}]. Captioning only; training never uses them.
     loras: list = field(default_factory=list)
@@ -354,13 +361,14 @@ def _answer(clip, tokens, job: CaptionJob) -> tuple[str, bool]:
     structured caption that isn't valid JSON gets more tries (sampled, so they differ); ValueError
     when none is."""
     limit = job.max_length or NO_LIMIT
+    sampling = dict(temperature=job.temperature, top_p=job.top_p, top_k=job.top_k, repetition_penalty=job.repetition_penalty)
     if job.format != "fibo_json":
-        ids = clip.generate(tokens, do_sample=job.seed is not None, temperature=0.7, seed=job.seed or 0, max_length=limit)
+        ids = clip.generate(tokens, do_sample=job.seed is not None, seed=job.seed or 0, max_length=limit, **sampling)
         return clean(clip.decode(ids)), len(ids) >= limit
     err = None
     for i in range(JSON_TRIES):
-        ids = clip.generate(tokens, do_sample=i > 0 or job.seed is not None, temperature=0.7, seed=(job.seed or 0) + i,
-                            max_length=limit)
+        ids = clip.generate(tokens, do_sample=i > 0 or job.seed is not None, seed=(job.seed or 0) + i, max_length=limit,
+                            **sampling)
         try:
             return structured.compact(structured.parse(clean(clip.decode(ids)))), False
         except ValueError as e:
@@ -425,6 +433,10 @@ def run(job: CaptionJob) -> None:
         return
     log(job, f"started: {job.clip_name}, rewriting {len(job.rewrite)} prompts" if job.rewrite else
         f"started: {job.clip_name}, into “{job.set_name}”, {job.mode} images" + (f", try-on of {job.preview}" if job.preview else ""))
+    log(job, f"answers up to {job.max_length or f'{NO_LIMIT} (no limit)'} tokens, "
+        + (f"sampled: seed {job.seed}, temperature {job.temperature}, top-p {job.top_p}, top-k {job.top_k}" if job.seed is not None
+           else "the most likely answer (the same every run)")
+        + (f", repetition penalty {job.repetition_penalty}" if job.repetition_penalty != 1.0 else ""))
     update(job, status="running", message=f"loading {job.clip_name}")
     # ComfyUI's model compiler (CUDA graphs) breaks token-by-token generation: a device-side
     # assert on the second token that takes the whole server down. Off while captioning, as

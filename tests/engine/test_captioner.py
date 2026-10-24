@@ -145,3 +145,10 @@ def test_a_seed_samples_and_no_seed_is_the_same_every_time(ds):
     captioner._answer(clip, None, job(seed=7))
     assert clip.calls[0]["do_sample"] is False
     assert clip.calls[1]["do_sample"] is True and clip.calls[1]["seed"] == 7
+
+
+def test_sampling_settings_reach_the_model(ds):
+    clip = _Clip(10)
+    captioner._answer(clip, None, job(seed=3, temperature=1.1, top_p=0.8, top_k=20, repetition_penalty=1.1))
+    call = clip.calls[-1]
+    assert (call["temperature"], call["top_p"], call["top_k"], call["repetition_penalty"]) == (1.1, 0.8, 20, 1.1)
