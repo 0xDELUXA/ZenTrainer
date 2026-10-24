@@ -89,7 +89,8 @@ in its top bar (or open `/zentrainer/` on its port, e.g. http://127.0.0.1:8188/z
 models, `input/` and `output/`; it needs ComfyUI 0.41 or newer and says so if yours is older.
 Nothing extra to install: everything it needs ships with ComfyUI (optional optimizers:
 `pip install -r requirements-optional.txt`). A Registry/Manager install includes the built app; a
-git clone needs it once: `scripts/zt web` fetches the prebuilt one (or builds it, with pnpm).
+git clone fetches the prebuilt one the first time you open it (or `scripts/zt web`, which can also
+build it with pnpm).
 
 **Its own pinned ComfyUI, from a clone** (for keeping training separate, below): a
 dedicated ComfyUI at the tested commit with its own venv, reading your existing models in place.

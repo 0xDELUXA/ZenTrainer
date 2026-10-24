@@ -64,6 +64,10 @@ and Manager show.
   now loads as it is.
 
 ### Install and run
+- **A git clone into custom_nodes opens without building anything:** the first visit to
+  /zentrainer/ fetches the prebuilt web app for that version (with the clone's own git), and again
+  after a `git pull` that changed it. It said to run `pnpm build` before. A build of your own is
+  left alone.
 - **`zt` no longer says a port is in use just after a server stops.** Its check counted the
   stopped server's lingering connections (about a minute) as the port being taken, so
   `zt train --port` right after a restart refused a free port.
