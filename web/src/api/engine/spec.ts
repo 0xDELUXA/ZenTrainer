@@ -178,7 +178,7 @@ export interface TrainSpec {
     lora_dir: string | null
     keep_states: 'latest' | 'all' | 'none'
     save_dtype: 'bf16' | 'fp16' | 'fp32'
-    keep: 'all' | 'latest' | 'likeness' | 'val_loss'
+    keep: 'all' | 'latest' | 'likeness' | 'val_loss' | 'likeness_new_best' | 'val_loss_new_best'
     keep_count: number
   }
   /** a slider LoRA (engine harness/slider.py): its strength moves pictures from `negative` (-1)

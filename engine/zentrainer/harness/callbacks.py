@@ -394,7 +394,7 @@ class Samples(Callback):
         if liker:
             # it finishes what's queued, then stops; when likeness picks the checkpoints, the end
             # waits for the last scores (Keep ranks them next)
-            liker.close(wait=120 if t.spec.output.keep == "likeness" else 0)
+            liker.close(wait=120 if t.spec.output.keep.removesuffix("_new_best") == "likeness" else 0)
         self._liker = None
 
     def render(self, t: Trainer, manual: int | None = None, base: bool = False, stay: bool = False,
@@ -636,7 +636,8 @@ def _scores_saves(t, rule: str) -> bool:
     """A scheduled save this step whose score output.keep ranks it by: samples (likeness) or
     validation have to land on it too, whatever their own interval."""
     every = t.spec.save_every
-    return t.spec.output.keep == rule and bool(every) and t.step % every == 0 and t.step < t.spec.optim.steps
+    keep = t.spec.output.keep.removesuffix("_new_best")  # "likeness_new_best" scores saves as "likeness" does
+    return keep == rule and bool(every) and t.step % every == 0 and t.step < t.spec.optim.steps
 
 
 class Keep(Callback):

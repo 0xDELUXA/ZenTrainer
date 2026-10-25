@@ -1,5 +1,6 @@
-"""Which checkpoints a run keeps (output.keep): all of them, the latest few, or the best few by
-likeness or validation loss, scored the way the run page marks its best one.
+"""Which checkpoints a run keeps (output.keep): all of them, the latest few, the best few by
+likeness or validation loss (scored the way the run page marks its best one), or each new best:
+every save that beat all the saves before it, so the run's record-setters all stay.
 
 Only scheduled saves (save_every) are ever removed. The final LoRA, the newest checkpoint (what a
 resume continues from), and saves asked for by hand or made at a stop always stay, and so does a
@@ -45,14 +46,34 @@ def to_prune(checkpoints: list[dict], rule: str, count: int, validation: list[di
     if rule == "latest":
         ranked = sorted(scheduled, key=lambda c: -c["step"])
         return [(c, f"older than the {count} kept") for c in ranked[count:] if c["step"] != newest]
-    if rule not in ("val_loss", "likeness"):
+    metric = rule.removesuffix("_new_best")
+    if metric not in ("val_loss", "likeness"):
         raise ValueError(f"unknown output.keep {rule!r}")
-    low = rule == "val_loss"
+    low = metric == "val_loss"
     score = {c["step"]: val_at(validation, c["step"]) if low else likeness_at(likeness, c["step"]) for c in scheduled}
+    if rule.endswith("_new_best"):
+        return _not_new_bests(scheduled, score, low, newest)
     ranked = sorted((c for c in scheduled if score[c["step"]] is not None), key=lambda c: score[c["step"]],
                     reverse=not low)
     say = "validation loss {:.4f}; the {} lowest kept" if low else "likeness {:.2f}; the {} highest kept"
     return [(c, say.format(score[c["step"]], count)) for c in ranked[count:] if c["step"] != newest]
+
+
+def _not_new_bests(scheduled: list[dict], score: dict, low: bool, newest: int) -> list[tuple[dict, str]]:
+    """The saves that weren't a new best when they came: in step order, each that didn't beat every
+    save before it. Once a save is still unscored, nothing after it is judged: its score could still
+    make a later save not a new best."""
+    gone, best, best_step = [], None, None
+    for c in sorted(scheduled, key=lambda c: c["step"]):
+        s = score[c["step"]]
+        if s is None:
+            break
+        if best is None or (s < best if low else s > best):
+            best, best_step = s, c["step"]
+        elif c["step"] != newest:
+            what = f"validation loss {s:.4f}, not below {best:.4f}" if low else f"likeness {s:.2f}, not above {best:.2f}"
+            gone.append((c, f"{what} (step {best_step}): only each new best kept"))
+    return gone
 
 
 def remove(row: dict, run_id: str, states_dir: Path) -> int | None:

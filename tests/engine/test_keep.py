@@ -45,6 +45,28 @@ def test_likeness_ranks_highest_first_without_manual_tries_or_unscored():
     assert gone[0][1] == "likeness 0.60; the 2 highest kept"
 
 
+def test_new_best_keeps_every_save_that_beat_all_before_it():
+    saves = SAVES + [_ck(600)]
+    like = [{"step": s, "score": v} for s, v in ((100, 0.4), (200, 0.3), (300, 0.6), (400, 0.5), (500, 0.7), (600, 0.65))]
+    gone = keep.to_prune(saves, "likeness_new_best", 1, [], like)
+    # 100, 300 and 500 each beat all before them; 600 is the newest (a resume needs it)
+    assert [c["step"] for c, _ in gone] == [200, 400]
+    assert gone[1][1] == "likeness 0.50, not above 0.60 (step 300): only each new best kept"
+    # the newest goes once it isn't the newest and didn't beat 500
+    gone = keep.to_prune(saves + [_ck(700)], "likeness_new_best", 1, [], like + [{"step": 700, "score": 0.8}])
+    assert [c["step"] for c, _ in gone] == [200, 400, 600]
+
+
+def test_new_best_waits_for_an_unscored_save_before_judging_later_ones():
+    like = [{"step": 100, "score": 0.4}, {"step": 300, "score": 0.3}, {"step": 400, "score": 0.5}]  # 200 unscored yet
+    assert keep.to_prune(SAVES, "likeness_new_best", 1, [], like) == []
+
+
+def test_new_best_by_validation_keeps_each_new_lowest():
+    val = [{"step": s, "val_loss": v} for s, v in ((100, 0.5), (200, 0.4), (300, 0.45), (400, 0.3), (500, 0.35))]
+    assert [c["step"] for c, _ in keep.to_prune(SAVES + [_ck(600)], "val_loss_new_best", 1, val, [])] == [300, 500]
+
+
 def test_validation_at_a_checkpoint_is_the_latest_before_it():
     rows = [{"step": 0, "val_loss": 1.0}, {"step": 90, "val_loss": 0.5}, {"step": 150, "val_loss": 0.1}]
     assert keep.val_at(rows, 100) == 0.5
@@ -99,3 +121,7 @@ def test_spec_rules_need_their_scores():
     with pytest.raises(SpecError, match="keep_count"):
         TrainSpec.from_dict(_spec(output={"keep": "latest", "keep_count": 0}))
     TrainSpec.from_dict(_spec(output={"keep": "likeness"}, samples={"prompts": ["a photo of sks"]}))
+    with pytest.raises(SpecError, match="likeness"):
+        TrainSpec.from_dict(_spec(output={"keep": "likeness_new_best"}))
+    with pytest.raises(SpecError, match="validation"):
+        TrainSpec.from_dict(_spec(output={"keep": "val_loss_new_best"}, validation={"every": 0}))

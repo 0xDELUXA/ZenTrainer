@@ -39,6 +39,8 @@ const pruned = computed(() => [...(detail.value?.pruned ?? [])].sort((a, b) => b
 const keepLine = computed(() => {
   const o = detail.value?.spec.output
   if (!o || !o.keep || o.keep === 'all') return ''
+  if (o.keep === 'likeness_new_best') return 'Keeping each new best likeness, the newest and the final'
+  if (o.keep === 'val_loss_new_best') return 'Keeping each new lowest validation loss, the newest and the final'
   const what = { latest: 'the latest', likeness: 'the best likeness', val_loss: 'the lowest validation loss' }[o.keep]
   return `Keeping ${what} ${o.keep_count}, the newest and the final`
 })

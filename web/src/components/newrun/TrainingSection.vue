@@ -38,11 +38,14 @@ const keepItems = [
   { value: 'latest', label: 'Latest' },
   { value: 'likeness', label: 'Best likeness' },
   { value: 'val_loss', label: 'Lowest validation loss' },
+  { value: 'likeness_new_best', label: 'Each new best likeness' },
+  { value: 'val_loss_new_best', label: 'Each new lowest validation loss' },
 ]
 const keepTip =
   'Which saves stay on disk; the rest are deleted as the run goes. The final LoRA, the newest save and saves made by hand or at a stop always stay. ' +
   "Best likeness: its samples' faces against the dataset's (a character, with faces on for its dataset). " +
-  "Lowest validation loss is measured on the training pictures, so it mostly keeps the later saves"
+  "Lowest validation loss is measured on the training pictures, so it mostly keeps the later saves. " +
+  'Each new best: every save that beat all the saves before it stays, so a run keeps each of its record-setters (no count)'
 const alphaAuto = computed({
   get: () => spec.network.alpha == null,
   set: (v: boolean) => (spec.network.alpha = v ? null : spec.network.rank),
@@ -144,7 +147,7 @@ const targets = computed({
     <ZenField v-if="spec.save_every" label="Keep checkpoints" stack :tip="keepTip">
       <div class="sw-row">
         <ZenCombo v-model="spec.output.keep" :items="keepItems" :sorted="false" :searchable="false" />
-        <ZenNumber v-if="spec.output.keep !== 'all'" v-model="spec.output.keep_count" :min="1" :max="99" :step="1" :precision="0" />
+        <ZenNumber v-if="spec.output.keep !== 'all' && !spec.output.keep.endsWith('_new_best')" v-model="spec.output.keep_count" :min="1" :max="99" :step="1" :precision="0" />
       </div>
     </ZenField>
     <ZenField label="Save LoRAs to" stack class="span-2" :tip="loraPlaceHint">

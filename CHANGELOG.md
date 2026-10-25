@@ -29,7 +29,8 @@ and Manager show.
   would score about what the photos do, so "93% of your photos" says more than a bare 0.67. Runs
   scored before this show the plain number.
 - **Keep only the checkpoints you want:** New run → Training → Keep checkpoints: All (as before),
-  the latest few, the best few by likeness, or the lowest validation loss. The rest are deleted as
+  the latest few, the best few by likeness, or the lowest validation loss; or each new best
+  likeness or validation loss, every save that beat all before it. The rest are deleted as
   the run goes, so a long run doesn't fill the disk. The final LoRA, the newest save (what a resume
   continues from) and saves made by hand or at a stop always stay. Best by likeness renders samples
   at every save to score them, and lowest validation loss runs validation at every save (it's
