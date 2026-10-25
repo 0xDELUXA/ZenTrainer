@@ -35,4 +35,5 @@ jobs:
           uv pip install -q --python comfyui/.venv torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
           uv pip install -q --python comfyui/.venv -r comfyui/requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
 
-      - run: uv run --no-project --with pytest python -m pytest -q tests/comfy
+      # one line per model family
+      - run: uv run --no-project --with pytest python -m pytest -v tests/comfy
