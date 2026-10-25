@@ -246,13 +246,9 @@ class Trainer:
                 from .kernels.compile import compiled_blocks, wanted
 
                 dm = self.models.patcher.model.diffusion_model
-                fits = self._fits_on_card()
-                compile_on, why = wanted(self.spec.memory.compile_blocks, self.spec.optim.steps, self.spec.memory.offloading, fits)
+                compile_on, why = wanted(self.spec.memory.compile_blocks, self.spec.optim.steps)
                 if why:
                     logging.info("[ZenTrainer] %s", why)
-                elif compile_on and self.spec.memory.offloading:
-                    logging.info("[ZenTrainer] compiling with offloading on: compiled while the whole model is on the "
-                                 "card, eager while any of it streams")
                 if compile_on and compat.fused_qk_rope:
                     # compile fuses the norms and rope itself, and the custom op would keep it from
                     # fusing what's around them: Krea 2 at 1024, 1.38 s a step compiled, 1.42 with it
@@ -739,7 +735,7 @@ class Trainer:
 
             overlap(True)
             guard_backward(True)
-        if getattr(self, "_compiled", 0) and not getattr(self, "_streaming_eager", False):
+        if getattr(self, "_compiled", 0):
             torch.compiler.set_stance("default")
         self._recompile_if_moved()
 
@@ -853,32 +849,10 @@ class Trainer:
 
     def _recompile_if_moved(self) -> None:
         if getattr(self, "_compiled", 0):
-            from .kernels.compile import reset_if_moved, still_resident
+            from .kernels.compile import reset_if_moved
 
-            eager = self.spec.memory.offloading and not still_resident(self.models.patcher)
-            if eager != getattr(self, "_streaming_eager", False):
-                # compiled graphs don't survive weights that stream (see kernels/compile.py): eager
-                # while any do; compiled again once all are on the card (the fit loading the rest),
-                # fresh graphs as reset_if_moved below drops the old ones
-                self._streaming_eager = eager
-                torch.compiler.set_stance("force_eager" if eager else "default")
-                if self.spec.memory.fused_qk_rope is not False:
-                    compat.fused_qk_rope = eager  # the fused op while uncompiled; compile fuses them itself
-                if eager:
-                    logging.info("[ZenTrainer] %.1f of %.1f GB of the model on the card, the rest streams: the compiled "
-                                 "blocks run eager (a lower VRAM headroom keeps it all on the card)",
-                                 self.models.patcher.loaded_size() / 1024 ** 3, self.models.patcher.model_size() / 1024 ** 3)
-                else:
-                    logging.info("[ZenTrainer] the whole model is on the card: the blocks run compiled")
             dm = self.models.patcher.model.diffusion_model
             self._residency = reset_if_moved(dm, getattr(self, "_residency", None))
-
-    def _fits_on_card(self) -> bool:
-        """The whole base model fits on the card beside training (what _auto_offload checks)."""
-        if not torch.cuda.is_available():
-            return False
-        total = torch.cuda.get_device_properties(torch.cuda.current_device()).total_memory
-        return self.models.patcher.model_size() <= total - self.headroom
 
     def _auto_vram(self) -> bool:
         m = self.spec.memory

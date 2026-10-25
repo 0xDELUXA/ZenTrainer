@@ -745,61 +745,18 @@ def test_skipped_blocks_get_no_adapters():
         TrainSpec.from_dict({**_spec(), "network": {"skip_blocks": "layers.22"}})
 
 
-def test_compile_is_auto_unless_set_and_never_with_weights_streaming(monkeypatch):
+def test_compile_is_auto_unless_set(monkeypatch):
     from zentrainer.harness.kernels import compile as comp
 
-    assert comp.wanted(True, 10, False) == (True, "") and comp.wanted(False, 5000, False) == (False, "")
-    assert not comp.wanted(True, 5000, True)[0]  # asked for, but offloaded weights break compiled graphs
-    assert comp.wanted(True, 5000, True, fits=True)[0]  # offloading on, but the whole model fits: nothing streams
+    assert comp.wanted(True, 10) == (True, "") and comp.wanted(False, 5000) == (False, "")
     monkeypatch.setattr(comp.os, "name", "posix")
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object() if name == "triton" else None)
-    assert comp.wanted(None, comp.AUTO_STEPS, False)[0]
-    assert not comp.wanted(None, comp.AUTO_STEPS - 1, False)[0]  # too short to repay the compile
-    assert not comp.wanted(None, 5000, True)[0]  # offloaded weights recompile
-    assert comp.wanted(None, 5000, True, fits=True)[0]
+    assert comp.wanted(None, comp.AUTO_STEPS)[0]
+    assert not comp.wanted(None, comp.AUTO_STEPS - 1)[0]  # too short to repay the compile
     monkeypatch.setattr("importlib.util.find_spec", lambda name: None)
-    assert not comp.wanted(None, 5000, False)[0]  # no Triton
+    assert not comp.wanted(None, 5000)[0]  # no Triton
 
 
-def test_compiled_blocks_go_eager_once_weights_stream(monkeypatch):
-    from zentrainer.harness import trainer as tr
-
-    stances = []
-    monkeypatch.setattr(tr.torch.compiler, "set_stance", lambda s: stances.append(s))
-    patcher = types.SimpleNamespace(model_size=lambda: 10, loaded_size=lambda: 10,
-                                    model=types.SimpleNamespace(diffusion_model=torch.nn.Linear(2, 2)))
-    t = tr.Trainer.__new__(tr.Trainer)
-    t.spec = TrainSpec.from_dict({**_spec(), "memory": {"offloading": True}})
-    t.models = types.SimpleNamespace(patcher=patcher)
-    t._compiled = 3
-    t._recompile_if_moved()
-    assert stances == [] and not getattr(t, "_streaming_eager", False)  # all on the card: compiled as it is
-    patcher.loaded_size = lambda: 7  # the fit (or a reload after samples) left some weights off the card
-    t._recompile_if_moved()
-    t._recompile_if_moved()
-    assert stances == ["force_eager"] and t._streaming_eager  # once, while they stream
-    patcher.loaded_size = lambda: 10  # the fit loaded the rest
-    t._recompile_if_moved()
-    assert stances == ["force_eager", "default"] and not t._streaming_eager
-
-
-def test_the_fused_qk_rope_is_on_while_the_blocks_run_uncompiled(monkeypatch):
-    from zentrainer.harness import compat
-    from zentrainer.harness import trainer as tr
-
-    monkeypatch.setattr(tr.torch.compiler, "set_stance", lambda s: None)
-    monkeypatch.setattr(compat, "fused_qk_rope", False)  # compiled: off (compile fuses them itself)
-    loaded = {"n": 7}
-    patcher = types.SimpleNamespace(model_size=lambda: 10, loaded_size=lambda: loaded["n"],
-                                    model=types.SimpleNamespace(diffusion_model=torch.nn.Linear(2, 2)))
-    for setting, while_eager in ((None, True), (False, False)):  # auto, and turned off
-        t = tr.Trainer.__new__(tr.Trainer)
-        t.spec = TrainSpec.from_dict({**_spec(), "memory": {"offloading": True, "fused_qk_rope": setting}})
-        assert t.spec.memory.fused_qk_rope is setting
-        t.models, t._compiled = types.SimpleNamespace(patcher=patcher), 3
-        loaded["n"] = 7  # some weights stream: uncompiled
-        t._recompile_if_moved()
-        assert compat.fused_qk_rope is while_eager
-        loaded["n"] = 10
-        t._recompile_if_moved()
-        assert compat.fused_qk_rope is False
+def test_the_fused_qk_rope_is_auto_by_default():
+    assert TrainSpec.from_dict(_spec()).memory.fused_qk_rope is None  # on while the blocks run uncompiled
+    assert TrainSpec.from_dict({**_spec(), "memory": {"fused_qk_rope": False}}).memory.fused_qk_rope is False

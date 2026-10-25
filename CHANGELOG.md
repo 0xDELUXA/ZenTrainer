@@ -85,11 +85,12 @@ and Manager show.
 - **Fused q/k norm + rope for MiniMax H3:** Memory → Fused q/k norm + rope now covers H3 too (it
   rotates only part of each head, which the op now handles). 9% faster a step on H3 at 512 px
   with sound, the same results.
-- **Compile with offloading on:** compiling the blocks used to be refused whenever offloading was
-  on, even when the whole model sat on the card and nothing streamed. Now it compiles while the
-  whole model is on the card and runs uncompiled while any of it streams, switching back and forth
-  as weights move. MiniMax H3 at 512 px with sound: 32% faster a step. If the log says part of the
-  model streams, a lower VRAM headroom can keep it all on the card.
+- **Compile with offloading on:** compiling the blocks was refused whenever offloading was on,
+  after a crash that turned out to be the offloaded weights themselves (fixed in 0.3.0), not
+  compile. It's allowed again, Auto included: MiniMax H3 at 512 px with sound, 32% faster a step,
+  whether it all fits on the card or about 1 GB of it streams. With most of a model streaming it's
+  about even (the copies set the pace). Tested with weights streaming and moving on H3 and Krea 2, also with a 32 GB card
+  held to 16 GB.
 - **Fused q/k norm + rope on by default (Auto):** used whenever the blocks run uncompiled, off
   while they're compiled (compile fuses those ops itself). 6–9% faster a step on Krea 2, MOSS and
   MiniMax H3 without compile, with nothing to set. On or Off in Memory still force it.

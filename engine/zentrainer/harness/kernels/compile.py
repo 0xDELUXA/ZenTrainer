@@ -21,18 +21,17 @@ import torch
 AUTO_STEPS = 500
 
 
-def wanted(setting: bool | None, steps: int, offloading: bool, fits: bool = False) -> tuple[bool, str]:
-    """Whether to compile, and why when it wasn't simply what was asked. Never with weights
-    streaming, even when asked: they move between CPU and GPU during a step, which compiled
-    graphs don't survive (an illegal memory access, a 16 GB card streaming 2 GB of Krea 2 with
-    compile on). Offloading that streams nothing is another matter: `fits` says the whole model
-    fits on the card beside training, and the trainer runs the blocks eager while any weights
-    stream (still_resident). MiniMax H3 at 512 px, offloading on but all on a 5090: 42% of the
-    step's GPU time was small ops, and compiled steps took 32% less time. Auto (setting None) also needs Triton,
-    which inductor generates its kernels with (often missing on Windows, where it also needs a C++
-    compiler)."""
-    if offloading and not fits:
-        return False, "not compiling with weights offloaded" + (" (turned off: weights that move break compiled graphs)" if setting else "")
+def wanted(setting: bool | None, steps: int) -> tuple[bool, str]:
+    """Whether to compile, and why when it wasn't simply what was asked. Offloaded weights are
+    fine: compile was kept off with them for a while after an illegal memory access (Krea 2, 16 GB
+    card, ~2 GB streaming), but the cause was the offloaded weights' stream-ordered frees, in eager
+    too, since fixed (memory/offload.py guard_backward). Compiled with weights streaming and
+    moving: MiniMax H3 (0.7-6.4 GB streaming) and Krea 2 (8.5-9.4 GB, and a 32 GB card held to 16)
+    with Automagic3 + EMA and samples, 10 of 10 runs clean. It pays when little streams (H3, 0.7
+    GB: 32% a step) and is even when most does (Krea 2, 9.4 of 12.9 GB: the copies set the pace).
+    Weights that move recompile fresh graphs (reset_if_moved). Auto (setting None) also needs
+    Triton, which inductor generates its kernels with (often missing on Windows, where it also
+    needs a C++ compiler)."""
     if setting is not None:
         return setting, ""
     import importlib.util
@@ -112,12 +111,6 @@ def compiled_blocks(diffusion_model, enabled: bool):
             m.__dict__.pop("forward", None)
         if cache_was is not None:
             functorch_config.enable_autograd_cache = cache_was
-
-
-def still_resident(patcher) -> bool:
-    """With offloading on, whether every weight is on the card (none stream): compiled blocks
-    are safe only then."""
-    return patcher.loaded_size() >= patcher.model_size()
 
 
 def residency(diffusion_model) -> int:
