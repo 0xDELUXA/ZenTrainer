@@ -7,6 +7,8 @@ cli/
 scripts/
 start-linux.sh
 start-windows.bat
+# fetches the prebuilt app into a clone; the pack has it built
+engine/zentrainer/server/webdist.py
 
 # the web app's source (the pack carries it built, as web/dist)
 web/

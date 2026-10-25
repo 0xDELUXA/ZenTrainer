@@ -16,7 +16,7 @@ jobs:
       - run: >
           uv run --no-project --index https://download.pytorch.org/whl/cpu
           --with pytest --with torch --with pillow --with numpy --with av --with safetensors
-          --with rich --with questionary --with textual
+          --with rich --with questionary --with textual --with aiohttp
           python -m pytest -q tests
 
   web:
