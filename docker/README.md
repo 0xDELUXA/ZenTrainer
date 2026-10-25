@@ -85,6 +85,11 @@ Then open http://127.0.0.1:8188/.
 
 ## RunPod
 
+The quickest way: [deploy the ZenTrainer template](https://console.runpod.io/hub/template/2amo4895gj?ref=oe5l65t0)
+(a referral link: it supports ZenTrainer at no cost to you).
+Pick a GPU with **Allowed CUDA versions** 13.0 and up, give it a volume, and deploy. The rest of
+this section is what the template holds, for making your own.
+
 Make a template (Templates → New Template) with:
 
 - **Container image**: `ghcr.io/nynxz/zentrainer:latest` (or a pinned tag, see above)

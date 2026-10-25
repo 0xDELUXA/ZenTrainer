@@ -110,7 +110,10 @@ If ZenTrainer is already running it says where; if another program has its port 
 uses the next free one. macOS isn't supported yet.
 
 **On a rented GPU** (RunPod, Vast.ai, …) or any machine with Docker: a container image with the
-app behind a password and your work kept on the volume. → [docker/README.md](docker/README.md)
+app behind a password and your work kept on the volume. On RunPod it's one click:
+[deploy the ZenTrainer template](https://console.runpod.io/hub/template/2amo4895gj?ref=oe5l65t0)
+(a referral link: it supports ZenTrainer at no cost to you). Elsewhere, and how it works →
+[docker/README.md](docker/README.md)
 
 ## Run it (zt)
 
