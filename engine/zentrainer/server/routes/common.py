@@ -32,7 +32,7 @@ def queue_resume(store, run_id: str, ckpt: dict | None, at: int = 0) -> None:
 
     step = ckpt["step"] if ckpt else 0
     _keep_later(store, run_id, step)
-    for stream in ("metrics", "samples", "checkpoints", "validation", "likeness"):
+    for stream in ("metrics", "samples", "checkpoints", "validation", "likeness", "pruned"):
         store.truncate(run_id, stream, step)
     store.update(run_id, resume_from=ckpt["path"] if ckpt else None,
                  resume_state=state_for(ckpt, run_id) if ckpt else None, message=None, final_step=None,

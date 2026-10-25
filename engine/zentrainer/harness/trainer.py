@@ -22,7 +22,7 @@ from .. import events, paths
 from ..spec import TrainSpec, slugify
 from . import control as control_mod
 from . import data, models, optim
-from .callbacks import Callback, Checkpoints, Metrics, Samples, Validation, write_metadata
+from .callbacks import Callback, Checkpoints, Keep, Metrics, Samples, Validation, write_metadata
 from . import compat
 from .data.streams import Streams
 from .denoiser import Denoiser
@@ -201,7 +201,7 @@ class Trainer:
         self.emit = emit
         self.control = control or control_mod.Control()
         self.callbacks = callbacks if callbacks is not None else [
-            Metrics(), Checkpoints(spec.save_every), Samples(spec.samples.every), Validation()]
+            Metrics(), Checkpoints(spec.save_every), Samples(spec.samples.every), Validation(), Keep()]
         self.step = 0
         self.train_seconds = 0.0  # time spent in optimizer steps only (no sampling/validation/saves/pauses)
         self.last_step_seconds: float | None = None

@@ -170,8 +170,16 @@ export interface TrainSpec {
     slg_end: number
   }
   validation: { every: number; images: number; timesteps: number; seed: number }
-  /** where checkpoints go and which resume states are kept */
-  output: { lora_dir: string | null; keep_states: 'latest' | 'all' | 'none'; save_dtype: 'bf16' | 'fp16' | 'fp32' }
+  /** where checkpoints go, which resume states are kept, and which scheduled checkpoints
+   *  (keep: all, the keep_count latest, or the keep_count best by likeness or validation loss;
+   *  engine harness/keep.py) */
+  output: {
+    lora_dir: string | null
+    keep_states: 'latest' | 'all' | 'none'
+    save_dtype: 'bf16' | 'fp16' | 'fp32'
+    keep: 'all' | 'latest' | 'likeness' | 'val_loss'
+    keep_count: number
+  }
   /** a slider LoRA (engine harness/slider.py): its strength moves pictures from `negative` (-1)
    *  to `positive` (+1), 0 the base model. "text": made from the prompts; the dataset's pictures
    *  are only where the noise starts, so their captions aren't used */
@@ -295,7 +303,7 @@ export function defaultSpec(): TrainSpec {
       slg_end: 1,
     },
     validation: { every: 100, images: 4, timesteps: 4, seed: 1234 },
-    output: { lora_dir: null, keep_states: 'latest', save_dtype: 'bf16' },
+    output: { lora_dir: null, keep_states: 'latest', save_dtype: 'bf16', keep: 'all', keep_count: 3 },
     slider: { kind: '', pair_set: '', dataset_end: 'positive', positive: '', negative: '', neutral: '', anchors: [], guidance: 3, anchor_weight: 1, directions: 'both' },
   }
 }

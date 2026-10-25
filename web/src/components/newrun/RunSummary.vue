@@ -22,9 +22,13 @@ const warnings = computed(() => {
     w.push(`${masked} picture${masked === 1 ? ' has a mask' : 's have masks'}, but Masked training is off: the parts the masks leave out train too.`)
   if (!spec.samples.prompts.length) w.push('No sample prompts: you will only see the loss curves.')
   else if (!spec.samples.every) w.push('Samples are off (Every 0): only Sample now renders them, so checkpoints get no samples or likeness. Set Every to the save interval.')
-  else if (spec.save_every && spec.save_every % spec.samples.every) w.push(`Samples every ${spec.samples.every} don't land on the saves every ${spec.save_every}: checkpoints get no samples or likeness to compare.`)
+  else if (spec.save_every && spec.save_every % spec.samples.every && spec.output.keep !== 'likeness') w.push(`Samples every ${spec.samples.every} don't land on the saves every ${spec.save_every}: checkpoints get no samples or likeness to compare.`)
   else if (!slider && spec.dataset.trigger && !spec.samples.prompts.map(promptText).some((p) => p.includes('[trigger]') || p.includes(spec.dataset.trigger)))
     w.push("Sample prompts don't use [trigger].")
+  const keep = spec.save_every ? spec.output.keep : 'all'
+  if (keep === 'likeness' && !spec.samples.prompts.length)
+    w.push('Keeping the best likeness needs sample prompts to score (Samples).')
+  if (keep === 'val_loss' && !spec.validation.every) w.push('Keeping the lowest validation loss needs validation on (Advanced training → Validation every).')
   if (opt.value?.id === 'Prodigy' && spec.optim.learning_rate < 0.5) w.push('Prodigy sets its own step size: use LR 1.0.')
   if (opt.value && opt.value.id !== 'Prodigy' && spec.optim.learning_rate >= 0.01) w.push('That LR is very high for this optimizer.')
   const automagic = opt.value?.id === 'Automagic' || opt.value?.id === 'Automagic3'

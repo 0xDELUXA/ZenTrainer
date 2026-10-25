@@ -31,6 +31,18 @@ const loraPlaceHint = computed(() => {
   return p.default ? 'Inside this install. Your model library’s loras folder keeps them with the rest, visible to your other ComfyUI' : `In a zentrainer/ subfolder · ${fmtBytes(p.free)} free`
 })
 // ---- bound helpers ---------------------------------------------------------------------------
+// which saves along the way stay on disk (engine harness/keep.py); the best-by rules put samples
+// or validation on every save, so each has a score
+const keepItems = [
+  { value: 'all', label: 'All' },
+  { value: 'latest', label: 'Latest' },
+  { value: 'likeness', label: 'Best likeness' },
+  { value: 'val_loss', label: 'Lowest validation loss' },
+]
+const keepTip =
+  'Which saves stay on disk; the rest are deleted as the run goes. The final LoRA, the newest save and saves made by hand or at a stop always stay. ' +
+  "Best likeness: its samples' faces against the dataset's (a character, with the faces extra). " +
+  "Lowest validation loss is measured on the training pictures, so it mostly keeps the later saves"
 const alphaAuto = computed({
   get: () => spec.network.alpha == null,
   set: (v: boolean) => (spec.network.alpha = v ? null : spec.network.rank),
@@ -128,6 +140,12 @@ const targets = computed({
     </ZenField>
     <ZenField label="Save every" stack tip="0 = only the final LoRA">
       <ZenNumber v-model="spec.save_every" :min="0" :step="50" :precision="0" />
+    </ZenField>
+    <ZenField v-if="spec.save_every" label="Keep checkpoints" stack :tip="keepTip">
+      <div class="sw-row">
+        <ZenCombo v-model="spec.output.keep" :items="keepItems" :sorted="false" :searchable="false" />
+        <ZenNumber v-if="spec.output.keep !== 'all'" v-model="spec.output.keep_count" :min="1" :max="99" :step="1" :precision="0" />
+      </div>
     </ZenField>
     <ZenField label="Save LoRAs to" stack class="span-2" :tip="loraPlaceHint">
       <ZenCombo v-model="loraDir" :items="loraPlaceItems" :sorted="false" :searchable="false" :item-height="40" :menu-width="520">

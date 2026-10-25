@@ -117,6 +117,8 @@ export interface RunDetail {
   validation: ValidationRow[]
   /** faces extra: each sample's face scored against the dataset's (cosine; same person ≳ 0.5) */
   likeness?: LikenessRow[]
+  /** checkpoints output.keep removed, each with why */
+  pruned?: (CheckpointRow & { reason: string; at_step: number })[]
   live: boolean
 }
 

@@ -43,4 +43,9 @@ def test_trains_samples_saves_and_resumes(family, tmp_path):
     assert out["trained"], out  # the LoRA moved off its zero start
     assert out["patched"] > 0 and out["unloaded"] == [], out  # stock ComfyUI loads every key
     assert out["samples"] and all(Path(p).is_file() for p in out["samples"]), out
+    # output.keep "val_loss", 1: validation on each save (1, 2, 3); the best and the newest (3, what
+    # a resume needs) stay, the other one goes, files and all; the final stays
+    assert out["validated"][:4] == [0, 1, 2, 3], out
+    assert sorted(out["kept"]) == sorted({out["best"], 3}) and out["kept_files"], out
+    assert sorted(out["pruned"] + out["kept"]) == [1, 2, 3] and not any(out["pruned_files"]), out
     assert out["resumed"] == "done" and out["resumed_steps"] == 6 and math.isfinite(out["resumed_loss"]), out

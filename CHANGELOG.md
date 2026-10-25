@@ -12,6 +12,13 @@ and Manager show.
   RunPod is in docker/README.md; the image is `ghcr.io/nynxz/zentrainer`.
 
 ### Runs
+- **Keep only the checkpoints you want:** New run → Training → Keep checkpoints: All (as before),
+  the latest few, the best few by likeness, or the lowest validation loss. The rest are deleted as
+  the run goes, so a long run doesn't fill the disk. The final LoRA, the newest save (what a resume
+  continues from) and saves made by hand or at a stop always stay. Best by likeness renders samples
+  at every save to score them, and lowest validation loss runs validation at every save (it's
+  measured on the training pictures, so it mostly keeps the later saves). The run's Checkpoints
+  card says what it keeps and lists what it removed, with why.
 - **Try other samplers as the run trains:** Manual's Sampling chip opens a sampler, scheduler,
   steps and CFG for the next tries (the run's own until changed), and each try's card says what it
   used. Custom sigmas, high to low, in place of a scheduler: for tries and for the run's samples

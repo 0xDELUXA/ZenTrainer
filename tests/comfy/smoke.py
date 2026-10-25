@@ -209,6 +209,7 @@ def main():
 
     from zentrainer import paths
     from zentrainer.harness import models, trainer
+    from zentrainer.runs.store import RunStore
     from zentrainer.spec import TrainSpec
 
     build, text_width, (channels, down) = FAMILIES[FAMILY]()
@@ -217,17 +218,23 @@ def main():
     models.load = lambda spec: models.Models(patcher, Clip(text_width), vae)
     dataset(WORK / "input" / "smoke")
     spec = {
-        "name": "smoke", "save_every": 2,
+        "name": "smoke", "save_every": 1,
         "model": {"kind": "split", "unet_name": "tiny", "clip_name": "tiny", "vae_name": "tiny", "clip_type": "tiny"},
         "dataset": {"folder": "smoke", "resolution": 64, "buckets": False},
         "optim": {"steps": 4},
         "memory": {"training_dtype": "fp32"},
+        # validation's own interval misses the saves: keeping the best by it puts it on each one
+        "validation": {"every": 100, "images": 1, "timesteps": 2},
+        "output": {"keep": "val_loss", "keep_count": 1},
         "samples": {"every": 4, "prompts": [{"prompt": "a red square"}], "width": 64, "height": 64, "steps": 2,
                     "baseline": False, "likeness": False},
     }
     drift = patch_drift(TrainSpec.from_dict(spec))
     events = []
-    t = trainer.Trainer(TrainSpec.from_dict(spec), "smoke1", emit=lambda kind, data: events.append((kind, data)))
+    store = RunStore(WORK / "runs")
+    store.create("smoke1", spec)
+    t = trainer.Trainer(TrainSpec.from_dict(spec), "smoke1", store=store,
+                        emit=lambda kind, data: events.append((kind, data)))
     status = t.run()
     saves = [d for k, d in events if k == trainer.events.CHECKPOINT]
     final = next(d["path"] for d in saves if d["final"])
@@ -239,6 +246,14 @@ def main():
         "samples": [str(paths.output_root() / "samples" / "smoke1" / d["filename"])
                     for k, d in events if k == trainer.events.SAMPLE],
     }
+    kept = store.read("smoke1", "checkpoints")
+    out.update(validated=sorted({r["step"] for r in store.read("smoke1", "validation")}),
+               pruned=[r["step"] for r in store.read("smoke1", "pruned")],
+               pruned_files=[Path(r["path"]).exists() for r in store.read("smoke1", "pruned")],
+               kept=[c["step"] for c in kept if not c["final"]],
+               kept_files=all(Path(c["path"]).is_file() for c in kept),
+               best=min(range(1, 4), key=lambda s: next(r["val_loss"] for r in store.read("smoke1", "validation")
+                                                          if r["step"] == s)))
     # resume from the last checkpoint and its state, on to step 6
     last = saves[-1]
     t2 = trainer.Trainer(TrainSpec.from_dict({**spec, "optim": {"steps": 6}, "samples": {"every": 0}}), "smoke1",

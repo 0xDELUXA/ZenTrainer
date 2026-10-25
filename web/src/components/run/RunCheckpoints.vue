@@ -33,6 +33,14 @@ const saveLine = computed(() => {
   if (running.value && next) return `${n ? `${n} · ` : ''}next ${next.step} · ${next.in}`
   return [n ? `${n} · ${plan}` : plan, ckSize.value].filter(Boolean).join(' · ')
 })
+// what output.keep removed along the way, newest first, each with why
+const pruned = computed(() => [...(detail.value?.pruned ?? [])].sort((a, b) => b.step - a.step))
+const keepLine = computed(() => {
+  const o = detail.value?.spec.output
+  if (!o || !o.keep || o.keep === 'all') return ''
+  const what = { latest: 'the latest', likeness: 'the best likeness', val_loss: 'the lowest validation loss' }[o.keep]
+  return `Keeping ${what} ${o.keep_count}, the newest and the final`
+})
 const copied = ref<string | null>(null)
 async function copy(text: string) {
   try {
@@ -53,6 +61,12 @@ async function copy(text: string) {
     </header>
     <div v-if="!ckRows.length" class="muted small">
       {{ running ? `The first save lands at step ${nextSave?.step ?? total}.` : 'None saved.' }}
+    </div>
+    <div v-if="keepLine" class="muted small keep-line">
+      {{ keepLine }}<template v-if="pruned.length">
+        ·
+        <ZenTip :text="pruned.map((p) => `${p.step}: ${p.reason}`).join('\n')">{{ pruned.length }} removed</ZenTip>
+      </template>
     </div>
     <div class="ckpts">
       <div
@@ -154,6 +168,9 @@ async function copy(text: string) {
 .ckpts .ckpt:hover .ck-val,
 .ckpts .ckpt:focus-within .ck-val {
   opacity: 0;
+}
+.keep-line {
+  margin-bottom: 4px;
 }
 .best-chip {
   color: var(--zen-ok);

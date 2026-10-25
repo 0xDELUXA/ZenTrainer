@@ -56,6 +56,7 @@ def register(server) -> None:
                 "samples": store.read(run_id, "samples"),
                 "validation": store.read(run_id, "validation"),
                 "likeness": store.read(run_id, "likeness"),
+                "pruned": store.read(run_id, "pruned"),
                 "live": control.get(run_id) is not None,
             })
         except (FileNotFoundError, ValueError):

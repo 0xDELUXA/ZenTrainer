@@ -381,13 +381,15 @@ class Samples(Callback):
         return rows
 
     def on_step(self, t):
-        if self.every and t.step % self.every == 0:
+        if (self.every and t.step % self.every == 0) or _scores_saves(t, "likeness"):
             self.render(t)
 
     def on_end(self, t, status):
         liker = getattr(self, "_liker", None)
         if liker:
-            liker.close()  # it finishes what's queued, then stops
+            # it finishes what's queued, then stops; when likeness picks the checkpoints, the end
+            # waits for the last scores (Keep ranks them next)
+            liker.close(wait=120 if t.spec.output.keep == "likeness" else 0)
         self._liker = None
 
     def render(self, t: Trainer, manual: int | None = None, base: bool = False, stay: bool = False,
@@ -580,7 +582,7 @@ class Validation(Callback):
             self.evaluate(t)
 
     def on_step(self, t):
-        if self._set and t.step % t.spec.validation.every == 0:
+        if self._set and (t.step % t.spec.validation.every == 0 or _scores_saves(t, "val_loss")):
             self.evaluate(t)
 
     def on_end(self, t, status):
@@ -623,6 +625,55 @@ class Validation(Callback):
         if t.store:
             t.store.append(t.run_id, "validation", row)
         return val
+
+
+def _scores_saves(t, rule: str) -> bool:
+    """A scheduled save this step whose score output.keep ranks it by: samples (likeness) or
+    validation have to land on it too, whatever their own interval."""
+    every = t.spec.save_every
+    return t.spec.output.keep == rule and bool(every) and t.step % every == 0 and t.step < t.spec.optim.steps
+
+
+class Keep(Callback):
+    """Removes the scheduled checkpoints output.keep doesn't keep (harness/keep.py), at each save
+    and at the end. After Samples and Validation in the callbacks: their scores for a save land
+    first."""
+
+    def on_step(self, t):
+        if t.spec.save_every and t.step % t.spec.save_every == 0:
+            gone = self._prune(t)
+            if gone:  # said on the run page; the run's status is the trainer's to set
+                t.emit(events.STATUS, {"run_id": t.run_id, "status": "training", "step": t.step,
+                                       "message": f"removed {len(gone)} checkpoint{'s' if len(gone) != 1 else ''}: "
+                                                  f"{gone[-1][1]}"})
+
+    def on_end(self, t, status):
+        self._prune(t)
+
+    def _prune(self, t) -> list:
+        from . import keep
+        from .trainer import state_dir
+
+        out = t.spec.output
+        if out.keep == "all" or not t.store:
+            return []
+        rows = t.store.read(t.run_id, "checkpoints")
+        gone = keep.to_prune(rows, out.keep, out.keep_count, t.store.read(t.run_id, "validation"),
+                             t.store.read(t.run_id, "likeness"))
+        if not gone:
+            return []
+        removed = []
+        for row, why in gone:
+            freed = keep.remove(row, t.run_id, state_dir(t.run_id))
+            if freed is None:
+                continue
+            removed.append((row, why))
+            t.store.append(t.run_id, "pruned", {**row, "reason": why, "at_step": t.step})
+            logging.info("[ZenTrainer] removed the step %d checkpoint (%.0f MB): %s", row["step"], freed / 1024 ** 2,
+                         why)
+        paths_gone = {row["path"] for row, _ in removed}
+        t.store.rewrite(t.run_id, "checkpoints", [c for c in rows if c.get("path") not in paths_gone])
+        return removed
 
 
 def _prompt_cache(t, prompts: list[str], negative: str):

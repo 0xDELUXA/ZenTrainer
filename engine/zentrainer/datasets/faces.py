@@ -313,13 +313,17 @@ class LikenessWorker:
         self.model = model()
         self.q: queue.Queue = queue.Queue()
         self.centroid = None
-        threading.Thread(target=self._run, daemon=True, name="zentrainer-likeness").start()
+        self.thread = threading.Thread(target=self._run, daemon=True, name="zentrainer-likeness")
+        self.thread.start()
 
     def submit(self, row: dict) -> None:
         self.q.put(row)
 
-    def close(self) -> None:
+    def close(self, wait: float = 0) -> None:
+        """Stop once what's queued is scored; `wait`: up to that many seconds for it."""
         self.q.put(None)
+        if wait:
+            self.thread.join(wait)
 
     def _run(self) -> None:
         from .. import paths

@@ -332,6 +332,12 @@ class OutputSpec:
     # What the LoRA files are written in, apart from what trains (network.lora_dtype): bf16 halves
     # an fp32 file and loses nothing a sample shows. The resume state keeps the full weights.
     save_dtype: str = "bf16"  # bf16 | fp16 | fp32
+    # Which scheduled checkpoints (save_every) a run keeps: "all"; the `keep_count` "latest"; or
+    # the `keep_count` best by "likeness" (its samples' faces, a character dataset with the faces
+    # extra) or by "val_loss". The final LoRA, the newest checkpoint (what a resume continues from)
+    # and saves asked for by hand or at a stop always stay (harness/keep.py).
+    keep: str = "all"
+    keep_count: int = 3
 
 
 @dataclass
@@ -456,6 +462,14 @@ class TrainSpec:
         check_sigmas(self.samples.sigmas)
         _choice("output.keep_states", self.output.keep_states, ("latest", "all", "none"))
         _choice("output.save_dtype", self.output.save_dtype, ("bf16", "fp16", "fp32"))
+        _choice("output.keep", self.output.keep, ("all", "latest", "likeness", "val_loss"))
+        if self.output.keep_count < 1:
+            raise SpecError("output.keep_count must be >= 1")
+        if self.output.keep == "val_loss" and not self.validation.every:
+            raise SpecError("keeping the best checkpoints by validation loss needs validation on (validation.every)")
+        if self.output.keep == "likeness" and not (self.samples.prompts and self.samples.likeness):
+            raise SpecError("keeping the best checkpoints by likeness needs sample prompts with likeness on "
+                            "(samples.prompts, samples.likeness)")
         if self.objective.shift < 0:
             raise SpecError("objective.shift must be >= 0 (0 = the model's own)")
         if not 0.0 <= self.samples.slg_start <= self.samples.slg_end <= 1.0:
