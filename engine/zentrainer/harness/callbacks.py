@@ -173,6 +173,11 @@ class Samples(Callback):
                  s.slg_end, s.lora_strength if t.spec.network.init_from else None, it.control]
         if s.sigmas:  # only then: baselines kept before custom sigmas existed still match
             parts.append(s.sigmas)
+        # samples render with these on, so they make another baseline (added only when set, as sigmas)
+        if t.spec.network.base_lora:
+            parts.append(["base", t.spec.network.base_lora, t.spec.network.base_strength])
+        if s.turbo_lora:
+            parts.append(["turbo", s.turbo_lora, s.turbo_strength])
         return hashlib.sha1(json.dumps(parts, default=str).encode()).hexdigest()[:20]
 
     def _baseline_dir(self) -> Path:

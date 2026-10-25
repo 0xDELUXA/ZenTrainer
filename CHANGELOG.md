@@ -71,6 +71,9 @@ and Manager show.
   alpha differs from the new run's rank (rank 16 at alpha 16 continued in a rank-4 run, say)
   trained at a fraction of its strength, and a DoRA lost its scale. It now continues exactly as
   ComfyUI applies the file.
+- **Fixed: a run with a base LoRA or a turbo LoRA could show another run's samples at step 0:**
+  the "before training" samples are reused between runs with the same settings, and those two
+  weren't counted, though samples render with them on.
 - **Fixed: video datasets with sound** stopped as their encoding finished, with "File exists" and
   the path of one of the clips: the soundtrack pass reused the name of the folder the encoded
   dataset is saved in. Datasets already encoded before were unaffected.
