@@ -781,3 +781,25 @@ def test_compiled_blocks_go_eager_once_weights_stream(monkeypatch):
     patcher.loaded_size = lambda: 10  # the fit loaded the rest
     t._recompile_if_moved()
     assert stances == ["force_eager", "default"] and not t._streaming_eager
+
+
+def test_the_fused_qk_rope_is_on_while_the_blocks_run_uncompiled(monkeypatch):
+    from zentrainer.harness import compat
+    from zentrainer.harness import trainer as tr
+
+    monkeypatch.setattr(tr.torch.compiler, "set_stance", lambda s: None)
+    monkeypatch.setattr(compat, "fused_qk_rope", False)  # compiled: off (compile fuses them itself)
+    loaded = {"n": 7}
+    patcher = types.SimpleNamespace(model_size=lambda: 10, loaded_size=lambda: loaded["n"],
+                                    model=types.SimpleNamespace(diffusion_model=torch.nn.Linear(2, 2)))
+    for setting, while_eager in ((None, True), (False, False)):  # auto, and turned off
+        t = tr.Trainer.__new__(tr.Trainer)
+        t.spec = TrainSpec.from_dict({**_spec(), "memory": {"offloading": True, "fused_qk_rope": setting}})
+        assert t.spec.memory.fused_qk_rope is setting
+        t.models, t._compiled = types.SimpleNamespace(patcher=patcher), 3
+        loaded["n"] = 7  # some weights stream: uncompiled
+        t._recompile_if_moved()
+        assert compat.fused_qk_rope is while_eager
+        loaded["n"] = 10
+        t._recompile_if_moved()
+        assert compat.fused_qk_rope is False

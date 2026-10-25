@@ -775,28 +775,51 @@ def test_a_fit_that_slows_the_steps_is_undone(monkeypatch):
     stats = {"num_alloc_retries": 0}
     monkeypatch.setattr(torch.cuda, "memory_stats", lambda: dict(stats))
 
-    # slower after: back to where it was, and capped there
-    t._trial = {"at": 4, "prev": 4 << 30, "before": 1.5, "retries": 0}
+    short, long = ((1, 2560, 64), "a"), ((1, 5376, 64), "b")  # two clip shapes: H3 took ~1.5 and ~3 s a step on them
+    before = [(1, 1.5, short), (2, 3.0, long), (3, 1.5, short), (4, 3.0, long)]
+
+    # same-shaped steps slower after: back to where it was, and capped there
+    t._trial = {"at": 4, "prev": 4 << 30, "before": before, "retries": 0}
     t.models.patcher.loaded = 9 << 30
-    t._times = [1.5, 1.5, 1.5, 21.0, 2.0, 2.0, 2.0, 2.0]
+    t._warm = 11
+    t._times = before + [(5, 21.0, short), (8, 2.0, short), (9, 2.0, short), (10, 3.9, long), (11, 2.0, short)]
     t._judge()
-    assert t._resident == t._ceiling == 4 << 30 and fits == [4 << 30]
+    assert t._resident == t._ceiling == 4 << 30 and fits == [4 << 30] and t._trial is None
 
     # as fast, but the allocator had to retry: undone too
     t._ceiling = 1 << 62
-    t._trial = {"at": 4, "prev": 4 << 30, "before": 1.5, "retries": 0}
+    t._trial = {"at": 4, "prev": 4 << 30, "before": before, "retries": 0}
     stats["num_alloc_retries"] = 3
-    t._times = [1.4, 1.4, 1.4, 1.4]
+    t._times = before + [(8, 1.4, short), (9, 1.4, short), (10, 1.4, short), (11, 1.4, short)]
     t._judge()
     assert t._ceiling == 4 << 30
 
     # faster and no retries: kept
     del t._ceiling
     fits.clear()
-    t._trial = {"at": 4, "prev": 4 << 30, "before": 1.8, "retries": 3}
-    t._times = [1.5, 1.5, 1.5, 1.5]
+    t._trial = {"at": 4, "prev": 4 << 30, "before": before, "retries": 3}
+    t._times = before + [(8, 1.4, short), (9, 2.9, long), (10, 1.4, short), (11, 2.9, long)]
     t._judge()
     assert fits == [] and not hasattr(t, "_ceiling")
+
+    # only long clips since the fit, short ones before it: raw times would read twice as slow, so
+    # it waits for a same-shaped step, then keeps the fit when none comes
+    t._trial = {"at": 4, "prev": 4 << 30, "before": [(1, 1.5, short), (2, 1.5, short)], "retries": 3}
+    t._times = t._trial["before"] + [(8, 3.0, long), (9, 3.0, long), (10, 3.0, long), (11, 3.0, long)]
+    t._judge()
+    assert t._trial is not None and fits == []  # not judged yet
+    t._warm = 4 + tr.TRIAL_LONGEST
+    t._judge()
+    assert t._trial is None and fits == [] and not hasattr(t, "_ceiling")
+
+
+def test_trial_ratio_compares_same_shapes_only():
+    from zentrainer.harness.trainer import trial_ratio
+
+    before = [(1, 1.0, "a"), (2, 2.0, "b"), (3, 1.2, "a")]
+    assert trial_ratio(before, [(5, 2.2, "b"), (6, 2.2, "b")]) == pytest.approx(1.1)
+    assert trial_ratio(before, [(5, 9.0, "c")]) is None
+    assert trial_ratio(before, []) is None
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="pinning needs CUDA")

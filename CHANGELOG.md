@@ -79,6 +79,13 @@ and Manager show.
   whole model is on the card and runs uncompiled while any of it streams, switching back and forth
   as weights move. MiniMax H3 at 512 px with sound: 32% faster a step. If the log says part of the
   model streams, a lower VRAM headroom can keep it all on the card.
+- **Fused q/k norm + rope on by default (Auto):** used whenever the blocks run uncompiled, off
+  while they're compiled (compile fuses those ops itself). 6–9% faster a step on Krea 2, MOSS and
+  MiniMax H3 without compile, with nothing to set. On or Off in Memory still force it.
+- **Fixed: the automatic VRAM fit undid itself on video:** after putting more of the model on the
+  card it checks the steps didn't get slower, but it compared raw step times, and video clips of
+  different lengths take very different times (1.4 to 3 s a step on H3). It often "measured" a
+  slowdown and moved the weights back off. It now compares steps of the same shape.
 
 ## 0.3.0 (2026-10-25)
 

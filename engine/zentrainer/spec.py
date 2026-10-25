@@ -235,9 +235,10 @@ class MemorySpec:
     # auto: on for runs long enough to repay that, with Triton and no offloading (kernels/compile.py)
     compile_blocks: bool | None = None
     # Krea 2, MOSS, MiniMax H3: the attention's q/k norms and rope as one op with its own backward (Triton),
-    # instead of separate ops and casts (kernels/qk_norm_rope.py). Experimental: same maths, 6-7% a
-    # step uncompiled; off when the blocks compile, which fuse them already
-    fused_qk_rope: bool = False
+    # instead of separate ops and casts (kernels/qk_norm_rope.py): same maths, 6-9% a step uncompiled.
+    # None = auto: on while the blocks run uncompiled (compiled ones fuse these already; a custom op
+    # in them kept compile from fusing what's around it: Krea 2 1.38 -> 1.42 s a step)
+    fused_qk_rope: bool | None = None
     # int8 bases: trained layers run ComfyUI's int8 kernel forward (activations quantized) instead
     # of a dequantized bf16 matmul. Off = the bf16 forward (slower; for comparing quality).
     int8_forward: bool = True

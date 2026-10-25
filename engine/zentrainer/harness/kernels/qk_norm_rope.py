@@ -21,6 +21,8 @@ custom ops, so torch.compile keeps the fused kernels whole instead of tracing in
 
 from __future__ import annotations
 
+import logging
+
 import torch
 import torch.nn.functional as F
 
@@ -140,12 +142,26 @@ if TRITON_AVAILABLE:
             tl.store(out + j, (r * (gnp - npp * dot)).to(OUT.dtype.element_ty), mask=jm)
 
 
+_triton_failed = False  # once a launch fails (an unusual GPU or Triton build): plain torch from then on
+
+
 def _backward(g, x, w, freqs, eps, split_half, seq_first, rot=0):
+    global _triton_failed
     D = x.shape[-1]
     rot = rot if rot and rot < D else D
-    if not (TRITON_AVAILABLE and x.is_cuda and D in (64, 128, 256) and rot % 2 == 0
-            and x.dtype in (torch.bfloat16, torch.float16, torch.float32)):
+    if _triton_failed or not (TRITON_AVAILABLE and x.is_cuda and D in (64, 128, 256) and rot % 2 == 0
+                              and x.dtype in (torch.bfloat16, torch.float16, torch.float32)):
         return _backward_torch(g, x, w, freqs, eps, split_half, seq_first, rot)
+    try:
+        return _backward_triton(g, x, w, freqs, eps, split_half, seq_first, rot)
+    except Exception as e:  # the torch backward is the same maths
+        _triton_failed = True
+        logging.warning("[ZenTrainer] fused q/k rope: the Triton backward failed (%s); plain torch from here", e)
+        return _backward_torch(g, x, w, freqs, eps, split_half, seq_first, rot)
+
+
+def _backward_triton(g, x, w, freqs, eps, split_half, seq_first, rot):
+    D = x.shape[-1]
     hd, sd = (2, 1) if seq_first else (1, 2)  # which dims hold the heads and the sequence
     B, H, L = x.shape[0], x.shape[hd], x.shape[sd]
     f = _freqs(freqs, x, seq_first, torch.float32)

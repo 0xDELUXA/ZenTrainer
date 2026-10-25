@@ -167,13 +167,32 @@ TIGHTEN_MARGIN = 1024 ** 3
 TIGHTEN_RETRIES = 3
 # each fit is a trial: measured over these steps after it (the recompile it may cause is over by
 # then), it stays only if steps didn't get slower than this and the allocator never had to retry.
-# A card run nearly full can be slower than one streaming more weights.
+# A card run nearly full can be slower than one streaming more weights. Steps are compared with
+# steps of the same shape before the fit: H3 clips of different lengths took 1.4 to 3 s a step,
+# and raw times "measured" every fit as slower. No same-shaped pair by TRIAL_LONGEST: kept.
 TRIAL_STEPS = (4, 7)
+TRIAL_LONGEST = 16
 TRIAL_SLOWER = 1.08
 
 # the run page's phase timings (data, forward, backward, optimizer) come from every this-many-th
 # step: timing them stalls the GPU at each phase's end
 PHASES_EVERY = 10
+
+
+def trial_ratio(before: list, after: list) -> float | None:
+    """How much slower steps got after a fit: the median of after/before over step shapes seen in
+    both (each a median of its steps), or None when no shape is in both. Entries are
+    (warm step, seconds, shape)."""
+    def by_shape(rows):
+        out: dict = {}
+        for _, sec, key in rows:
+            if key is not None:
+                out.setdefault(key, []).append(sec)
+        return {k: sorted(v)[len(v) // 2] for k, v in out.items()}
+
+    b, a = by_shape(before), by_shape(after)
+    ratios = sorted(a[k] / b[k] for k in a.keys() & b.keys() if b[k] > 0)
+    return ratios[len(ratios) // 2] if ratios else None
 
 
 class _Lazy:
@@ -238,7 +257,7 @@ class Trainer:
                     # compile fuses the norms and rope itself, and the custom op would keep it from
                     # fusing what's around them: Krea 2 at 1024, 1.38 s a step compiled, 1.42 with it
                     compat.fused_qk_rope = False
-                    logging.info("[ZenTrainer] fused q/k norm + rope off: the compiled blocks fuse them already")
+                    logging.info("[ZenTrainer] fused q/k norm + rope off while the blocks run compiled: they fuse them already")
                 # compiled first, so checkpointing wraps the compiled forward
                 with compiled_blocks(dm, compile_on) as self._compiled, \
                         gradient_checkpointing(dm, self.spec.memory.gradient_checkpointing,
@@ -369,7 +388,7 @@ class Trainer:
         import folder_paths
 
         s = self.spec
-        compat.apply(qk_rope=s.memory.fused_qk_rope)  # ComfyUI model fixes for training (see compat/)
+        compat.apply(qk_rope=s.memory.fused_qk_rope is not False)  # ComfyUI model fixes for training (see compat/)
         from .kernels import int8_backward
 
         int8_backward.enable("w8a8" if s.memory.w8a8_backward else "fused" if s.memory.fused_int8_backward else "")
@@ -754,6 +773,7 @@ class Trainer:
         total = self.spec.optim.steps
         self._peak = 0  # the most VRAM PyTorch held during training steps (callbacks reset its own counter)
         self._warm = 0
+        self._times = []
         if torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats()
         while self.step < total:
@@ -773,7 +793,9 @@ class Trainer:
                 try:
                     ts = time.perf_counter()
                     self._train_step()
-                    self._times = (getattr(self, "_times", []) + [time.perf_counter() - ts])[-12:]
+                    # (warm step, seconds, the step's shape): fits compare steps of the same shape
+                    self._times = (getattr(self, "_times", []) +
+                                   [(self._warm, time.perf_counter() - ts, getattr(self, "_step_key", None))])[-24:]
                     self._backoffs = 0  # the retries count in a row: a long run's sample passes don't use them up
                 except torch.OutOfMemoryError as e:
                     if not self._back_off(e):
@@ -785,7 +807,7 @@ class Trainer:
                 self._peak = max(self._peak, torch.cuda.max_memory_reserved())
                 self._warm += 1
                 trial = getattr(self, "_trial", None)
-                if trial and self._warm == trial["at"] + TRIAL_STEPS[1]:
+                if trial and self._warm >= trial["at"] + TRIAL_STEPS[1]:
                     self._judge()
                 if self._warm in TIGHTEN_AT:
                     self._tighten()
@@ -826,6 +848,7 @@ class Trainer:
         self._recompile_if_moved()
         self._resident = None
         self._warm = self._peak = 0
+        self._times = []  # step times are by warm step, which starts again
         torch.cuda.reset_peak_memory_stats()
 
     def _recompile_if_moved(self) -> None:
@@ -839,6 +862,8 @@ class Trainer:
                 # fresh graphs as reset_if_moved below drops the old ones
                 self._streaming_eager = eager
                 torch.compiler.set_stance("force_eager" if eager else "default")
+                if self.spec.memory.fused_qk_rope is not False:
+                    compat.fused_qk_rope = eager  # the fused op while uncompiled; compile fuses them itself
                 if eager:
                     logging.info("[ZenTrainer] %.1f of %.1f GB of the model on the card, the rest streams: the compiled "
                                  "blocks run eager (a lower VRAM headroom keeps it all on the card)",
@@ -904,8 +929,7 @@ class Trainer:
         if target - have < 256 * 1024 ** 2:
             return
         gb = 1024 ** 3
-        times = getattr(self, "_times", [])[-3:]
-        self._trial = {"at": self._warm, "prev": have, "before": sorted(times)[len(times) // 2] if times else None,
+        self._trial = {"at": self._warm, "prev": have, "before": list(getattr(self, "_times", [])),
                        "retries": torch.cuda.memory_stats().get("num_alloc_retries", 0)}
         self._resident = target
         self._fit_weights()
@@ -918,22 +942,25 @@ class Trainer:
 
     def _judge(self) -> None:
         """Keep the last fit only if it didn't slow the steps (see TRIAL_STEPS)."""
-        trial, self._trial = self._trial, None
-        times = getattr(self, "_times", [])[-(TRIAL_STEPS[1] - TRIAL_STEPS[0] + 1):]
-        after = sorted(times)[len(times) // 2] if times else None
+        trial = self._trial
+        after = [t for t in getattr(self, "_times", []) if t[0] >= trial["at"] + TRIAL_STEPS[0]]
+        ratio = trial_ratio(trial["before"], after)
         retries = torch.cuda.memory_stats().get("num_alloc_retries", 0) - trial["retries"]
-        slower = trial["before"] and after and after > trial["before"] * TRIAL_SLOWER
+        if ratio is None and not retries and self._warm < trial["at"] + TRIAL_LONGEST:
+            return  # no step shaped like one before the fit yet: judge on a later step
+        self._trial = None
+        slower = ratio is not None and ratio > TRIAL_SLOWER
         gb = 1024 ** 3
         if not slower and not retries:
-            if trial["before"] and after:
-                logging.info("[ZenTrainer] with more of the model on the card: %.2f -> %.2f s a step", trial["before"], after)
+            if ratio is not None:
+                logging.info("[ZenTrainer] with more of the model on the card: steps %+.0f%% (same-shaped steps)", (ratio - 1) * 100)
             return
         patcher = self.models.patcher
         have = patcher.loaded_size()
         self._resident = self._ceiling = trial["prev"]
         self._fit_weights()
         self._recompile_if_moved()
-        why = f"{retries} allocator retries (the card ran too full)" if retries else f"steps {trial['before']:.2f} -> {after:.2f} s"
+        why = f"{retries} allocator retries (the card ran too full)" if retries else f"same-shaped steps {(ratio - 1) * 100:+.0f}%"
         logging.info("[ZenTrainer] more of the model on the card was slower (%s): back to %.1f GB from %.1f, and no higher",
                      why, trial["prev"] / gb, have / gb)
 
@@ -1004,9 +1031,12 @@ class Trainer:
             mark = now
 
         self.objective.start_step()
+        keys = []
         for a in range(acc):
             idx = next(self.batches)
             x0, weight, shapes = self.batch(idx)
+            keys.append((tuple(x0.shape), repr(shapes)))
+            self._step_key = tuple(keys)  # what this step's time depends on (the auto VRAM fit's trials)
             conds = [self._cond(i, x0, shapes) for i in idx]
 
             noise = torch.randn(x0.shape, generator=self.generator).to(self.device)
