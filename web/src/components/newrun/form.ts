@@ -46,6 +46,7 @@ const OPT_DEFAULTS: Record<string, { lr: number; scheduler?: TrainSpec['optim'][
   // it barely climbs (measured on Krea 2, batch 1: 1.0e-6 -> 1.3e-6 in 280 steps). Start near a normal
   // LoRA LR and let it adjust from there
   Automagic3: { lr: 1e-4, scheduler: 'constant' },
+  Automagic4: { lr: 1e-4, scheduler: 'constant' }, // v3's controller underneath: the same start
   Prodigy: { lr: 1 },
   Lion: { lr: 3e-5 },
   Lion8bit: { lr: 3e-5 },

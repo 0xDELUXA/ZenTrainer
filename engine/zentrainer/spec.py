@@ -160,9 +160,9 @@ class OptimSpec:
     # Weight averaging: checkpoints, samples and the saved LoRA use a running average of the
     # adapter (0.98 = roughly the last 50 steps). 0 = off.
     ema: float = 0.0
-    # Automagic3's adaptive rate never drops below this fraction of its start (0.5 = half). Its
-    # rate peaks early and then decays, and on MOSS-Image runs stalled under-strength (likeness
-    # flat after ~500 steps); a floor keeps it learning. 0 = no floor.
+    # Automagic v3's (and v4's) adaptive rate never drops below this fraction of its start (0.5 =
+    # half). v3's rate peaks early and then decays, and on MOSS-Image runs stalled under-strength
+    # (likeness flat after ~500 steps); a floor keeps it learning. v4 settles on its own. 0 = no floor.
     lr_floor: float = 0.0
 
 

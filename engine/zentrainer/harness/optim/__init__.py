@@ -15,7 +15,7 @@ import torch
 
 from ...spec import OptimSpec
 
-AUTOMAGIC3_CEILING = 4.0  # Automagic3's LR stays under this many times where it started
+AUTOMAGIC3_CEILING = 4.0  # Automagic v3's and v4's LR stays under this many times where it started
 
 
 class Lion(torch.optim.Optimizer):
@@ -152,6 +152,13 @@ def _automagic3(p, s):
                              **({"min_lr": s.learning_rate * s.lr_floor} if s.lr_floor > 0 else {}))
 
 
+def _automagic4(p, s):
+    from .automagic4_batched import Automagic4Batched
+
+    return Automagic4Batched(p, lr=s.learning_rate, weight_decay=s.weight_decay, fused=False,
+                             **({"min_lr": s.learning_rate * s.lr_floor} if s.lr_floor > 0 else {}))
+
+
 def _prodigy(p, s):
     from prodigyopt import Prodigy
 
@@ -197,6 +204,12 @@ OPTIMIZERS: dict[str, OptimizerDef] = {d.id: d for d in [
                  note="Ostris's v3: one LR per group that climbs while updates agree and backs off when they "
                       "flip. It moves only on a steady trend, which small batches rarely give, so start near "
                       "a normal LoRA LR (1e-4); the schedule and warmup are ignored."),
+    OptimizerDef("Automagic4", "Automagic v4 (auto LR, experimental)",
+                 _automagic4,
+                 lr_hint="1e-4 (start)", adaptive=True,
+                 note="Ostris's v4, experimental: v3 whose LR settles at a level instead of sinking once "
+                      "the trend is learned, and whose most sensitive weights take smaller steps. Start "
+                      "near 1e-4; the schedule and warmup are ignored."),
     OptimizerDef("Prodigy", "Prodigy (auto LR)",
                  _prodigy,
                  package="prodigyopt", pip="prodigyopt", lr_hint="1.0",
@@ -247,7 +260,7 @@ def build(params: Iterable[torch.nn.Parameter], spec: OptimSpec):
         for g in opt.param_groups:
             if "min_lr" in g:
                 g["min_lr"] = spec.learning_rate * spec.lr_floor * g.get("lr_mult", 1.0)
-    if d.id == "Automagic3":
+    if d.id in ("Automagic3", "Automagic4"):
         # its own ceiling (1e3) never binds: a steady trend (an edit's new input columns, an input
         # dropped half the time) kept it climbing to hundreds and the run blew up
         for g in opt.param_groups:

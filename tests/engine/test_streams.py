@@ -626,6 +626,97 @@ def test_automagic3_batched_bf16_trains():
     assert all(p.dtype == torch.bfloat16 and torch.isfinite(p).all() for p in ps)
 
 
+def test_automagic4_batched_matches_the_vendored_step():
+    from zentrainer.harness.optim.automagic4 import Automagic4
+    from zentrainer.harness.optim.automagic4_batched import Automagic4Batched
+
+    for steps in (1, 12):  # the measuring-only first step, then past the full sign window
+        a, oa = _automagic3_run(Automagic4, torch.float32, steps=steps)
+        b, ob = _automagic3_run(Automagic4Batched, torch.float32, steps=steps)
+        for pa, pb in zip(a, b):
+            assert torch.allclose(pa, pb, rtol=1e-5, atol=1e-7)
+            sa, sb = oa.state[pa], ob.state[pb]
+            assert sa.keys() == sb.keys() and sa["step"] == sb["step"]  # states save and resume either way
+            assert torch.allclose(sa["sens_ref"], sb["sens_ref"], rtol=1e-5)
+            assert torch.equal(sa["sign_history"], sb["sign_history"])
+        assert oa.get_learning_rates() == pytest.approx(ob.get_learning_rates(), rel=1e-5)
+    assert oa.get_learning_rates()[0] != 1e-3  # the vote ran: it's compared too
+
+
+def test_automagic4_bf16_trains():
+    from zentrainer.harness.optim.automagic4_batched import Automagic4Batched
+
+    ps, _ = _automagic3_run(Automagic4Batched, torch.bfloat16, steps=60)
+    assert all(p.dtype == torch.bfloat16 and torch.isfinite(p).all() for p in ps)
+
+
+def test_automagic4_first_step_only_measures():
+    from zentrainer.harness.optim.automagic4_batched import Automagic4Batched
+
+    torch.manual_seed(0)
+    w, b = torch.nn.Parameter(torch.randn(8, 8)), torch.nn.Parameter(torch.randn(8))
+    before = (w.detach().clone(), b.detach().clone())
+    opt = Automagic4Batched([w, b], lr=1e-3, fused=False)
+    w.grad, b.grad = torch.randn(8, 8), torch.randn(8)
+    opt.step()
+    assert torch.equal(w, before[0]) and torch.equal(b, before[1])  # nothing moved
+    assert "sens_ref" in opt.state[w]  # but it has its reference for the next
+    w.grad, b.grad = torch.randn(8, 8), torch.randn(8)
+    opt.step()
+    assert not torch.equal(w, before[0])
+
+
+def test_automagic4_holds_its_rate_where_v3_sinks():
+    from zentrainer.harness.optim.automagic3_batched import Automagic3Batched
+    from zentrainer.harness.optim.automagic4_batched import Automagic4Batched
+
+    # a weight already at its minimum, its gradient only the pull back plus noise: v3 reads the
+    # pull's flips as overshoot and walks its LR down; v4 settles where steps are step_target
+    def settle(cls):
+        torch.manual_seed(0)
+        w = torch.nn.Parameter(torch.zeros(32, 32))
+        opt = cls([w], lr=1e-3, fused=False)
+        for _ in range(400):
+            w.grad = w.detach() + 0.1 * torch.randn_like(w)
+            opt.step()
+        return opt.get_learning_rates()[0]
+
+    assert settle(Automagic3Batched) < 1e-3
+    assert settle(Automagic4Batched) > 2e-3
+
+
+def test_automagic4_resumes_where_it_left_off():
+    from zentrainer.harness import optim
+    from zentrainer.spec import OptimSpec
+
+    def make():
+        torch.manual_seed(0)
+        ps = [torch.nn.Parameter(torch.randn(16, 8) * 0.1), torch.nn.Parameter(torch.randn(8, 16) * 0.1)]
+        return ps, optim.build(ps, OptimSpec(optimizer="Automagic4", learning_rate=1e-3))[0]
+
+    def steps(ps, opt, seed, n):
+        g = torch.Generator().manual_seed(seed)
+        for _ in range(n):
+            for p in ps:
+                p.grad = torch.randn(p.shape, generator=g)
+            opt.step()
+
+    a, oa = make()
+    steps(a, oa, 1, 10)
+    steps(a, oa, 2, 10)
+    b, ob = make()
+    steps(b, ob, 1, 10)
+    saved = ob.state_dict()
+    c, oc = make()
+    for pc, pb in zip(c, b):
+        pc.data.copy_(pb.data)
+    oc.load_state_dict(saved)
+    steps(c, oc, 2, 10)
+    for pa, pc in zip(a, c):
+        assert torch.allclose(pa, pc, rtol=1e-5, atol=1e-7)
+    assert optim.current_lr(oa) == pytest.approx(optim.current_lr(oc), rel=1e-5)
+
+
 def test_old_optimizer_states_resume_without_the_alphas():
     from zentrainer.harness.optim import remap_state
 

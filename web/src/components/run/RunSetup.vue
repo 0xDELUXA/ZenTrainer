@@ -9,8 +9,8 @@ import { fmtLr, useRunContext } from './context'
 const { detail } = useRunContext()
 
 const specOpen = ref(false)
-const OPT_NAMES: Record<string, string> = { Automagic3: 'Automagic v3', AdamWScheduleFree: 'AdamW schedule-free', AdamW8bit: 'AdamW 8-bit' }
-const ADAPTIVE = new Set(['Automagic', 'Automagic3', 'Prodigy']) // they set their own LR: the schedule hardly matters
+const OPT_NAMES: Record<string, string> = { Automagic3: 'Automagic v3', Automagic4: 'Automagic v4', AdamWScheduleFree: 'AdamW schedule-free', AdamW8bit: 'AdamW 8-bit' }
+const ADAPTIVE = new Set(['Automagic', 'Automagic3', 'Automagic4', 'Prodigy']) // they set their own LR: the schedule hardly matters
 const baseName = (p: string) => p.split(/[\\/]/).pop()!.replace(/\.safetensors$/, '')
 // a dataset in the datasets folder (by name, not a path elsewhere) opens in the lightbox, on the run's caption set
 const showData = ref<{ name: string; set: string } | null>(null)

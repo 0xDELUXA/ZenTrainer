@@ -411,8 +411,9 @@ def test_optimizer_catalog_builds_what_is_available():
         opt, sched = optim.build([torch.nn.Parameter(torch.ones(4))], OptimSpec(optimizer=row["id"], learning_rate=lr))
         optim.set_mode(opt, training=True)  # as a run does (schedule-free ones refuse to step otherwise)
         q = opt.param_groups[0]["params"][0]
-        q.grad = torch.ones_like(q)
-        opt.step()
+        for _ in range(2 if row["id"] == "Automagic4" else 1):  # its first step only measures
+            q.grad = torch.ones_like(q)
+            opt.step()
         assert not torch.equal(q.detach(), torch.ones(4)), row["id"]  # it moved
 
 

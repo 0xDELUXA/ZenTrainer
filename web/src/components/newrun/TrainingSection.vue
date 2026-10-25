@@ -199,7 +199,7 @@ const targets = computed({
             <span v-else class="sw-state">Off</span>
           </div>
         </ZenField>
-        <ZenField v-if="spec.optim.optimizer === 'Automagic3'" label="LR floor (%)" stack tip="Automagic v3 never lowers its learning rate below this share of the start LR. Steps on fine detail (Focus toward Detail) give it noisy signals and it can talk itself down to almost nothing; 50% kept likeness climbing on MOSS. 0 = no floor">
+        <ZenField v-if="spec.optim.optimizer === 'Automagic3' || spec.optim.optimizer === 'Automagic4'" label="LR floor (%)" stack tip="Automagic never lowers its learning rate below this share of the start LR. v3 can talk itself down to almost nothing once the trend is learned (50% kept likeness climbing on MOSS); v4 settles on its own, so it rarely needs one. 0 = no floor">
           <ZenNumber :model-value="Math.round((spec.optim.lr_floor ?? 0) * 100)" :min="0" :max="100" :step="5" :precision="0" @update:model-value="spec.optim.lr_floor = $event / 100" />
         </ZenField>
         <ZenField label="Weight decay" stack><ZenNumber v-model="spec.optim.weight_decay" :min="0" :step="0.001" :precision="4" /></ZenField>

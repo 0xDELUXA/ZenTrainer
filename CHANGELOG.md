@@ -63,6 +63,11 @@ and Manager show.
   arguments don't support automatic differentiation"). ComfyUI's FLUX.3 builds its token sequence
   and residuals in place, which is fine for sampling but not for training; ZenTrainer now does
   those steps out of place while training, with the same results.
+- **Automagic v4 (experimental):** Ostris's newest Automagic, in the optimizer list. Where v3's
+  learning rate keeps falling once the easy learning is done (what the LR floor works around), v4's
+  settles at a steady level, and its most sensitive weights take smaller steps so the rest can
+  learn faster. Batched like v3, so it's as quick, and it saves and resumes the same way. It's
+  marked experimental upstream; try it against v3 on the same dataset.
 
 ## 0.3.0 (2026-10-25)
 
