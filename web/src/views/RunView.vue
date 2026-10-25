@@ -2,13 +2,13 @@
 // One run. Header with the controls; the progress line; the loss and validation curves over the
 // samples; a rail of numbers, setup, what's in VRAM and the checkpoints. The parts are in
 // components/run/ and share the run through its context (context.ts).
-import { ZenButton, ZenNumber } from '@nynxz/zenkit-ui'
+import { ZenButton, ZenMenuItem, ZenMenuSeparator, ZenNumber, ZenPopover } from '@nynxz/zenkit-ui'
 import { computed, provide, ref, toRef } from 'vue'
 import { useRouter } from 'vue-router'
 import LossChart from '@/components/LossChart.vue'
 import StatusPill from '@/components/StatusPill.vue'
 import { downloadUrl, exportUrl } from '@/api/engine/runs'
-import { RUN, useRun } from '@/components/run/context'
+import { fmtLr, RUN, useRun } from '@/components/run/context'
 import RunCheckpoints from '@/components/run/RunCheckpoints.vue'
 import RunLoaded from '@/components/run/RunLoaded.vue'
 import RunNoise from '@/components/run/RunNoise.vue'
@@ -24,6 +24,11 @@ const run = useRun(toRef(props, 'id'))
 provide(RUN, run)
 const { detail, error, busy, lrInput, status, running, total, marks, likeSteps, send, retryable, canResume, resumePoint, resume, extendable, extend } = run
 const lrOpen = ref(false)
+// a file download from a menu item (no link to click there)
+function download(url: string) {
+  const a = Object.assign(document.createElement('a'), { href: url, download: '' })
+  a.click()
+}
 // Train more: how many steps on, and what changes with the run's length
 const moreOpen = ref(false)
 const more = ref(1000)
@@ -81,19 +86,11 @@ const modelFile = computed(() => {
           <template v-if="running">
             <ZenButton v-if="status === 'paused'" variant="primary" icon="mdi mdi-play" :disabled="!!busy" @click="send('resume')">Resume</ZenButton>
             <ZenButton v-else icon="mdi mdi-pause" :disabled="!!busy || status !== 'training'" @click="send('pause')">Pause</ZenButton>
-            <ZenButton icon="mdi mdi-content-save-outline" :disabled="!!busy || status !== 'training'" title="Save a checkpoint now" @click="send('save')">Save</ZenButton>
-            <div class="lr-wrap">
-              <ZenButton icon="mdi mdi-tune-variant" title="Change the learning rate" @click="lrOpen = !lrOpen">LR</ZenButton>
-              <div v-if="lrOpen" class="lr-pop card">
-                <span class="eyebrow">Learning rate</span>
-                <ZenNumber v-model="lrInput" :min="0" :step="0.00001" :precision="6" size="sm" />
-                <ZenButton size="sm" variant="primary" @click="send('set_lr', { lr: lrInput }); lrOpen = false">Apply</ZenButton>
-              </div>
-            </div>
             <ZenButton variant="danger" icon="mdi mdi-stop" :disabled="!!busy" @click="send('stop')">Stop</ZenButton>
           </template>
           <RouterLink v-if="retryable" :to="`/runs/new?edit=${id}`"><ZenButton icon="mdi mdi-pencil-outline" title="Change its settings, then it goes back in the queue">Edit &amp; retry</ZenButton></RouterLink>
           <RouterLink v-else-if="canResume" :to="`/runs/new?edit=${id}`"><ZenButton icon="mdi mdi-tune-variant" title="Change memory, samples, learning rate or length, then resume from its last state">Edit &amp; resume</ZenButton></RouterLink>
+          <a v-if="finalCk" :href="downloadUrl(id, finalCk.lora_name)" download><ZenButton icon="mdi mdi-download-outline" :title="`Download the final LoRA: ${finalCk.lora_name.split('/').pop()}`">Download</ZenButton></a>
           <ZenButton v-if="canResume" variant="primary" icon="mdi mdi-play-circle-outline" :disabled="!!busy" @click="resume()">
             {{ resumePoint ? `Resume from ${resumePoint}` : 'Restart' }}
           </ZenButton>
@@ -107,9 +104,44 @@ const modelFile = computed(() => {
               <ZenButton size="sm" variant="primary" :disabled="!(more > 0)" @click="trainMore">Queue</ZenButton>
             </div>
           </div>
-          <a v-if="finalCk" :href="downloadUrl(id, finalCk.lora_name)" download><ZenButton icon="mdi mdi-download-outline" :title="`Download the final LoRA: ${finalCk.lora_name.split('/').pop()}`">Download</ZenButton></a>
-          <ZenButton icon="mdi mdi-content-copy" title="New run with these settings" @click="router.push(`/runs/new?from=${id}`)">Duplicate</ZenButton>
-          <a :href="exportUrl(id)" download><ZenButton icon="mdi mdi-export-variant" title="Download this run's settings as a file to share (without your dataset or folders); Import it on New run">Export settings</ZenButton></a>
+          <!-- the rest, used now and then: one menu -->
+          <div class="lr-wrap">
+            <ZenPopover placement="bottom-end">
+              <template #trigger="{ toggle }">
+                <ZenButton icon="mdi mdi-dots-horizontal" title="More" aria-label="More actions" @click="toggle" />
+              </template>
+              <template #default="{ close }">
+                <template v-if="running">
+                  <ZenMenuItem icon="mdi mdi-content-save-outline" :disabled="!!busy || status !== 'training'" @select="send('save'); close()">
+                    Save a checkpoint now
+                  </ZenMenuItem>
+                  <ZenMenuItem icon="mdi mdi-tune-variant" @select="lrOpen = true; close()">
+                    Learning rate…
+                    <template #hint>{{ fmtLr(detail.metrics.at(-1)?.lr ?? detail.spec.optim.learning_rate) }}</template>
+                  </ZenMenuItem>
+                  <ZenMenuSeparator />
+                </template>
+                <ZenMenuItem icon="mdi mdi-content-copy" title="A new run with these settings" @select="router.push(`/runs/new?from=${id}`); close()">
+                  Duplicate
+                </ZenMenuItem>
+                <ZenMenuItem
+                  icon="mdi mdi-export-variant"
+                  title="This run's settings as a file to share (without your dataset or folders); Import it on New run"
+                  @select="download(exportUrl(id)); close()"
+                >
+                  Export settings
+                </ZenMenuItem>
+              </template>
+            </ZenPopover>
+            <div v-if="lrOpen && running" class="lr-pop card">
+              <span class="eyebrow">Learning rate</span>
+              <ZenNumber v-model="lrInput" :min="0" :step="0.00001" :precision="6" size="sm" />
+              <div class="pop-acts">
+                <ZenButton size="sm" @click="lrOpen = false">Cancel</ZenButton>
+                <ZenButton size="sm" variant="primary" @click="send('set_lr', { lr: lrInput }); lrOpen = false">Apply</ZenButton>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
       <div v-if="error" class="card err mono">{{ error }}</div>
@@ -199,6 +231,11 @@ const modelFile = computed(() => {
   padding: 12px;
   box-shadow: 0 10px 30px rgb(0 0 0 / 0.3);
   background: var(--zen-surface);
+}
+.pop-acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
 }
 .more-pop {
   width: 260px;
