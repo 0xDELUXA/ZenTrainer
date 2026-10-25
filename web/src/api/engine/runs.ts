@@ -129,6 +129,9 @@ export interface LikenessRow {
   score: number | null
   manual?: boolean
   base?: boolean
+  /** how alike the dataset's own photos are (their median against the others): about the best a
+   * score can be (newer runs only) */
+  ceiling?: number | null
 }
 
 export interface QueueState {

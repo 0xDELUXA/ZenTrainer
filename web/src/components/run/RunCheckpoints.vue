@@ -5,10 +5,11 @@
 import { ZenTip } from '@nynxz/zenkit-ui'
 import { computed, ref } from 'vue'
 import { downloadUrl } from '@/api/engine/runs'
+import { likeShare } from '@/lib/likeness'
 import { fmtBytes } from '@/stores/downloads'
 import { ckKind, useRunContext } from './context'
 
-const { id, detail, total, running, ckRows, nextSave, likeAt, ckptVal, resumable, resumeFrom } = useRunContext()
+const { id, detail, total, running, ckRows, nextSave, likeAt, likeCeil, ckptVal, resumable, resumeFrom } = useRunContext()
 
 // the best checkpoint: highest likeness when faces are scored (a character LoRA), else lowest validation loss
 const bestBy = computed(() => {
@@ -83,7 +84,7 @@ async function copy(text: string) {
         <span v-if="c.step === bestStep" class="chip best-chip" :title="bestBy === 'likeness' ? 'Its samples look most like the dataset\'s faces' : 'Lowest validation loss of the saved checkpoints'">best</span>
         <span class="spacer" />
         <span class="ck-val mono">
-          <template v-if="likeAt(c.step) != null"><span title="How much its samples' faces look like the dataset's (same person ≳ 0.5)">♥ {{ likeAt(c.step)!.toFixed(2) }}</span> · </template>
+          <template v-if="likeAt(c.step) != null"><span :title="likeCeil ? `How much its samples' faces look like the dataset's (same person ≳ 0.5); ${likeShare(likeAt(c.step)!, likeCeil)} of how alike your photos are to each other (${likeCeil.toFixed(2)})` : 'How much its samples\' faces look like the dataset\'s (same person ≳ 0.5)'">♥ {{ likeAt(c.step)!.toFixed(2) }}<template v-if="likeCeil"> ({{ likeShare(likeAt(c.step)!, likeCeil) }})</template></span> · </template>
           <span title="Validation loss">{{ ckptVal(c.step) != null ? ckptVal(c.step)!.toFixed(4) : '—' }}</span>
         </span>
         <span class="ck-acts">

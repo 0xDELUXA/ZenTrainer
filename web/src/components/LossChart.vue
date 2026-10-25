@@ -10,6 +10,7 @@
 // the x axis, where the speed changes. Each legend key shows or hides its line; the x axis is
 // steps or the run's time.
 import { maxOf, minOf } from '@/lib/extent'
+import { SHARE_TIP } from '@/lib/likeness'
 import { resumed } from '@/lib/resumed'
 import { computed, ref, watch } from 'vue'
 import type { MetricRow, ValidationRow } from '@/api/engine'
@@ -22,7 +23,7 @@ const props = withDefaults(
     marks?: { step: number; kind: 'ckpt' | 'sample'; done: boolean }[]
     val?: ValidationRow[]
     /** with faces on: each sampled step's mean likeness (its own 0-1 scale, no axis; values on hover) */
-    like?: { step: number; score: number }[]
+    like?: { step: number; score: number; share?: string }[]
     /** resolution stages: from `start` the run blends into `label`'s resolution, all of it by `end` */
     stages?: { start: number; end: number; label: string }[]
     height?: number
@@ -275,6 +276,7 @@ const fmt = (v: number) => (v === 0 || Math.abs(v) >= 0.01 ? v.toFixed(4) : v.to
         </div>
         <div v-if="likeAt(hovered.p.step)">
           likeness <b class="mono">{{ likeAt(hovered.p.step)!.score.toFixed(2) }}</b>
+          <span v-if="likeAt(hovered.p.step)!.share" class="muted" :title="SHARE_TIP"> · {{ likeAt(hovered.p.step)!.share }} of your photos</span>
           <span class="muted">@{{ likeAt(hovered.p.step)!.step }}</span>
         </div>
         <div v-if="hovered.p.lr != null" class="muted">lr <span class="mono">{{ fmtLr(hovered.p.lr) }}</span></div>

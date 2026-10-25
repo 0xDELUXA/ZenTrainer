@@ -3,6 +3,7 @@
 // commands). RunView makes it; its parts take it with useRunContext().
 import { computed, inject, onMounted, onUnmounted, ref, shallowReactive, type InjectionKey, type Ref, watch } from 'vue'
 import { onComfyMessage } from '@/api/comfy'
+import { likeCeiling, likeShare } from '@/lib/likeness'
 import { keepCompact } from '@/lib/resumed'
 import {
   ACTIVE,
@@ -168,10 +169,14 @@ export function useRun(id: Ref<string>) {
   })
 
   // with faces on: each sampled step's mean likeness (run samples and Sample now; manual tries left out)
+  const likeCeil = computed(() => likeCeiling(detail.value?.likeness))
   const likeSteps = computed(() => {
     const by = new Map<number, number[]>()
     for (const r of detail.value?.likeness ?? []) if (!r.manual && r.score != null) by.set(r.step, [...(by.get(r.step) ?? []), r.score])
-    return [...by].sort((a, b) => a[0] - b[0]).map(([step, xs]) => ({ step, score: xs.reduce((a, b) => a + b, 0) / xs.length }))
+    return [...by].sort((a, b) => a[0] - b[0]).map(([step, xs]) => {
+      const score = xs.reduce((a, b) => a + b, 0) / xs.length
+      return { step, score, share: likeShare(score, likeCeil.value) }
+    })
   })
   const likeLast = computed(() => likeSteps.value.at(-1) ?? null)
   const likeFirst = computed(() => likeSteps.value[0] ?? null)
@@ -261,7 +266,7 @@ export function useRun(id: Ref<string>) {
     id, detail, error, busy, lrInput, sampling, now, load,
     last, total, step, progress, status, running, ckRows, sampleCkpt, sampleBusy, newestCkpt, sampleFinished,
     wall, marks, nextSave, nextSample,
-    likeSteps, likeLast, likeFirst, ckptVal, likeAt,
+    likeSteps, likeLast, likeFirst, likeCeil, ckptVal, likeAt,
     queuedTries, queueTry, queueFinishedTries,
     send, resumable, retryable, resumePoint, canResume, resumeFrom, resume, extendable, extend,
   }

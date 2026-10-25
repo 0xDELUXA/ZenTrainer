@@ -97,7 +97,7 @@ const tiles = computed<Tile[]>(() => {
       label: 'Faces',
       value: v.face_one_identity ? `alike ${v.face_likeness_median ?? '–'}` : 'mixed people',
       sub: `${v.face_coverage}/${n} faces · ${v.face_issues} issue${v.face_issues === 1 ? '' : 's'}`,
-      tip: `How much the faces look like one person: each face against the average of the others (one person is usually above 0.5, strangers below 0.3); median ${v.face_likeness_median ?? '–'}, lowest ${v.face_likeness_min ?? '–'}. ${v.face_one_identity ? 'Runs on this dataset score their samples\' likeness against it.' : 'These faces don\'t agree, so runs don\'t score likeness against them.'} Issues: no face, several people, or a face unlike the rest.`,
+      tip: `How much the faces look like one person: each face against the average of the others (one person is usually above 0.5, strangers below 0.3); median ${v.face_likeness_median ?? '–'}, lowest ${v.face_likeness_min ?? '–'}. ${v.face_one_identity ? `Runs on this dataset score their samples' likeness against it: ${v.face_likeness_median ?? '–'} is as alike as your photos are to each other, so a run's likeness shows as a share of it (100% = as alike as they are).` : 'These faces don\'t agree, so runs don\'t score likeness against them.'} Issues: no face, several people, or a face unlike the rest.`,
     })
   else
     out.push({

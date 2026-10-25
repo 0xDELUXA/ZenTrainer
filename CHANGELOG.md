@@ -23,6 +23,11 @@ and Manager show.
   faces switch and in Health.
 
 ### Runs
+- **Likeness as a share of your photos:** a run's likeness also shows as a percentage of how alike
+  the dataset's own photos are to each other (its median in the face report), on the chart, the
+  stats, the checkpoints and the recommended checkpoint. A LoRA that caught the face perfectly
+  would score about what the photos do, so "93% of your photos" says more than a bare 0.67. Runs
+  scored before this show the plain number.
 - **Keep only the checkpoints you want:** New run → Training → Keep checkpoints: All (as before),
   the latest few, the best few by likeness, or the lowest validation loss. The rest are deleted as
   the run goes, so a long run doesn't fill the disk. The final LoRA, the newest save (what a resume

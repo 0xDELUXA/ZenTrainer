@@ -7,6 +7,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { onComfyMessage } from '@/api/comfy'
 import { ACTIVE, EVENTS, engine, promptText, viewUrl as fileUrl, type CheckpointRow, type RunDetail, type SampleRow } from '@/api/engine'
 import { downloadUrl } from '@/api/engine/runs'
+import { likeCeiling, likeShare } from '@/lib/likeness'
 import { eta } from '@/lib/recipes'
 
 const props = defineProps<{ id: string }>()
@@ -131,7 +132,9 @@ const best = computed(() => {
   const scored = ck.map((c) => ({ c, like: likenessAt(c.step) })).filter((x) => x.like != null)
   if (scored.length) {
     const top = scored.reduce((a, b) => (b.like! > a.like! + 0.005 ? b : a))  // later wins a near tie (it's first)
-    return { step: top.c.step, why: `its samples look most like your photos (likeness ${top.like!.toFixed(2)})` }
+    const ceil = likeCeiling(d.value?.likeness)
+    const share = ceil ? `, ${likeShare(top.like!, ceil)} as alike as your photos are to each other` : ''
+    return { step: top.c.step, why: `its samples look most like your photos (likeness ${top.like!.toFixed(2)}${share})` }
   }
   return { step: ck[0]!.step, why: 'the newest: compare them below, the one you like best is the one to keep' }
 })

@@ -4,9 +4,10 @@
 import { ZenTip } from '@nynxz/zenkit-ui'
 import { computed } from 'vue'
 import { gb } from '@/stores/system'
+import { SHARE_TIP, likeShare } from '@/lib/likeness'
 import { dur, fmtLr, useRunContext } from './context'
 
-const { detail, last, wall, likeLast, likeFirst } = useRunContext()
+const { detail, last, wall, likeLast, likeFirst, likeCeil } = useRunContext()
 
 const valLast = computed(() => detail.value?.validation.at(-1))
 const valFirst = computed(() => detail.value?.validation[0])
@@ -70,9 +71,10 @@ const statGroups = computed((): { title: string; items: Stat[] }[] => {
         ...(likeLast.value
           ? [{
               k: 'Likeness',
-              v: likeDelta ? likeLast.value.score.toFixed(2) : `${likeLast.value.score.toFixed(2)} @ ${likeLast.value.step}`,
+              v: (likeDelta ? likeLast.value.score.toFixed(2) : `${likeLast.value.score.toFixed(2)} @ ${likeLast.value.step}`)
+                + (likeCeil.value ? ` (${likeShare(likeLast.value.score, likeCeil.value)})` : ''),
               delta: likeDelta,
-              tip: `At step ${likeLast.value.step}: how much the samples' faces look like the dataset's (mean of the step's samples): 1 is identical, about 0.5 and up reads as the same person, near 0 a stranger. The arrow: change since the first scored samples. ${likeFirst.value && likeFirst.value.step !== likeLast.value.step ? `It was ${likeFirst.value.score.toFixed(2)} at step ${likeFirst.value.step}.` : ''}`,
+              tip: `At step ${likeLast.value.step}: how much the samples' faces look like the dataset's (mean of the step's samples): 1 is identical, about 0.5 and up reads as the same person, near 0 a stranger.${likeCeil.value ? ` In brackets: ${SHARE_TIP.toLowerCase()}, ${likeCeil.value.toFixed(2)} here.` : ''} The arrow: change since the first scored samples. ${likeFirst.value && likeFirst.value.step !== likeLast.value.step ? `It was ${likeFirst.value.score.toFixed(2)} at step ${likeFirst.value.step}.` : ''}`,
             }]
           : []),
       ],

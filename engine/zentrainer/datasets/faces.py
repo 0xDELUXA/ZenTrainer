@@ -230,8 +230,11 @@ def likeness(path: Path, centroid: np.ndarray, frames: int = 4, face_model: str 
 
 class LikenessWorker:
     """Scores a run's samples off the training thread (CPU), appending {"step", "index", "score",
-    "model"} rows to the run's "likeness" stream as each finishes. The face model is the one set
-    when the run started, for the whole run, so its scores compare with each other."""
+    "model", "ceiling"} rows to the run's "likeness" stream as each finishes. The face model is the
+    one set when the run started, for the whole run, so its scores compare with each other.
+    `ceiling` is how alike the dataset's own pictures are (their median against the others): a
+    LoRA that caught the face perfectly would still score about that, so a score reads best as a
+    share of it."""
 
     def __init__(self, store, run_id: str, dataset: str):
         import queue
@@ -240,6 +243,7 @@ class LikenessWorker:
         self.model = model()
         self.q: queue.Queue = queue.Queue()
         self.centroid = None
+        self.ceiling = None
         self.thread = threading.Thread(target=self._run, daemon=True, name="zentrainer-likeness")
         self.thread.start()
 
@@ -257,6 +261,7 @@ class LikenessWorker:
 
         try:
             report = dataset_faces(self.dataset, face_model=self.model)
+            self.ceiling = report.get("identity")
             if report.get("one_identity"):
                 self.centroid = dataset_centroid(self.dataset, self.model)
             else:
@@ -278,7 +283,7 @@ class LikenessWorker:
                     raise FileNotFoundError(row["filename"])
                 score = likeness(path, self.centroid, face_model=self.model)
                 out = {"run_id": self.run_id, "step": row["step"], "index": row["index"], "score": score,
-                       "model": self.model}
+                       "model": self.model, "ceiling": self.ceiling}
                 if row.get("manual"):
                     out.update(manual=True, base=bool(row.get("base")))
                 self.store.append(self.run_id, "likeness", out)
