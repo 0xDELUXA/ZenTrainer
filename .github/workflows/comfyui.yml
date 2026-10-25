@@ -1,0 +1,38 @@
+name: comfyui
+
+# Training through a real ComfyUI (tests/comfy), on CPU with tiny models: what a change in
+# ComfyUI's model code breaks. Pushes test the ComfyUI comfy.lock pins; the nightly run tests
+# ComfyUI's latest, so a change there shows up before users update into it.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: ComfyUI commit or branch (empty for the comfy.lock pin)
+        default: ''
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+
+      - name: ComfyUI
+        env:
+          WANT: ${{ github.event_name == 'schedule' && 'master' || inputs.ref }}
+        run: |
+          ref="${WANT:-$(python3 -c "import json; print(json.load(open('comfy.lock'))['comfyui']['ref'])")}"
+          git init -q comfyui
+          git -C comfyui fetch -q --depth 1 https://github.com/comfyanonymous/ComfyUI.git "$ref"
+          git -C comfyui checkout -q FETCH_HEAD
+          echo "ComfyUI $ref: $(git -C comfyui log -1 --format='%h %cd')"
+          uv venv -q -p 3.12 comfyui/.venv
+          uv pip install -q --python comfyui/.venv torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+          uv pip install -q --python comfyui/.venv -r comfyui/requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+
+      - run: uv run --no-project --with pytest python -m pytest -q tests/comfy

@@ -121,13 +121,16 @@ frozen. Training reverses the first and relies on the second.
 zt dev                     # ComfyUI + the web app with hot reload (:5173/zentrainer/)
 zt restart                 # after engine (Python) changes (check `zt queue` first)
 cd web && pnpm build       # type-check and build web/dist
-python -m pytest -q tests  # engine tests
+python -m pytest -q tests  # engine tests; tests/comfy also trains each patched model family
+                           # (tiny, on CPU) through comfyui/ when it's there
 uv run --frozen --project cli --with pytest python -m pytest -q tests/cli   # zt's tests
 ```
 
 `tests/engine/test_streams.py::test_sharpest_frame_picks_the_detailed_one` fails on main
 already; anything else failing is new. New behaviour gets a test when it can break quietly
-(formats, compatibility, anything touching the user's files).
+(formats, compatibility, anything touching the user's files). A patch of ComfyUI model code
+(harness/compat.py) gets its family in tests/comfy/smoke.py, which also checks the patched model
+computes what ComfyUI's code does.
 
 ## Commits, changelog, releases
 
@@ -141,6 +144,7 @@ already; anything else failing is new. New behaviour gets a test when it can bre
   republished: a fix is the next patch version.
 - The Registry pack is what git tracks minus `.comfyignore` (plus `web/dist` and `engine/js` from
   `[tool.comfy] includes`). Anything only a clone needs goes in `.comfyignore`.
-- CI: `ci` runs the tests and the web build on every push; `web-dist` rebuilds the prebuilt app
+- CI: `ci` runs the tests and the web build on every push; `comfyui` runs tests/comfy against the
+  pinned ComfyUI on every push and against ComfyUI's latest nightly; `web-dist` rebuilds the prebuilt app
   (the orphan `web-dist` branch, for clones without Node) when `web/` changes; `publish-registry`
   runs on `v*` tags.
