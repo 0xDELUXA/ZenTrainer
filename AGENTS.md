@@ -129,7 +129,7 @@ uv run --frozen --project cli --with pytest python -m pytest -q tests/cli   # zt
 `tests/engine/test_streams.py::test_sharpest_frame_picks_the_detailed_one` fails on main
 already; anything else failing is new. New behaviour gets a test when it can break quietly
 (formats, compatibility, anything touching the user's files). A patch of ComfyUI model code
-(harness/compat.py) gets its family in tests/comfy/smoke.py, which also checks the patched model
+(a module in harness/compat/) gets its family in tests/comfy/smoke.py, which also checks the patched model
 computes what ComfyUI's code does.
 
 ## Commits, changelog, releases

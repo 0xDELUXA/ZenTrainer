@@ -82,12 +82,14 @@ and calls ComfyUI **as a library** for everything else.
 - `harness/memory/` imports `patch`/`unpatch`/`find_modules_at_depth` from
   `comfy_extras/nodes_train.py`. That's the only private import. The proposal is to move
   these helpers into a public `comfy/train/` module.
-- `harness/compat.py` patches ComfyUI model code that samples fine but can't train,
-  only while `in_training` is set, so the pinned checkout stays untouched. MiniMax H3:
-  the training branch of its attention calls comfy_kitchen's fused RMSNorm+rope, which
-  has no backward (replaced by the plain-torch partial split-half rope), and `_mod_gate`
-  adds into the residual stream in place after the norms saved it (made out of place).
-  Each is the fix to send upstream; delete the patch once ComfyUI has it.
+- `harness/compat/` patches ComfyUI model code that samples fine but can't train, one
+  module per model, only while `in_training` is set, so the pinned checkout stays
+  untouched. MiniMax H3: the training branch of its attention calls comfy_kitchen's fused
+  RMSNorm+rope, which has no backward (replaced by the plain-torch partial split-half
+  rope), and `_mod_gate` adds into the residual stream in place after the norms saved it
+  (made out of place). FLUX.3 fills its joint sequence with `cat(out=...)` and adds its
+  residuals in place, both out of place while gradients are on. Each is the fix to send
+  upstream; delete the module once ComfyUI has it.
 - Possible bug in native `TrainLoraNode`: in bucket and multi-res modes the latents
   appear to skip `process_latent_in`. Unverified; worth a test before reporting.
 

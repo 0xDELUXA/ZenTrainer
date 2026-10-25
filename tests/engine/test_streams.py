@@ -97,7 +97,7 @@ def test_h3_targets():
 
 
 def test_rope_split_half_rotates_only_the_first_dims():
-    from zentrainer.harness.compat import _rope_split_half
+    from zentrainer.harness.compat.minimax_h3 import _rope_split_half
 
     x = torch.randn(1, 5, 2, 8)
     pe = torch.zeros(1, 5, 1, 2, 2, 2)

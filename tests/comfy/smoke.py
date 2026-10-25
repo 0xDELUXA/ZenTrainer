@@ -5,7 +5,7 @@
 The model is ComfyUI's own class for the family at a tiny size with random weights, loaded the
 way a file is (comfy.sd detects the family from its keys); the text encoder and VAE are stand-ins
 of the right widths. Everything else is ZenTrainer's: the trainer, ComfyUI's patches in
-harness/compat.py, the LoRA, sampling, saving and resuming: what a change in ComfyUI's model code
+harness/compat/, the LoRA, sampling, saving and resuming: what a change in ComfyUI's model code
 breaks, which the unit tests' stand-in ComfyUI modules can't show.
 
 Every ComfyUI folder points into the work dir, and CUDA is hidden: a GPU busy training is left
@@ -173,9 +173,10 @@ def stock_load(patcher, path: str) -> tuple[int, list[str]]:
 
 
 def patch_drift(spec) -> float:
-    """How far (relative to its size) ZenTrainer's patched model (harness/compat.py, gradients on) is from ComfyUI's own
-    code (in training mode, without gradients, where it runs as written) on one picture: a patch
-    is a copy of ComfyUI's code, and this is what says when ComfyUI's changed under it."""
+    """How far (relative to its size) ZenTrainer's patched model (harness/compat/, gradients on) is
+    from ComfyUI's own code (in training mode, without gradients, where it runs as written) on one
+    picture: a patch is a copy of ComfyUI's code, and this is what says when ComfyUI's changed
+    under it."""
     import comfy.model_management as mm
 
     from zentrainer.harness import compat, trainer

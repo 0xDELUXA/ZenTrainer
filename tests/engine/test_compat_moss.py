@@ -1,4 +1,4 @@
-"""The MOSS attention patch (harness/compat.py _moss) on a ComfyUI whose attention takes more."""
+"""The MOSS attention patch (harness/compat/moss.py) on a ComfyUI whose attention takes more."""
 
 import sys
 import types
@@ -6,6 +6,7 @@ import types
 import torch
 
 from zentrainer.harness import compat
+from zentrainer.harness.compat import moss as moss_patch
 
 
 def _install(monkeypatch, in_training):
@@ -27,7 +28,7 @@ def _install(monkeypatch, in_training):
     sys.modules["comfy"].model_management = mm
     monkeypatch.setattr(compat, "_applied", set())
     monkeypatch.setattr(compat, "fused_qk_rope", True)
-    compat._moss()
+    moss_patch.apply()
     return moss, calls
 
 
