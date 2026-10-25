@@ -49,7 +49,7 @@ COPY --chown=zen:zen comfy.lock ./
 COPY --chown=zen:zen cli cli
 RUN uv sync --frozen --no-dev --project cli --python "$(sed -n 's/.*"python": *"\([^"]*\)".*/\1/p' comfy.lock)" \
  && cli/.venv/bin/zt setup --torch "$TORCH" \
- && cli/.venv/bin/zt extras optimizers
+ && cli/.venv/bin/zt extras optimizers faces
 COPY --chown=zen:zen . .
 COPY --chown=zen:zen --from=web /src/web/dist web/dist
 
