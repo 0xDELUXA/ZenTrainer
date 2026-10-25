@@ -46,6 +46,10 @@ and Manager show.
 - **Fixed: MOSS Image on a newer ComfyUI** stopped with "attention() got an unexpected keyword
   argument 'mask'": ComfyUI's MOSS attention takes more arguments since its MOSS-Image edit
   support, and ZenTrainer's fused q/k wrapper didn't pass them on.
+- **Fixed: FLUX.3 couldn't train:** every run stopped on its first step ("functions with out=...
+  arguments don't support automatic differentiation"). ComfyUI's FLUX.3 builds its token sequence
+  and residuals in place, which is fine for sampling but not for training; ZenTrainer now does
+  those steps out of place while training, with the same results.
 
 ## 0.3.0 (2026-10-25)
 
