@@ -18,7 +18,9 @@ and Manager show.
   as before (existing face reports and likeness stay valid), and it's a little faster. The face
   model downloads the first time faces run: 104 MB for Standard, 147 MB for Larger, into
   `models/detection/zentrainer/`. Models InsightFace downloaded to `~/.insightface` aren't used
-  any more; delete them if nothing else needs them.
+  any more; delete them if nothing else needs them. While a dataset's faces are checked, its page
+  shows how far along it is (and the face model's download, the first time), beside the Check
+  faces switch and in Health.
 
 ### Runs
 - **Keep only the checkpoints you want:** New run → Training → Keep checkpoints: All (as before),

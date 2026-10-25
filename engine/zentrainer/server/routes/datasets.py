@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 from pathlib import Path
 
@@ -111,11 +112,20 @@ def register(server) -> None:
         """The dataset's faces: per picture, faces found, the main face's size, how much it looks
         like the rest, outliers. Cached per file; the first look takes a while (and downloads the
         face model the first time). available: false, with a hint, when the model can't download."""
+        from ... import events
         from ...datasets import faces
 
         name = request.match_info["name"]
+        last = 0.0
+
+        def progress(done: int, total: int) -> None:  # at most 4 a second, and the last one
+            nonlocal last
+            if done == total or time.monotonic() - last >= 0.25:
+                last = time.monotonic()
+                events.emit(events.FACES, {"dataset": name, "done": done, "total": total})
+
         try:
-            out = await asyncio.to_thread(faces.dataset_faces, name)
+            out = await asyncio.to_thread(faces.dataset_faces, name, progress)
         except FileNotFoundError:
             return _bad("dataset not found", 404)
         except RuntimeError as e:  # the face model didn't download

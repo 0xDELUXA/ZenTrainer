@@ -18,6 +18,7 @@ SAMPLE = "zentrainer.sample"  # {run_id, step, index, prompt, filename, subfolde
 #                 s_step, s_total, preview (JPEG data URL)}
 SAMPLE_PROGRESS = "zentrainer.sample_progress"
 LIKENESS = "zentrainer.likeness"  # {run_id, step, index, score, manual?, base?}: a sample's face vs the dataset's
+FACES = "zentrainer.faces"  # {dataset, done, total}: a dataset's face check going through its pictures
 VALIDATION = "zentrainer.validation"  # {run_id, step, val_loss, by_noise: {noise level: loss}}
 ZENKIT_JOB = "zenkit.job"  # mirrored so ZenKit's taskbar shows the run too
 

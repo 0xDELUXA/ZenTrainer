@@ -11,7 +11,7 @@ import DatasetStats from '@/components/DatasetStats.vue'
 import { useDatasetContext } from './context'
 
 const props = defineProps<{ name: string; drawer: boolean }>()
-const { fit, showMasks, view, items, sets, activeSet, controlSets, activeControl, selected, load, review, counts, imageFlags, statsPanel, faces, facesBusy, captionSubject, facesSetting, toggleFaces, flash } =
+const { fit, showMasks, view, items, sets, activeSet, controlSets, activeControl, selected, load, review, counts, imageFlags, statsPanel, faces, facesBusy, facesStatus, facesShort, captionSubject, facesSetting, toggleFaces, flash } =
   useDatasetContext()
 
 // The side panel stays pinned without a scrollbar of its own: under the sticky toolbar when it fits
@@ -205,8 +205,8 @@ function onCaptioned(set: string) {
       </RouterLink>
       <!-- with faces on, how they read: part of the dataset's health -->
       <p v-if="healthOpen && facesSetting && (facesBusy || faces?.items)" class="side-note faces-line">
-        <i class="mdi mdi-face-recognition" />
-        <template v-if="facesBusy">Checking faces…</template>
+        <i :class="facesBusy ? 'mdi mdi-loading mdi-spin' : 'mdi mdi-face-recognition'" />
+        <template v-if="facesBusy">{{ facesStatus }}</template>
         <template v-else-if="faces?.items">
           {{ faces.with_face }}/{{ faces.total }} with a face{{ faces.one_identity === false ? ' · mixed people' : ` · alike ${faces.identity?.toFixed(2) ?? '–'}` }}{{ counts.faceIssues ? ` · ${counts.faceIssues} to look at` : '' }}
         </template>
@@ -278,9 +278,10 @@ function onCaptioned(set: string) {
       <template v-if="settingsOpen">
       <div class="side-row" :title="faces && !faces.available ? faces.hint : 'Faces checked on open, a Faces score in its health, and likeness for this dataset\'s runs'">
         <span class="small">Check faces</span><span class="spacer" />
+        <span v-if="facesBusy" class="small muted faces-busy" :title="facesStatus"><i class="mdi mdi-loading mdi-spin" /> {{ facesShort }}</span>
         <ZenSwitch :model-value="facesSetting" :disabled="facesBusy || (!!faces && !faces.available)" @update:model-value="toggleFaces" />
       </div>
-      <p v-if="faces && !faces.available" class="side-note">{{ faces.hint }}</p>
+      <p v-if="faces && !faces.available && !facesBusy" class="side-note">{{ faces.hint }}</p>
       <div class="side-row">
         <span class="small">Crop to the card</span><span class="spacer" />
         <ZenSwitch :model-value="fit === 'cover'" @update:model-value="fit = $event ? 'cover' : 'contain'" />
@@ -362,6 +363,10 @@ function onCaptioned(set: string) {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+.faces-busy {
+  margin-right: 8px;
+  font-variant-numeric: tabular-nums;
 }
 .set-name {
   font-weight: 400;

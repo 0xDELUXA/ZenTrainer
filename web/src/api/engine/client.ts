@@ -38,4 +38,5 @@ export const EVENTS = {
   likeness: 'zentrainer.likeness',
   caption: 'zentrainer.caption',
   download: 'zentrainer.download',
+  faces: 'zentrainer.faces',
 } as const

@@ -3,10 +3,12 @@
 // faces, and the view settings that are remembered. DatasetView makes it; its parts take it with
 // useDatasetContext().
 import type { ContextMenuItem, LightboxItem, ZenContextMenu } from '@nynxz/zenkit-ui'
-import { computed, inject, onMounted, reactive, ref, watch, type InjectionKey } from 'vue'
+import { computed, inject, onMounted, onUnmounted, reactive, ref, watch, type InjectionKey } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { engine, thumbUrl, viewUrl, type CaptionJob, type DatasetFaces, type DatasetItem } from '@/api/engine'
+import { onComfyMessage } from '@/api/comfy'
+import { EVENTS, engine, thumbUrl, viewUrl, type CaptionJob, type DatasetFaces, type DatasetItem } from '@/api/engine'
 import type DatasetStats from '@/components/DatasetStats.vue'
+import { activeDownloads, fmtBytes, startDownloadSync } from '@/stores/downloads'
 
 export const isVideoPath = (p: string) => /\.(mp4|webm|mov|mkv)$/i.test(p)
 export const aspect = (it: DatasetItem) => (it.width && it.height ? `${it.width} / ${it.height}` : '1')
@@ -161,6 +163,27 @@ export function useDataset(name: () => string) {
   // ---- faces (when on): a face per picture, how much it looks like the rest -----------------
   const faces = ref<DatasetFaces | null>(null)
   const facesBusy = ref(false)
+  const facesDone = ref<{ done: number; total: number } | null>(null) // the check's progress (zentrainer.faces)
+  onUnmounted(
+    onComfyMessage((m) => {
+      if (m.type === EVENTS.faces && m.data.dataset === name() && facesBusy.value)
+        facesDone.value = { done: Number(m.data.done), total: Number(m.data.total) }
+    }),
+  )
+  /** what the check is doing: the face model's first download, then picture by picture */
+  const facesStatus = computed(() => {
+    const dl = activeDownloads.value.find((d) => d.family === 'faces')
+    if (dl) return `Downloading the face model… ${fmtBytes(dl.done)}${dl.total ? ` of ${fmtBytes(dl.total)}` : ''}`
+    const p = facesDone.value
+    return p && p.total ? `Checking faces… ${p.done} of ${p.total}` : 'Checking faces…'
+  })
+  /** the same, short enough for the switch's row */
+  const facesShort = computed(() => {
+    const dl = activeDownloads.value.find((d) => d.family === 'faces')
+    if (dl) return dl.total ? `${Math.round((dl.done / dl.total) * 100)}%` : fmtBytes(dl.done)
+    const p = facesDone.value
+    return p && p.total ? `${p.done}/${p.total}` : ''
+  })
   const captionSubject = ref('') // this dataset's "caption_subject" setting: what auto-captions call the subject
   const facesSetting = ref(false) // this dataset's "faces" setting: on = checked on open, in the stats and runs
   async function toggleFaces() {
@@ -181,6 +204,8 @@ export function useDataset(name: () => string) {
   }
   async function checkFaces() {
     facesBusy.value = true
+    facesDone.value = null
+    startDownloadSync() // the face model downloads the first time: its progress shows here
     try {
       faces.value = await engine.datasetFaces(name())
       statsPanel.value?.load() // the faces score joins the stats
@@ -366,7 +391,7 @@ export function useDataset(name: () => string) {
     items, sets, activeSet, cap, k, controlSets, activeControl, inputs, loading, error, notice, drafts, saving, bust, load,
     filter, query, sortKey, sortDir, selected, reviewing, review, counts,
     isMuted, setMuted, imageFlags, statsPanel,
-    faces, facesBusy, captionSubject, facesSetting, toggleFaces, faceOf, faceIssue, faceNote,
+    faces, facesBusy, facesStatus, facesShort, captionSubject, facesSetting, toggleFaces, faceOf, faceIssue, faceNote,
     shown, visible, more, sortBy, toggleSelect, onItemClick, menu, menuItems, onItemMenu, allShownSelected, toggleAll,
     flash, save, removeMany,
     layout, ctrlView, full, thumb, thumbSize, lightbox, lbItems,
