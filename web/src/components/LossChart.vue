@@ -21,7 +21,7 @@ const props = withDefaults(
     smoothing?: number
     marks?: { step: number; kind: 'ckpt' | 'sample'; done: boolean }[]
     val?: ValidationRow[]
-    /** faces extra: each sampled step's mean likeness (its own 0-1 scale, no axis; values on hover) */
+    /** with faces on: each sampled step's mean likeness (its own 0-1 scale, no axis; values on hover) */
     like?: { step: number; score: number }[]
     /** resolution stages: from `start` the run blends into `label`'s resolution, all of it by `end` */
     stages?: { start: number; end: number; label: string }[]

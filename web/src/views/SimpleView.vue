@@ -69,7 +69,7 @@ async function loadItems() {
 }
 
 // ---- each photo checked: the dataset's own picture checks (blurry, small, duplicate...) and, with
-// the faces extra, its faces (none, several, someone else's), shown on the thumbnails ----------
+// faces on, its faces (none, several, someone else's), shown on the thumbnails ----------
 const flags = ref<Record<string, string[]>>({})
 const faces = ref<DatasetFaces | null>(null)
 const checking = ref(false)

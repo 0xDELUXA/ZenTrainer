@@ -35,9 +35,7 @@ EOF
 
 # ---- 2. the user's data, on the volume ------------------------------------------------------------
 read -ra folders < <("$ZT/cli/.venv/bin/python" -I -c 'from zt import repo; print(*repo.MODEL_FOLDERS)')
-mkdir -p "$DATA"/{input,output,user,insightface} "${folders[@]/#/$DATA/models/}"
-# InsightFace downloads its face models to ~/.insightface: on the volume, they download once
-ln -sfnT "$DATA/insightface" /home/zen/.insightface
+mkdir -p "$DATA"/{input,output,user} "${folders[@]/#/$DATA/models/}"
 if [[ $(findmnt -n -o TARGET -T "$DATA") == / ]]; then
   echo "ZenTrainer: WARNING: $DATA is not on a volume, so everything in it is lost when the container is deleted." \
        "Mount a volume at /workspace (on RunPod: a volume or network volume)." >&2

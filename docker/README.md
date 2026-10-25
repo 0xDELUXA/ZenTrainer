@@ -31,7 +31,6 @@ in the log if you didn't):
   output/     trained LoRAs (output/zentrainer/loras), samples
   user/       run history, settings, the queue
   models/     checkpoints/, diffusion_models/, vae/, text_encoders/, loras/, …
-  insightface/  face models, downloaded when you first turn on faces for a dataset
   .password   the generated password, when you didn't set one
 ```
 

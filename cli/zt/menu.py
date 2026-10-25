@@ -87,7 +87,7 @@ def menu() -> None:
             ("Monitor runs (live)", "monitor"),
             ("Start ZenTrainer here (this window shows its log)" if not up else "Restart ZenTrainer", "start"),
             ("Doctor: what's installed", "doctor"),
-            ("Install extras (optimizers, faces)", "extras"),
+            ("Install extras (optimizers)", "extras"),
             ("Settings: port, updates, intro", "settings"),
             ("Quit", "quit"),
         ], "open")

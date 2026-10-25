@@ -41,7 +41,7 @@ const keepItems = [
 ]
 const keepTip =
   'Which saves stay on disk; the rest are deleted as the run goes. The final LoRA, the newest save and saves made by hand or at a stop always stay. ' +
-  "Best likeness: its samples' faces against the dataset's (a character, with the faces extra). " +
+  "Best likeness: its samples' faces against the dataset's (a character, with faces on for its dataset). " +
   "Lowest validation loss is measured on the training pictures, so it mostly keeps the later saves"
 const alphaAuto = computed({
   get: () => spec.network.alpha == null,

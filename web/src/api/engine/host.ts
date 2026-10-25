@@ -90,10 +90,8 @@ export interface EngineSettings {
   restart_needed: boolean
   /** datasets the saved datasets folder won't show: still where they were, to move by hand */
   datasets_elsewhere: string[]
-  /** the face recognition models on offer (engine datasets/faces.py MODELS) */
+  /** the face recognition models on offer (engine analysis/faces.py MODELS) */
   face_models: { id: string; label: string; note: string; downloaded: boolean }[]
-  /** InsightFace is installed (the faces extra) */
-  faces_available: boolean
   message?: string
 }
 

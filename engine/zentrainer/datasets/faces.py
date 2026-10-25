@@ -1,5 +1,4 @@
-"""Faces (optional: `scripts/zt extras faces`, or pip install insightface onnxruntime
-opencv-python-headless): InsightFace on the CPU, so it never competes with training for VRAM.
+"""Faces in datasets and samples (the faces themselves come from analysis/faces.py):
 
 - A dataset's face report: how many faces each picture has, how big the main one is, and how much
   it looks like the rest (cosine to the dataset's average face). Outliers stand out. A face mostly
@@ -10,9 +9,7 @@ opencv-python-headless): InsightFace on the CPU, so it never competes with train
 
 The recognition model is a setting (face_model): buffalo_l's ArcFace R50, or antelopev2's larger
 R100, which tells similar faces apart better and is slower on the CPU. Scores from the two don't
-compare, so caches are per model and each likeness row says which one scored it. InsightFace's
-pretrained models are for non-commercial research use only; they download to
-~/.insightface/models on first use (or are already there).
+compare, so caches are per model and each likeness row says which one scored it.
 """
 
 from __future__ import annotations
@@ -20,36 +17,17 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 import threading
 from pathlib import Path
 
 import numpy as np
 
-# id -> (label, what it is); the first is the default
-MODELS = {
-    "buffalo_l": ("Standard (buffalo_l)", "ArcFace R50 trained on WebFace600K, with RetinaFace: quick on the CPU."),
-    "antelopev2": ("Larger (antelopev2)", "ArcFace R100 trained on Glint360K, with SCRFD: tells similar faces apart "
-                                          "better, about 1.5 times slower on the CPU. A 360 MB download the first time."),
-}
-DEFAULT = "buffalo_l"
+from ..analysis.faces import DEFAULT, MODELS
+
 MASKED_OUT = 0.5  # a face whose box averages below this in the picture's mask is masked out
 MAX_FACES = 6  # faces kept per frame (largest first)
 OUTLIER = 0.3  # cosine to the other pictures' average face below this: probably not the same person
 ONE_IDENTITY = 0.35  # the set's median below this: its faces aren't one person (likeness means little)
-_app: tuple[str, object] | None = None  # (model, FaceAnalysis): the one in use, rebuilt when the setting changes
-_lock = threading.RLock()  # detect() holds it while _get() builds the app
-
-
-def available() -> bool:
-    try:
-        import cv2  # noqa: F401
-        import insightface  # noqa: F401
-        import onnxruntime  # noqa: F401
-
-        return True
-    except ImportError:
-        return False
 
 
 def model() -> str:
@@ -63,65 +41,14 @@ def model() -> str:
     return name if name in MODELS else DEFAULT
 
 
-def _home() -> Path:
-    return Path(os.path.expanduser("~/.insightface"))
-
-
-def downloaded(name: str) -> bool:
-    d = _home() / "models" / name
-    return any(d.glob("*.onnx")) or any((d / name).glob("*.onnx"))
-
-
-def _root(name: str) -> str:
-    """The root FaceAnalysis loads `name` from, downloading it first if needed. antelopev2's zip
-    unpacks one folder too deep (models/antelopev2/antelopev2/*.onnx), where FaceAnalysis can't find
-    it: then a link in ZenTrainer's own folder points at the inner one, and ~/.insightface is left
-    as it is (other custom nodes use it)."""
-    from insightface.utils import storage
-
-    home = _home()
-    storage.ensure_available("models", name, root=str(home))
-    d = home / "models" / name
-    if any(d.glob("*.onnx")) or not any((d / name).glob("*.onnx")):
-        return str(home)
-    import folder_paths
-
-    root = Path(folder_paths.get_user_directory()) / "zentrainer" / "insightface"
-    link = root / "models" / name
-    if not link.exists():
-        link.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            link.symlink_to(d / name, target_is_directory=True)
-        except OSError:  # Windows without developer mode: a junction needs no rights
-            import subprocess
-
-            subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(d / name)], check=True, capture_output=True)
-    return str(root)
-
-
-def _get(name: str):
-    global _app
-    with _lock:
-        if _app is None or _app[0] != name:
-            from insightface.app import FaceAnalysis
-
-            app = FaceAnalysis(name=name, root=_root(name), allowed_modules=["detection", "recognition"],
-                               providers=["CPUExecutionProvider"])
-            app.prepare(ctx_id=-1, det_size=(640, 640))
-            _app = (name, app)
-        return _app[1]
-
-
 def detect(rgb: np.ndarray, name: str | None = None) -> list[dict]:
     """Faces in an (H, W, 3) uint8 RGB picture, largest first: bbox, detector score, the share of
     the picture's height the face spans, and its unit ArcFace embedding (from `name`, or the
     model the settings pick)."""
+    from ..analysis import faces
+
     h = rgb.shape[0]
-    with _lock:  # the onnx sessions aren't shared across threads
-        faces = _get(name or model()).get(np.ascontiguousarray(rgb[..., ::-1]))
-    out = [{"bbox": [float(v) for v in f.bbox], "score": float(f.det_score),
-            "share": float((f.bbox[3] - f.bbox[1]) / max(h, 1)), "emb": np.asarray(f.normed_embedding, np.float32)}
-           for f in faces]
+    out = [{**f, "share": (f["bbox"][3] - f["bbox"][1]) / max(h, 1)} for f in faces.faces(rgb, name or model())]
     return sorted(out, key=lambda f: -f["share"])
 
 

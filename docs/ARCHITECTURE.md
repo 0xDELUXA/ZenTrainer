@@ -173,6 +173,14 @@ and calls ComfyUI **as a library** for everything else.
 - **Datasets** (`datasets/folders.py`): list, per-image view with sizes, caption edit, bulk
   prefix/suffix/replace, upload, delete, create; every path is checked to stay inside
   its folder. The scanner skips `.`/`_` folders (other trainers' caches and thumbnails).
+- **Faces** (`analysis/faces.py`, `datasets/faces.py`): InsightFace's SCRFD detector and
+  ArcFace (buffalo_l, antelopev2) in plain PyTorch (`analysis/nets/`), with InsightFace's
+  letterbox, anchors, NMS and 5-point alignment, and OpenCV's resize and warp done in numpy.
+  The weights are safetensors in `nynxz/Zentrainer` (pinned by commit), downloaded into
+  `models/detection/zentrainer/` through the download manager the first time faces run. The
+  networks' parameter names are that file format (`tests/engine/test_faces_model.py` holds
+  their fingerprints). `datasets/faces.py` builds the face reports, per-model caches and
+  likeness on top; it all runs on the CPU, so it never takes VRAM from a run.
 - **Memory** (`system.py`): VRAM (device, PyTorch allocated/reserved, comfy_aimdo) and
   RAM (system, process) sampled at 1 Hz into a 15-minute buffer; sidebar meters and a
   System page with charts. The System page can restart ComfyUI (`os.execv` of the same

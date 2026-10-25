@@ -167,7 +167,7 @@ export function useRun(id: Ref<string>) {
     return { step: next, in: dur((next - step.value) / last.value.it_s) }
   })
 
-  // faces extra: each sampled step's mean likeness (run samples and Sample now; manual tries left out)
+  // with faces on: each sampled step's mean likeness (run samples and Sample now; manual tries left out)
   const likeSteps = computed(() => {
     const by = new Map<number, number[]>()
     for (const r of detail.value?.likeness ?? []) if (!r.manual && r.score != null) by.set(r.step, [...(by.get(r.step) ?? []), r.score])
@@ -181,7 +181,7 @@ export function useRun(id: Ref<string>) {
     for (const r of detail.value?.validation ?? []) if (r.step <= stepAt) v = r.val_loss
     return v ?? null
   }
-  // faces extra: the run's samples' likeness at a step (their mean; manual tries left out)
+  // with faces on: the run's samples' likeness at a step (their mean; manual tries left out)
   const likeAt = (stepAt: number): number | null => {
     const xs = (detail.value?.likeness ?? []).filter((r) => r.step === stepAt && !r.manual && r.score != null).map((r) => r.score!)
     return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null

@@ -11,6 +11,15 @@ and Manager show.
   SSH takes keys only, and your datasets, runs, LoRAs and models stay on the volume. Setup for
   RunPod is in docker/README.md; the image is `ghcr.io/nynxz/zentrainer`.
 
+### Datasets
+- **Faces need nothing installed:** face reports and likeness scores now run on ZenTrainer's own
+  port of InsightFace's models, in plain PyTorch, so the faces extra is gone (no insightface,
+  onnxruntime or OpenCV, and none of their clashes with other custom nodes). Scores are the same
+  as before (existing face reports and likeness stay valid), and it's a little faster. The face
+  model downloads the first time faces run: 104 MB for Standard, 147 MB for Larger, into
+  `models/detection/zentrainer/`. Models InsightFace downloaded to `~/.insightface` aren't used
+  any more; delete them if nothing else needs them.
+
 ### Runs
 - **Keep only the checkpoints you want:** New run → Training → Keep checkpoints: All (as before),
   the latest few, the best few by likeness, or the lowest validation loss. The rest are deleted as

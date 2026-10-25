@@ -315,10 +315,6 @@ async function checkUpdates() {
           the model it started with; scores from different models don't compare.
         </p>
       </div>
-      <p v-if="!storage.faces_available" class="warn">
-        <i class="mdi mdi-puzzle-outline" /> Not installed: add the faces extra (<span class="mono">zt extras faces</span>, or
-        <span class="mono">pip install insightface onnxruntime opencv-python-headless</span> in ComfyUI's environment).
-      </p>
       <div class="stack">
         <div class="eyebrow">Model</div>
         <div class="segmented">

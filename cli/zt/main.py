@@ -6,7 +6,7 @@
     zt dev [--port N]          ComfyUI in the background + the web app with hot reload
     zt restart [--force]       restart the running managed ComfyUI
     zt monitor                 a live dashboard of the queue, runs and memory
-    zt extras optimizers|faces
+    zt extras optimizers
     zt update [--ref REF]      pull ZenTrainer (fast-forward only), re-sync ComfyUI and the web app
     zt attach COMFYUI_DIR      zt doctor      zt web [--build]
 
@@ -66,7 +66,7 @@ def parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("extras", help="install optional packages into the managed ComfyUI")
     s.add_argument("groups", nargs="+", choices=list(comfy.EXTRAS),
-                   help="optimizers: Prodigy, 8-bit, schedule-free, CAME; faces: InsightFace face reports + likeness")
+                   help="optimizers: Prodigy, 8-bit, schedule-free, CAME")
     s = sub.add_parser("update", help="pull ZenTrainer and re-sync ComfyUI and the web app, or move the pin with --ref")
     s.add_argument("--ref", help="a ComfyUI commit, tag or branch to pin")
     s = sub.add_parser("attach", help="link the engine into an existing ComfyUI instead")

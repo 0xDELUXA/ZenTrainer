@@ -108,19 +108,18 @@ def register(server) -> None:
 
     @routes.get("/zentrainer/api/datasets/{name}/faces")
     async def dataset_faces(request):
-        """The dataset's faces (faces extra): per picture, faces found, the main face's size, how
-        much it looks like the rest, outliers. Cached per file; the first look takes a while."""
+        """The dataset's faces: per picture, faces found, the main face's size, how much it looks
+        like the rest, outliers. Cached per file; the first look takes a while (and downloads the
+        face model the first time). available: false, with a hint, when the model can't download."""
         from ...datasets import faces
 
-        if not faces.available():
-            return web.json_response({"available": False,
-                                      "hint": "install the faces extra: scripts/zt extras faces "
-                                              "(pip install insightface onnxruntime opencv-python-headless)"})
         name = request.match_info["name"]
         try:
             out = await asyncio.to_thread(faces.dataset_faces, name)
         except FileNotFoundError:
             return _bad("dataset not found", 404)
+        except RuntimeError as e:  # the face model didn't download
+            return web.json_response({"available": False, "hint": str(e)})
         return web.json_response({"available": True, **out})
 
     @routes.post("/zentrainer/api/datasets/{name}/split")

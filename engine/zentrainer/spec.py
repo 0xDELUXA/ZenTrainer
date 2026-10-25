@@ -266,7 +266,7 @@ class SamplePrompt:
 
 @dataclass
 class SampleSpec:
-    # score each sample's face against the dataset's (needs the faces extra; off without faces)
+    # score each sample's face against the dataset's (with faces on for the dataset)
     likeness: bool = True
     every: int = 0  # 0 = off
     # each a prompt, or {"prompt", "width"?, "height"?, "frames"?, "seed"?} for its own size

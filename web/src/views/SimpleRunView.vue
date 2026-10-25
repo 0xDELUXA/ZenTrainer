@@ -120,7 +120,7 @@ const rows = computed(() => {
   if (steps[0] === 0) out.push({ key: 'base', label: 'Before training', step: 0, ckpt: null, recommended: false, samples: at(0) })
   return out
 })
-// the checkpoint to recommend: the one whose samples look most like the photos (faces extra), else the newest
+// the checkpoint to recommend: the one whose samples look most like the photos (faces on), else the newest
 const likenessAt = (step: number) => {
   const xs = (d.value?.likeness ?? []).filter((x) => x.step === step && !x.manual && x.score != null).map((x) => x.score!)
   return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null

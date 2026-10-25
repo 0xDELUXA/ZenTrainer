@@ -233,8 +233,6 @@ def extras(groups: list[str]) -> None:
 
 EXTRAS = {
     "optimizers": ["prodigyopt", "bitsandbytes", "schedulefree", "came-pytorch"],
-    # face reports and sample likeness (InsightFace models: non-commercial research use only)
-    "faces": ["insightface", "onnxruntime", "opencv-python-headless"],
 }
 
 

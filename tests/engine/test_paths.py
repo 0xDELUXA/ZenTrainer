@@ -17,6 +17,7 @@ def comfy(tmp_path, monkeypatch):
     fp.get_temp_directory = lambda: str(tmp_path / "comfy" / "temp")
     fp.get_user_directory = lambda: str(tmp_path / "comfy" / "user")
     fp.get_folder_paths = lambda _kind: []
+    fp.get_full_path = lambda _kind, _name: None
     monkeypatch.setitem(sys.modules, "folder_paths", fp)
     paths.reset()
     yield tmp_path / "comfy"

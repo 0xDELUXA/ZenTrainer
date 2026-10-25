@@ -10,7 +10,7 @@ sizes, captions), the new one is appended to its history, so the panel can show 
                   own median), sensibly exposed, no letterbox bars, no transparency, not heavily
                   JPEG-compressed (per-picture flags for the view)
     uniqueness    share of pictures without a near-duplicate of themselves (pairs())
-    faces/balance with faces on (faces extra): how much the faces agree (each against the others)
+    faces/balance with faces on: how much the faces agree (each against the others)
                   times the share of pictures without a face issue;
                   without one, how evenly the pictures spread over aspect ratios
 
@@ -281,7 +281,7 @@ def image_flags(looks: dict[str, dict | None], sides: dict[str, int], found: lis
 def compute(name: str, set_name: str = "default") -> dict:
     """The dataset's metrics and 0-1 scores, now, for one caption set: its captions, and without
     the pictures muted in it."""
-    from . import folders as datasets, faces
+    from . import folders as datasets
     from ..harness.data import video
     from ..harness.data import muted, scan
 
@@ -342,21 +342,20 @@ def compute(name: str, set_name: str = "default") -> dict:
         "pairs": sum(1 for it in items if it.control_sets),
     }
     face_scores = None
-    if faces.available():
-        report = _cached_faces(name)
-        if report is not None:
-            rows = report["items"].values()
-            issues = sum(1 for r in rows if r["faces"] != 1 or r["outlier"])
-            likes = [r["likeness"] for r in rows if r["likeness"] is not None]
-            identity = report.get("identity")
-            m.update(face_coverage=report["with_face"], face_issues=issues,
-                     face_likeness_median=round(st.median(likes), 3) if likes else None,
-                     face_likeness_min=round(min(likes), 3) if likes else None,
-                     face_one_identity=bool(report.get("one_identity")))
-            # how much the faces agree (each against the others: 0.2 = strangers, 0.7 = clearly one
-            # person), times the share of pictures without a face issue
-            agree = 0.0 if identity is None else max(0.0, min(1.0, (identity - 0.2) / 0.5))
-            face_scores = agree * (1 - issues / max(1, len(report["items"])))
+    report = _cached_faces(name)
+    if report is not None:
+        rows = report["items"].values()
+        issues = sum(1 for r in rows if r["faces"] != 1 or r["outlier"])
+        likes = [r["likeness"] for r in rows if r["likeness"] is not None]
+        identity = report.get("identity")
+        m.update(face_coverage=report["with_face"], face_issues=issues,
+                 face_likeness_median=round(st.median(likes), 3) if likes else None,
+                 face_likeness_min=round(min(likes), 3) if likes else None,
+                 face_one_identity=bool(report.get("one_identity")))
+        # how much the faces agree (each against the others: 0.2 = strangers, 0.7 = clearly one
+        # person), times the share of pictures without a face issue
+        agree = 0.0 if identity is None else max(0.0, min(1.0, (identity - 0.2) / 0.5))
+        face_scores = agree * (1 - issues / max(1, len(report["items"])))
 
     def clamp(x):
         return max(0.0, min(1.0, x))

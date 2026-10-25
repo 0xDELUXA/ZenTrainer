@@ -248,7 +248,7 @@ def save_settings(changes: dict) -> dict:
 def describe() -> dict:
     """The saved settings, what this process actually uses, whether a restart is pending (the
     folder only: the face model applies at the next face check), and the face models on offer."""
-    from .datasets import faces
+    from .analysis import faces
 
     saved = read_settings()
     active = folder()
@@ -261,8 +261,7 @@ def describe() -> dict:
             # datasets the saved datasets folder won't list, still where they were (moved by hand)
             "datasets_elsewhere": _datasets_left(wanted) if wanted else [],
             "face_models": [{"id": k, "label": label, "note": note, "downloaded": faces.downloaded(k)}
-                            for k, (label, note) in faces.MODELS.items()],
-            "faces_available": faces.available()}
+                            for k, (label, note, *_) in faces.MODELS.items()]}
 
 
 # ---- files by ComfyUI /view address ----------------------------------------------------------------

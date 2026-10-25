@@ -158,7 +158,7 @@ export function useDataset(name: () => string) {
   // the side panel's health card, reloaded when muting or faces change its scores
   const statsPanel = ref<InstanceType<typeof DatasetStats> | null>(null)
 
-  // ---- faces (faces extra): a face per picture, how much it looks like the rest -----------------
+  // ---- faces (when on): a face per picture, how much it looks like the rest -----------------
   const faces = ref<DatasetFaces | null>(null)
   const facesBusy = ref(false)
   const captionSubject = ref('') // this dataset's "caption_subject" setting: what auto-captions call the subject

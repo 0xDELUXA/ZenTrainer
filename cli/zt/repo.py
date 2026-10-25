@@ -16,7 +16,7 @@ WINDOWS = platform.system() == "Windows"
 
 # folders an existing ComfyUI keeps under models/
 MODEL_FOLDERS = ["checkpoints", "diffusion_models", "unet", "loras", "vae", "text_encoders", "clip",
-                 "clip_vision", "controlnet", "embeddings", "upscale_models", "model_patches"]
+                 "clip_vision", "controlnet", "embeddings", "upscale_models", "model_patches", "detection"]
 
 
 def set_root(root: Path) -> None:

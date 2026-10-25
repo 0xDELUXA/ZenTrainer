@@ -137,7 +137,7 @@ class Samples(Callback):
         self._base_sd = None  # the base LoRA (network.base_lora), for the alternate model
 
     def _like(self, t, row: dict) -> None:
-        """Hand a landed sample to the likeness worker (faces extra), started on first use."""
+        """Hand a landed sample to the likeness worker, started on first use."""
         if not t.spec.samples.likeness or not t.store or row.get("sweep"):  # a slider's strip: five faces
             return
         if getattr(self, "_liker", None) is None:
@@ -145,7 +145,7 @@ class Samples(Callback):
 
             from ..datasets import folders as datasets
 
-            if not faces.available() or not datasets.get_settings(t.spec.dataset.folder).get("faces"):
+            if not datasets.get_settings(t.spec.dataset.folder).get("faces"):
                 self._liker = False  # likeness for datasets with faces on
                 return
             self._liker = faces.LikenessWorker(t.store, t.run_id, t.spec.dataset.folder)

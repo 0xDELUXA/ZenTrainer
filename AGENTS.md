@@ -58,7 +58,7 @@ change it: what good changes look like here, what must not break, and the workfl
   same seed; say what you compared.
 - No silent upcasts to fp32 copies of a model, no extra copies of weights, no tensors used as
   Python bookkeeping (counts, indices, shapes stay Python ints).
-- Optional packages (optimizers, InsightFace) are extras: `zt extras ...`, imported with a plain
+- Optional packages (optimizers) are extras: `zt extras ...`, imported with a plain
   `import` when the user picks them (the Registry's scanner flags `importlib.import_module`), with
   a message naming the extra when missing.
 
