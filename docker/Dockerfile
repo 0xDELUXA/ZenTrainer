@@ -60,4 +60,5 @@ RUN printf '#!/bin/sh\nexec /opt/zentrainer/cli/.venv/bin/zt "$@"\n' > /usr/loca
 
 # 8188: the app, behind the password. 22: SSH, key only, when PUBLIC_KEY is set.
 EXPOSE 8188 22
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/zentrainer-entrypoint"]
+# -s: some hosts (RunPod) run their own init as PID 1, so tini registers to reap zombies anyway
+ENTRYPOINT ["/usr/bin/tini", "-s", "--", "/usr/local/bin/zentrainer-entrypoint"]
