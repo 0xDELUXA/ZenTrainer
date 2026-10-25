@@ -1,0 +1,70 @@
+name: docker-image
+
+# The container image (docker/Dockerfile) on GHCR, one per torch build. A v* tag publishes
+# ghcr.io/<owner>/zentrainer:<version>-<torch> and :<torch>, and :latest for cu128. A manual run
+# builds any branch as :<branch>-<torch>, for trying an image on a cloud GPU before a release.
+#
+# The token can push packages, so: no pull_request trigger (a fork's code never runs with it),
+# actions pinned to commits (a moved tag can't swap in code that reads it), checkout keeps no copy
+# of it in .git/config, and it never reaches the build (no build args or secrets carry it, and
+# docker/Dockerfile.dockerignore lets only named paths into the image).
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        torch: [cu128, cu130]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+
+      - name: The tag names the version being published
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          have=$(grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)
+          test "$want" = "$have" || { echo "tag $GITHUB_REF_NAME, but pyproject.toml is $have"; exit 1; }
+
+      # a CUDA torch build is several GB unpacked; the runner's preinstalled toolchains make room
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache /usr/local/share/boost
+          docker system prune -af
+          df -h /
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051  # v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/zentrainer
+          flavor: |
+            latest=false
+          tags: |
+            type=semver,pattern={{version}},suffix=-${{ matrix.torch }}
+            type=raw,value=${{ matrix.torch }},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && matrix.torch == 'cu128' }}
+            type=ref,event=branch,suffix=-${{ matrix.torch }}
+
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          build-args: TORCH=${{ matrix.torch }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
