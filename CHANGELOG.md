@@ -71,6 +71,14 @@ and Manager show.
   settles at a steady level, and its most sensitive weights take smaller steps so the rest can
   learn faster. Batched like v3, so it's as quick, and it saves and resumes the same way. It's
   marked experimental upstream; try it against v3 on the same dataset.
+- **Fused q/k norm + rope for MiniMax H3:** Memory → Fused q/k norm + rope now covers H3 too (it
+  rotates only part of each head, which the op now handles). 9% faster a step on H3 at 512 px
+  with sound, the same results.
+- **Compile with offloading on:** compiling the blocks used to be refused whenever offloading was
+  on, even when the whole model sat on the card and nothing streamed. Now it compiles while the
+  whole model is on the card and runs uncompiled while any of it streams, switching back and forth
+  as weights move. MiniMax H3 at 512 px with sound: 32% faster a step. If the log says part of the
+  model streams, a lower VRAM headroom can keep it all on the card.
 
 ## 0.3.0 (2026-10-25)
 

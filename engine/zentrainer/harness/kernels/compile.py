@@ -21,13 +21,17 @@ import torch
 AUTO_STEPS = 500
 
 
-def wanted(setting: bool | None, steps: int, offloading: bool) -> tuple[bool, str]:
+def wanted(setting: bool | None, steps: int, offloading: bool, fits: bool = False) -> tuple[bool, str]:
     """Whether to compile, and why when it wasn't simply what was asked. Never with weights
-    offloaded, even when asked: they move between CPU and GPU during a step, which compiled
+    streaming, even when asked: they move between CPU and GPU during a step, which compiled
     graphs don't survive (an illegal memory access, a 16 GB card streaming 2 GB of Krea 2 with
-    compile on). Auto (setting None) also needs Triton, which inductor generates its kernels with
-    (often missing on Windows, where it also needs a C++ compiler)."""
-    if offloading:
+    compile on). Offloading that streams nothing is another matter: `fits` says the whole model
+    fits on the card beside training, and the trainer runs the blocks eager while any weights
+    stream (still_resident). MiniMax H3 at 512 px, offloading on but all on a 5090: 42% of the
+    step's GPU time was small ops, and compiled steps took 32% less time. Auto (setting None) also needs Triton,
+    which inductor generates its kernels with (often missing on Windows, where it also needs a C++
+    compiler)."""
+    if offloading and not fits:
         return False, "not compiling with weights offloaded" + (" (turned off: weights that move break compiled graphs)" if setting else "")
     if setting is not None:
         return setting, ""
@@ -108,6 +112,12 @@ def compiled_blocks(diffusion_model, enabled: bool):
             m.__dict__.pop("forward", None)
         if cache_was is not None:
             functorch_config.enable_autograd_cache = cache_was
+
+
+def still_resident(patcher) -> bool:
+    """With offloading on, whether every weight is on the card (none stream): compiled blocks
+    are safe only then."""
+    return patcher.loaded_size() >= patcher.model_size()
 
 
 def residency(diffusion_model) -> int:

@@ -2,6 +2,7 @@
 - Attention: the training branch calls comfy_kitchen's fused RMSNorm + rope, which has no
   backward. Plain torch here: the q/k RMSNorm modules, then the partial split-half rope (the
   first `rot` of each head's dims rotate, the rest pass through). Matches the kitchen op to ~1e-7.
+  With memory.fused_qk_rope, norms and rope run as one op that trains (kernels/qk_norm_rope.py).
 - `_mod_gate` adds the gated branch into the residual stream in place, but norm1/norm2 saved
   that stream for their backward ("modified by an inplace operation"). Out of place in training.
 """
@@ -37,8 +38,17 @@ def apply() -> None:
         q, k, v = self.qkv_proj(x).split(self.heads * self.head_dim, dim=-1)
         v = v.view(s, self.heads, self.head_dim)
         rot = rope_freqs.shape[-3] * 2
-        q = _rope_split_half(self.q_norm(q.view(1, s, self.heads, self.head_dim)), rope_freqs, rot)[0]
-        k = _rope_split_half(self.k_norm(k.view(1, s, self.heads, self.head_dim)), rope_freqs, rot)[0]
+        q, k = q.view(1, s, self.heads, self.head_dim), k.view(1, s, self.heads, self.head_dim)
+        if compat.fused_qk_rope and _plain(self.q_norm) and _plain(self.k_norm):
+            from ..kernels.qk_norm_rope import qk_norm_rope
+
+            wq = mm.cast_to(self.q_norm.weight, dtype=torch.float32, device=q.device)
+            wk = mm.cast_to(self.k_norm.weight, dtype=torch.float32, device=k.device)
+            q, k = qk_norm_rope(q, k, wq, wk, rope_freqs, self.q_norm.eps, split_half=True, seq_first=True, rot=rot)
+            q, k = q[0], k[0]
+        else:
+            q = _rope_split_half(self.q_norm(q), rope_freqs, rot)[0]
+            k = _rope_split_half(self.k_norm(k), rope_freqs, rot)[0]
         q = h3.AttentionTensorContainer(q.transpose(0, 1).unsqueeze(0))
         k = h3.AttentionTensorContainer(k.transpose(0, 1).unsqueeze(0))
         v = h3.AttentionTensorContainer(v.transpose(0, 1).unsqueeze(0))
@@ -63,6 +73,12 @@ def apply() -> None:
     h3._mod_gate = mod_gate
     compat._applied.add("minimax_h3")
     logging.info("[ZenTrainer] MiniMax H3: trainable attention and residual gate patched in")
+
+
+def _plain(norm) -> bool:
+    """A norm whose weight is a frozen tensor with nothing patched onto it (else the separate ops)."""
+    w = getattr(norm, "weight", None)
+    return isinstance(w, torch.Tensor) and not w.requires_grad and not getattr(norm, "weight_function", None)
 
 
 def _rope_split_half(x: torch.Tensor, pe: torch.Tensor, rot: int) -> torch.Tensor:

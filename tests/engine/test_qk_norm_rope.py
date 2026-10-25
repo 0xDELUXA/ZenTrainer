@@ -52,3 +52,48 @@ def test_the_fused_op_trains_like_the_separate_ones(model):
     torch.autograd.backward((separate(qs, wq, f), separate(ks, wk, f)), (gq, gk))
     assert torch.allclose(a, separate(q0, wq, f)) and torch.allclose(b, separate(k0, wk, f))
     assert torch.allclose(q.grad, qs.grad, atol=1e-12) and torch.allclose(k.grad, ks.grad, atol=1e-12)
+
+
+@pytest.mark.parametrize("rot", [8, 12])  # H3 turns only the first rot dims; 12: pairs not a power of 2
+def test_h3s_partial_rope_trains_like_its_separate_ops(rot):
+    from zentrainer.harness.compat.minimax_h3 import _rope_split_half
+
+    torch.manual_seed(0)
+    a = torch.arange(L, dtype=torch.float64)[:, None] / (10000 ** (torch.arange(0, rot, 2, dtype=torch.float64) / rot))
+    f = torch.stack([a.cos(), -a.sin(), a.sin(), a.cos()], -1).reshape(1, L, 1, rot // 2, 2, 2)
+    wq, wk = 1 + torch.randn(D, dtype=torch.float64) * 0.3, 1 + torch.randn(D, dtype=torch.float64) * 0.3
+
+    def separate(x, w):  # H3's q/k RMSNorm, then its partial split-half rope
+        return _rope_split_half(F.rms_norm(x, (D,), weight=w, eps=1e-5), f, rot)
+
+    q0 = torch.randn(1, L, H, D, dtype=torch.float64)
+    k0 = torch.randn(1, L, KV, D, dtype=torch.float64)
+    op = lambda q, k: qk_norm_rope(q, k, wq, wk, f, 1e-5, split_half=True, seq_first=True, rot=rot)  # noqa: E731
+    assert torch.autograd.gradcheck(op, (q0.clone().requires_grad_(), k0.clone().requires_grad_()), eps=1e-6, atol=1e-7)
+    q, k = q0.clone().requires_grad_(), k0.clone().requires_grad_()
+    qs, ks = q0.clone().requires_grad_(), k0.clone().requires_grad_()
+    gq, gk = torch.randn_like(q0), torch.randn_like(k0)
+    oq, ok = op(q, k)
+    torch.autograd.backward((oq, ok), (gq, gk))
+    torch.autograd.backward((separate(qs, wq), separate(ks, wk)), (gq, gk))
+    assert torch.allclose(oq, separate(q0, wq)) and torch.allclose(ok, separate(k0, wk))
+    assert torch.allclose(q.grad, qs.grad, atol=1e-12) and torch.allclose(k.grad, ks.grad, atol=1e-12)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="the Triton backward runs on CUDA")
+@pytest.mark.parametrize("rot", [0, 32, 96])  # all of D, and two partial ropes (96: 48 pairs, masked)
+def test_the_triton_backward_matches_torch(rot):
+    from zentrainer.harness.kernels import qk_norm_rope as m
+
+    if not m.TRITON_AVAILABLE:
+        pytest.skip("no Triton")
+    torch.manual_seed(0)
+    d, r = 128, rot or 128
+    a = torch.arange(64, dtype=torch.float32)[:, None] / (10000 ** (torch.arange(0, r, 2, dtype=torch.float32) / r))
+    f = torch.stack([a.cos(), -a.sin(), a.sin(), a.cos()], -1).reshape(1, 64, 1, r // 2, 2, 2).cuda()
+    x = torch.randn(1, 64, 6, d, device="cuda", dtype=torch.bfloat16)
+    g = torch.randn_like(x)
+    w = (1 + torch.randn(d) * 0.3).cuda()
+    fast = m._backward(g, x, w, f, 1e-5, True, True, rot)
+    slow = m._backward_torch(g, x, w, f, 1e-5, True, True, rot)
+    assert torch.allclose(fast.float(), slow.float(), atol=2e-2, rtol=2e-2)

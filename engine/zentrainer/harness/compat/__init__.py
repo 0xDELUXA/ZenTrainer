@@ -26,7 +26,7 @@ def apply(qk_rope: bool = False) -> None:
     for model in (minimax_h3, flux3, krea2, moss):
         model.apply()
     if qk_rope:
-        logging.info("[ZenTrainer] fused q/k norm + rope while training, for Krea 2 and MOSS (memory.fused_qk_rope)")
+        logging.info("[ZenTrainer] fused q/k norm + rope while training, for Krea 2, MOSS and MiniMax H3 (memory.fused_qk_rope)")
 
 
 def prune_unused(patcher) -> int:

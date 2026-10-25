@@ -234,7 +234,7 @@ class MemorySpec:
     # The first steps (and the first sample) take longer while it compiles. None (the default) =
     # auto: on for runs long enough to repay that, with Triton and no offloading (kernels/compile.py)
     compile_blocks: bool | None = None
-    # Krea 2, MOSS: the attention's q/k norms and rope as one op with its own backward (Triton),
+    # Krea 2, MOSS, MiniMax H3: the attention's q/k norms and rope as one op with its own backward (Triton),
     # instead of separate ops and casts (kernels/qk_norm_rope.py). Experimental: same maths, 6-7% a
     # step uncompiled; off when the blocks compile, which fuse them already
     fused_qk_rope: bool = False

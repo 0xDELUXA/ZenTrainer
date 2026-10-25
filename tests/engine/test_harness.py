@@ -3,6 +3,7 @@ No ComfyUI needed."""
 
 import math
 import re
+import types
 from pathlib import Path
 
 import pytest
@@ -744,15 +745,39 @@ def test_skipped_blocks_get_no_adapters():
         TrainSpec.from_dict({**_spec(), "network": {"skip_blocks": "layers.22"}})
 
 
-def test_compile_is_auto_unless_set_and_never_with_offloading(monkeypatch):
+def test_compile_is_auto_unless_set_and_never_with_weights_streaming(monkeypatch):
     from zentrainer.harness.kernels import compile as comp
 
     assert comp.wanted(True, 10, False) == (True, "") and comp.wanted(False, 5000, False) == (False, "")
     assert not comp.wanted(True, 5000, True)[0]  # asked for, but offloaded weights break compiled graphs
+    assert comp.wanted(True, 5000, True, fits=True)[0]  # offloading on, but the whole model fits: nothing streams
     monkeypatch.setattr(comp.os, "name", "posix")
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object() if name == "triton" else None)
     assert comp.wanted(None, comp.AUTO_STEPS, False)[0]
     assert not comp.wanted(None, comp.AUTO_STEPS - 1, False)[0]  # too short to repay the compile
     assert not comp.wanted(None, 5000, True)[0]  # offloaded weights recompile
+    assert comp.wanted(None, 5000, True, fits=True)[0]
     monkeypatch.setattr("importlib.util.find_spec", lambda name: None)
     assert not comp.wanted(None, 5000, False)[0]  # no Triton
+
+
+def test_compiled_blocks_go_eager_once_weights_stream(monkeypatch):
+    from zentrainer.harness import trainer as tr
+
+    stances = []
+    monkeypatch.setattr(tr.torch.compiler, "set_stance", lambda s: stances.append(s))
+    patcher = types.SimpleNamespace(model_size=lambda: 10, loaded_size=lambda: 10,
+                                    model=types.SimpleNamespace(diffusion_model=torch.nn.Linear(2, 2)))
+    t = tr.Trainer.__new__(tr.Trainer)
+    t.spec = TrainSpec.from_dict({**_spec(), "memory": {"offloading": True}})
+    t.models = types.SimpleNamespace(patcher=patcher)
+    t._compiled = 3
+    t._recompile_if_moved()
+    assert stances == [] and not getattr(t, "_streaming_eager", False)  # all on the card: compiled as it is
+    patcher.loaded_size = lambda: 7  # the fit (or a reload after samples) left some weights off the card
+    t._recompile_if_moved()
+    t._recompile_if_moved()
+    assert stances == ["force_eager"] and t._streaming_eager  # once, while they stream
+    patcher.loaded_size = lambda: 10  # the fit loaded the rest
+    t._recompile_if_moved()
+    assert stances == ["force_eager", "default"] and not t._streaming_eager

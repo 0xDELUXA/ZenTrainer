@@ -125,7 +125,7 @@ export interface TrainSpec {
     fused_int8_backward?: boolean
     /** int8 ConvRot bases: the input gradients on int8 tensor cores (engine default on) */
     w8a8_backward?: boolean
-    /** torch.compile the main blocks; unset/null = auto (long runs, with Triton, no offloading) */
+    /** torch.compile the main blocks; unset/null = auto (long runs, with Triton; with offloading, only while nothing streams) */
     compile_blocks?: boolean | null
     /** Krea 2 / MOSS: the q/k norms and rope as one op that trains (experimental, engine default off) */
     fused_qk_rope?: boolean
