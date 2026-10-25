@@ -4,13 +4,12 @@
 # Build from the repository root:
 #
 #   docker build -f docker/Dockerfile -t zentrainer .
-#   docker build -f docker/Dockerfile --build-arg TORCH=cu130 -t zentrainer:cu130 .
 #
 # How to run it and what it keeps where: docker/README.md.
 
-# a torch build from comfy.lock. cu128 runs on NVIDIA drivers for CUDA 12.8 and newer, which covers
-# current cloud GPUs including Blackwell (RTX 5090, B200); cu130 needs CUDA 13.0 drivers.
-ARG TORCH=cu128
+# a torch build from comfy.lock. cu130 needs an NVIDIA driver for CUDA 13.0 or newer, and covers
+# current GPUs including Blackwell (RTX 5090, B200).
+ARG TORCH=cu130
 
 # ---- the web app, built from this checkout ------------------------------------------------------
 FROM node:24-slim AS web

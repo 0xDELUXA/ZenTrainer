@@ -56,22 +56,23 @@ Each release is published to GHCR by CI (`.github/workflows/docker-image.yml`):
 
 | Tag | |
 |---|---|
-| `ghcr.io/nynxz/zentrainer:latest` | the newest release, cu128 |
-| `ghcr.io/nynxz/zentrainer:cu128`, `:cu130` | the newest release for that torch build |
-| `ghcr.io/nynxz/zentrainer:0.3.1-cu128`, … | one release, for a template that shouldn't move |
+| `ghcr.io/nynxz/zentrainer:latest` | the newest release |
+| `ghcr.io/nynxz/zentrainer:0.3.1`, … | one release, for a template that shouldn't move |
 
-`cu128` needs a driver for CUDA 12.8 or newer and covers current GPUs including Blackwell;
-`cu130` needs CUDA 13.0. The container checks the driver at start and says so if it's too old.
+It runs PyTorch's CUDA 13.0 build, so it needs an NVIDIA driver for CUDA 13.0 or newer, and covers
+current GPUs including Blackwell. The container checks the driver at start and says so if it's too
+old.
 
 To try a branch before a release, run the workflow by hand (Actions → docker-image → Run
-workflow): it publishes `:<branch>-cu128` and `:<branch>-cu130`.
+workflow): it publishes `:<branch>`.
 
-To build it yourself, from the repository root (`TORCH` is one of comfy.lock's torch builds):
+To build it yourself, from the repository root:
 
 ```sh
-docker build -f docker/Dockerfile -t zentrainer:cu128 .
-docker build -f docker/Dockerfile --build-arg TORCH=cu130 -t zentrainer:cu130 .
+docker build -f docker/Dockerfile -t zentrainer .
 ```
+
+`--build-arg TORCH=<build>` picks another of comfy.lock's torch builds, for older drivers.
 
 ## Run it locally
 
@@ -94,8 +95,7 @@ Make a template (Templates → New Template) with:
 - **Environment variables**: `ZT_PASSWORD` = `{{ RUNPOD_SECRET_zentrainer_password }}` (make that
   secret under Settings → Secrets first), and `HF_TOKEN` the same way if you need gated models
 
-Deploy it on a GPU with **Allowed CUDA versions** set to 12.8 and up (13.0 and up for a cu130
-image). Once it's running, Connect → HTTP Service 8188 opens the app. Log in with
+Deploy it on a GPU with **Allowed CUDA versions** set to 13.0 and up. Once it's running, Connect → HTTP Service 8188 opens the app. Log in with
 `zentrainer` and your password. Without `ZT_PASSWORD`, the generated one is in the pod's logs.
 
 For a terminal, `ssh zen@<pod ip> -p <mapped port>` (Connect → SSH over exposed TCP) works with

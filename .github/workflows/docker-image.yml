@@ -1,8 +1,8 @@
 name: docker-image
 
-# The container image (docker/Dockerfile) on GHCR, one per torch build. A v* tag publishes
-# ghcr.io/<owner>/zentrainer:<version>-<torch> and :<torch>, and :latest for cu128. A manual run
-# builds any branch as :<branch>-<torch>, for trying an image on a cloud GPU before a release.
+# The container image (docker/Dockerfile) on GHCR. A v* tag publishes ghcr.io/<owner>/zentrainer
+# as :<version> and :latest. A manual run builds any branch as :<branch>, for trying an image on a
+# cloud GPU before a release.
 #
 # The token can push packages, so: no pull_request trigger (a fork's code never runs with it),
 # actions pinned to commits (a moved tag can't swap in code that reads it), checkout keeps no copy
@@ -20,9 +20,6 @@ permissions:
 jobs:
   image:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        torch: [cu128, cu130]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
@@ -55,16 +52,14 @@ jobs:
           flavor: |
             latest=false
           tags: |
-            type=semver,pattern={{version}},suffix=-${{ matrix.torch }}
-            type=raw,value=${{ matrix.torch }},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && matrix.torch == 'cu128' }}
-            type=ref,event=branch,suffix=-${{ matrix.torch }}
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=ref,event=branch
 
       - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6
         with:
           context: .
           file: docker/Dockerfile
-          build-args: TORCH=${{ matrix.torch }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
