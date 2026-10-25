@@ -27,8 +27,9 @@ FROM ghcr.io/astral-sh/uv:0.11.28 AS uv
 FROM ubuntu:24.04
 ARG TORCH
 ENV DEBIAN_FRONTEND=noninteractive
+# gcc + libc6-dev: Triton compiles its CUDA helper the first time torch runs one of its kernels
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates git openssh-server procps tini \
+ && apt-get install -y --no-install-recommends ca-certificates gcc git libc6-dev openssh-server procps tini \
  && rm -rf /var/lib/apt/lists/* \
  && userdel --remove ubuntu \
  && useradd --create-home --uid 1000 --shell /bin/bash zen \
