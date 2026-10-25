@@ -67,6 +67,10 @@ and Manager show.
   A file from a newer ZenTrainer loads what this one knows, and says what it left out.
 
 ### Training
+- **Fixed: continuing from a LoRA used this run's alpha instead of the file's,** so a LoRA whose
+  alpha differs from the new run's rank (rank 16 at alpha 16 continued in a rank-4 run, say)
+  trained at a fraction of its strength, and a DoRA lost its scale. It now continues exactly as
+  ComfyUI applies the file.
 - **Fixed: video datasets with sound** stopped as their encoding finished, with "File exists" and
   the path of one of the clips: the soundtrack pass reused the name of the folder the encoded
   dataset is saved in. Datasets already encoded before were unaffected.

@@ -343,9 +343,9 @@ class Network:
                     continue
                 key = f"{name}.weight"
                 adapter = None
-                for cls in adapters:  # continuing from an existing LoRA keeps its layout
-                    loaded = cls.load(name, init_weights, float(init_weights.get(f"{key}.alpha", alpha)),
-                                      init_weights.get(f"{key}.dora_scale"))
+                for cls in adapters:  # continuing from an existing LoRA keeps its layout, and its alpha
+                    loaded = cls.load(name, init_weights, float(init_weights.get(f"{name}.alpha", alpha)),
+                                      init_weights.get(f"{name}.dora_scale"))
                     if loaded is not None:
                         adapter = loaded.to_train()
                         break
