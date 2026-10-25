@@ -5,6 +5,12 @@ and Manager show.
 
 ## Unreleased
 
+### Cloud
+- **Train on a rented GPU:** a container image (`docker/`) for RunPod and other cloud GPUs, or any
+  machine with Docker. The app sits behind a password, ComfyUI is never reachable from outside,
+  SSH takes keys only, and your datasets, runs, LoRAs and models stay on the volume. Setup for
+  RunPod is in docker/README.md; the image is `ghcr.io/nynxz/zentrainer`.
+
 ### Runs
 - **Try other samplers as the run trains:** Manual's Sampling chip opens a sampler, scheduler,
   steps and CFG for the next tries (the run's own until changed), and each try's card says what it

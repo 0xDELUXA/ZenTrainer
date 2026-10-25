@@ -1,0 +1,20 @@
+# The build context is the repository root, and the image is public: only the paths named here go
+# in, so nothing local (.git and its credentials, .env files, comfyui/, environments) ever does.
+*
+!comfy.lock
+!LICENSE
+!cli/
+!engine/
+!web/
+!docker/Caddyfile
+!docker/entrypoint.sh
+
+# made by the image itself, or local
+cli/.venv/
+web/node_modules/
+web/dist/
+web/.dist-*
+**/__pycache__/
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/

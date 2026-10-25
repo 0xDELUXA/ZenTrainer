@@ -7,6 +7,8 @@ cli/
 scripts/
 start-linux.sh
 start-windows.bat
+# the container image (docker build -f docker/Dockerfile .)
+docker/
 # fetches the prebuilt app into a clone; the pack has it built
 engine/zentrainer/server/webdist.py
 

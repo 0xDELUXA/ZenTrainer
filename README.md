@@ -109,6 +109,9 @@ changes or commits. Arguments pass through to `zt`, e.g. `./start-linux.sh start
 If ZenTrainer is already running it says where; if another program has its port (8189), it
 uses the next free one. macOS isn't supported yet.
 
+**On a rented GPU** (RunPod, Vast.ai, …) or any machine with Docker: a container image with the
+app behind a password and your work kept on the volume. → [docker/README.md](docker/README.md)
+
 ## Run it (zt)
 
 `zt` is ZenTrainer's command line (`cli/`, run through uv): the start scripts open its menu, and
@@ -160,6 +163,7 @@ engine/   ComfyUI node pack: training harness (ComfyUI as a library), run API, s
 web/      Vue app (zenkit-ui, ZenKit themes), served by ComfyUI at /zentrainer/
 tests/    harness tests that need no ComfyUI
 scripts/  zt (setup, start, dev, …); devrun.py runs a spec through the harness without the server
+docker/   the container image for cloud GPUs (RunPod, …)
 docs/     architecture, apps; banner/ holds the README banner's source
 ```
 
