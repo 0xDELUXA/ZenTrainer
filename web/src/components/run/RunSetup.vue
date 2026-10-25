@@ -3,6 +3,7 @@
 // and the full spec behind a link.
 import { ZenModal } from '@nynxz/zenkit-ui'
 import { computed, ref } from 'vue'
+import RunDatasetLightbox from './RunDatasetLightbox.vue'
 import { fmtLr, useRunContext } from './context'
 
 const { detail } = useRunContext()
@@ -11,7 +12,12 @@ const specOpen = ref(false)
 const OPT_NAMES: Record<string, string> = { Automagic3: 'Automagic v3', AdamWScheduleFree: 'AdamW schedule-free', AdamW8bit: 'AdamW 8-bit' }
 const ADAPTIVE = new Set(['Automagic', 'Automagic3', 'Prodigy']) // they set their own LR: the schedule hardly matters
 const baseName = (p: string) => p.split(/[\\/]/).pop()!.replace(/\.safetensors$/, '')
-const setup = computed((): { k: string; v: string; title?: string }[] => {
+// a dataset in the datasets folder (by name, not a path elsewhere) opens in the lightbox, on the run's caption set
+const showData = ref<{ name: string; set: string } | null>(null)
+const datasetOpen = (folder: string, set?: string) =>
+  /^([\\/]|[A-Za-z]:)/.test(folder) ? undefined : () => (showData.value = { name: folder, set: set || 'default' })
+// lead: the start of v that opens (the dataset's name)
+const setup = computed((): { k: string; v: string; title?: string; lead?: string; open?: () => void }[] => {
   const sp = detail.value?.spec
   if (!sp) return []
   const model = sp.model.unet_name ?? sp.model.ckpt_name ?? ''
@@ -31,6 +37,8 @@ const setup = computed((): { k: string; v: string; title?: string }[] => {
     {
       k: 'Dataset',
       v: [sp.dataset.folder, sp.dataset.caption_set && sp.dataset.caption_set !== 'default' ? sp.dataset.caption_set : '', sp.dataset.trigger ? `“${sp.dataset.trigger}”` : ''].filter(Boolean).join(' · '),
+      lead: sp.dataset.folder,
+      open: datasetOpen(sp.dataset.folder, sp.dataset.caption_set),
     },
     {
       k: 'Training',
@@ -69,13 +77,17 @@ const setup = computed((): { k: string; v: string; title?: string }[] => {
     <dl class="kv">
       <div v-for="it in setup" :key="it.k" class="kv-row">
         <dt>{{ it.k }}</dt>
-        <dd :title="it.title ?? it.v">{{ it.v }}</dd>
+        <dd :title="it.title ?? it.v">
+          <template v-if="it.open && it.lead"><button class="to" title="Show its pictures" @click="it.open">{{ it.lead }}</button>{{ it.v.slice(it.lead.length) }}</template>
+          <template v-else>{{ it.v }}</template>
+        </dd>
       </div>
     </dl>
   </section>
   <ZenModal v-if="detail" v-model:open="specOpen" title="Spec" width="760px">
     <pre class="mono spec">{{ JSON.stringify(detail.spec, null, 2) }}</pre>
   </ZenModal>
+  <RunDatasetLightbox v-if="showData" :name="showData.name" :set="showData.set" @close="showData = null" />
 </template>
 
 <style scoped src="./section.css"></style>
@@ -129,6 +141,26 @@ dd {
 }
 .link:hover {
   color: var(--zen-accent);
+}
+.to {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted color-mix(in srgb, var(--zen-text) 40%, transparent);
+  text-underline-offset: 3px;
+}
+.to:hover {
+  color: var(--zen-accent);
+  text-decoration-color: currentColor;
+}
+.to:focus-visible {
+  outline: 1px solid var(--zen-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
 }
 .spec {
   margin: 0;

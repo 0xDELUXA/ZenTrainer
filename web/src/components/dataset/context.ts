@@ -62,7 +62,8 @@ export function useDataset(name: () => string) {
   // caption sets: <img>.txt is "default", <img>.<set>.txt the others; everything below
   // (view, edit, filters, bulk) works on the selected set
   const sets = ref<string[]>(['default'])
-  const activeSet = ref('default')
+  // ?set=<caption set>: opened from somewhere that names one (a run's Setup card)
+  const activeSet = ref(typeof route.query.set === 'string' && route.query.set ? route.query.set : 'default')
   const cap = (it: DatasetItem) => it.captions?.[activeSet.value] ?? ''
   // control sets: edit training's input pictures, named layers beside the pictures; the pairs
   // view, the grid's insets and the lightbox show the selected one's
@@ -91,6 +92,7 @@ export function useDataset(name: () => string) {
       // none shown until one's picked (opening a dataset shows its pictures, not their inputs)
       if (activeControl.value && !controlSets.value.includes(activeControl.value)) activeControl.value = ''
       sets.value = [...new Set([...r.sets, ...sets.value])].sort((a, b) => (a === 'default' ? -1 : b === 'default' ? 1 : a.localeCompare(b)))
+      if (!sets.value.includes(activeSet.value)) activeSet.value = 'default' // a ?set= that's since been removed
       error.value = null
     } catch (e) {
       error.value = String((e as Error).message ?? e)
