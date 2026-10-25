@@ -7,9 +7,20 @@
 }
 
 :8188 {
-	basic_auth {
-		{$ZT_USER} {$ZT_PASSWORD_HASH}
+	# route: in this order, so the password comes first (Caddy would otherwise redirect before it)
+	route {
+		basic_auth {
+			{$ZT_USER} {$ZT_PASSWORD_HASH}
+		}
+		redir / /zentrainer/
+		# ComfyUI refuses every cross-site request, which includes opening the app from another site
+		# (RunPod's Connect button). Loading a page is safe to let through; any other request keeps
+		# the header, so ComfyUI still turns away other sites using the browser's saved password.
+		@pageload {
+			method GET
+			header Sec-Fetch-Mode navigate
+		}
+		request_header @pageload -Sec-Fetch-Site
+		reverse_proxy 127.0.0.1:8189
 	}
-	redir / /zentrainer/
-	reverse_proxy 127.0.0.1:8189
 }
