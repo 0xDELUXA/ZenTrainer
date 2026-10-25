@@ -56,6 +56,9 @@ and Manager show.
   A file from a newer ZenTrainer loads what this one knows, and says what it left out.
 
 ### Training
+- **Fixed: video datasets with sound** stopped as their encoding finished, with "File exists" and
+  the path of one of the clips: the soundtrack pass reused the name of the folder the encoded
+  dataset is saved in. Datasets already encoded before were unaffected.
 - **Fixed: MOSS Image on a newer ComfyUI** stopped with "attention() got an unexpected keyword
   argument 'mask'": ComfyUI's MOSS attention takes more arguments since its MOSS-Image edit
   support, and ZenTrainer's fused q/k wrapper didn't pass them on.

@@ -633,10 +633,10 @@ def _build(spec, clip, vae, root, cache_dir, encoder_id, progress, audio_vae=Non
         raise FileNotFoundError(f"nothing in {root} could be encoded")
     # soundtracks in one pass after every picture: the video and audio VAEs each load once,
     # instead of swapping in and out per clip
-    for k, (i, path, t0, t1) in enumerate(sounds):
-        samples[i].audio = _encode_audio(audio_vae, path, t0, t1)
+    for k, (i, clip, t0, t1) in enumerate(sounds):  # not `path`: that's the cache folder, written below
+        samples[i].audio = _encode_audio(audio_vae, clip, t0, t1)
         if progress and k % 10 == 0:
-            progress(k + 1, len(sounds), f"encoding soundtracks ({path.name})")
+            progress(k + 1, len(sounds), f"encoding soundtracks ({clip.name})")
 
     # disk-cached grounded pairs carry their own conditioning: their plain captions aren't needed
     # (thousands of them would be most of RAM)
